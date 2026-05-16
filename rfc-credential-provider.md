@@ -405,6 +405,23 @@ This feature must not become a project-controlled install hook. Install scripts 
 
 6. **Stdin input**: The client sends only the fields defined in the protocol. No environment variables or filesystem paths are leaked to the provider.
 
+#### Threat model
+
+The npm ecosystem is actively reducing install-time code execution. Credential providers should therefore be designed as a narrowly scoped, user-controlled auth integration rather than a new dependency-controlled hook.
+
+Generative AI and other automation lower the cost of producing plausible malicious packages, searching for misconfigurations, and scaling typosquatting or environment-poisoning attacks. The protocol should assume attackers can cheaply generate many variants and target weak trust boundaries. This is a reason to fail closed and require explicit user or administrator trust for anything that executes before or during install.
+
+| Threat | Risk | Mitigation |
+|---|---|---|
+| Malicious project `.npmrc` | A repository could try to make `npm install` run an attacker-chosen provider. | Project/workspace `.npmrc` cannot configure `credentialProvider`. |
+| Project-local binary shadowing | A dependency could place a provider-like binary in `node_modules/.bin`. | Project `node_modules` and the current directory are never searched for providers. |
+| PATH poisoning | Shell startup files, `.env` tooling, or CI setup could redirect a provider name to another binary. | Provider resolution uses trusted npm-controlled locations or explicit user/global paths, not arbitrary `PATH`. |
+| Typosquatting | The `npm-credential-provider-*` naming convention could attract lookalike packages. | Discovery is suggest-only, trusted-global-only, and never auto-installs or auto-executes. |
+| Compromised provider package | A previously trusted provider could be replaced or updated maliciously. | High-assurance environments may pin providers by absolute path, package version, integrity hash, or enterprise allowlist. |
+| Silent plaintext fallback | A provider failure could accidentally re-enable legacy token use. | Legacy fallback after provider selection requires explicit user/global opt-in. |
+
+Provider integrity pinning is intentionally optional for the baseline protocol because it adds operational complexity, but the resolution model should leave room for it. Enterprise and CI deployments should be able to require a resolved provider identity such as `{ name, version, integrity }` or an absolute path plus checksum.
+
 ### 7. Provider Lifecycle
 
 ```
