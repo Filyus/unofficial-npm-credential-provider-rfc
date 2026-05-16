@@ -1,4 +1,8 @@
-# RFC: Credential Provider Plugin Protocol v2
+# RFC: Credential Provider Plugin Protocol
+
+> Status: Draft  
+> Revision: 1  
+> Date: 2026-05-16
 
 > An alternative proposal to [npm/rfcs#850](https://github.com/npm/rfcs/pull/850), addressing per-package authentication granularity, bidirectional protocol, and provider discovery.
 
@@ -555,4 +559,3 @@ Minimal: run executable, read stdout as token string. No stdin, no arguments, no
 ### npm RFC #850 (2025)
 
 Improvement over tokenHelper: JSON response with `expiresAt`, arguments allowed, command resolved via PATH. But still unidirectional — provider receives no context from npm, only from its own hardcoded arguments.
-
