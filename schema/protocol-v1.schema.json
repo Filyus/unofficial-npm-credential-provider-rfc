@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://filyus.github.io/unofficial-npm-credential-provider-rfc/schema/protocol-v1.schema.json",
+  "title": "npm Credential Provider Protocol v1",
+  "description": "Machine-readable schema for the draft npm credential provider JSONL protocol.",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/providerResponse" }
+  ],
+  "$defs": {
+    "hello": {
+      "title": "Provider hello",
+      "type": "object",
+      "required": ["v"],
+      "properties": {
+        "v": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "request": {
+      "title": "Client request",
+      "type": "object",
+      "required": ["v", "action", "registry"],
+      "properties": {
+        "v": { "const": 1 },
+        "action": {
+          "enum": ["login", "logout", "get", "get-batch", "refresh", "erase"]
+        },
+        "registry": {
+          "type": "string",
+          "format": "uri"
+        },
+        "scope": {
+          "type": ["string", "null"],
+          "pattern": "^@[^/]+$"
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "enum": ["install", "publish", "search", "view"]
+        },
+        "interactive": {
+          "type": "boolean"
+        },
+        "refreshToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "loginUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "packages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/packageContext" },
+          "minItems": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "const": "get" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["operation", "interactive"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "get-batch" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["operation", "interactive", "packages"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "refresh" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["refreshToken"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "operation": { "const": "publish" } },
+            "required": ["operation"]
+          },
+          "then": {
+            "required": ["version"]
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "packageContext": {
+      "type": "object",
+      "required": ["package"],
+      "properties": {
+        "scope": {
+          "type": ["string", "null"],
+          "pattern": "^@[^/]+$"
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "providerResponse": {
+      "title": "Provider response",
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["Ok"],
+          "not": { "required": ["Err"] }
+        },
+        {
+          "required": ["Err"],
+          "not": { "required": ["Ok"] }
+        }
+      ],
+      "properties": {
+        "Ok": { "$ref": "#/$defs/providerOk" },
+        "Err": { "$ref": "#/$defs/providerErr" }
+      },
+      "additionalProperties": true
+    },
+    "providerOk": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["login", "logout", "erase", "get-batch"]
+        },
+        "auth": { "$ref": "#/$defs/auth" },
+        "cache": {
+          "enum": ["never", "session", "expires"]
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "operationIndependent": {
+          "type": "boolean"
+        },
+        "refreshToken": {
+          "type": "string",
+          "minLength": 1
+        },
+        "granularity": {
+          "enum": ["registry", "scope", "package"]
+        },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/batchResult" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "get-batch" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["results"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "cache": { "const": "expires" } },
+            "required": ["cache"]
+          },
+          "then": {
+            "required": ["expiresAt"]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "kind": { "enum": ["login", "logout", "erase", "get-batch"] }
+              },
+              "required": ["kind"]
+            }
+          },
+          "then": {
+            "required": ["auth"]
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "batchResult": {
+      "type": "object",
+      "required": ["auth"],
+      "properties": {
+        "auth": { "$ref": "#/$defs/auth" },
+        "granularity": {
+          "enum": ["registry", "scope", "package"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "auth": {
+      "oneOf": [
+        { "$ref": "#/$defs/bearerAuth" },
+        { "$ref": "#/$defs/basicAuth" }
+      ]
+    },
+    "bearerAuth": {
+      "type": "object",
+      "required": ["type", "token"],
+      "properties": {
+        "type": { "const": "bearer" },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "basicAuth": {
+      "type": "object",
+      "required": ["type", "username", "password"],
+      "properties": {
+        "type": { "const": "basic" },
+        "username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "providerErr": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["url-not-supported", "not-found", "operation-not-supported", "other"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "causedBy": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

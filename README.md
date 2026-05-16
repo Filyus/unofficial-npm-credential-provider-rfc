@@ -12,6 +12,10 @@ Test coverage matrix:
 
 - [tests/conformance_matrix.md](./tests/conformance_matrix.md)
 
+Machine-readable schema:
+
+- [schema/protocol-v1.schema.json](./schema/protocol-v1.schema.json)
+
 Executable protocol checks:
 
 ```sh
