@@ -80,7 +80,7 @@ On startup, the provider sends a hello message listing supported protocol versio
 {"v":[1]}
 ```
 
-The client selects a compatible version and uses it in all subsequent messages. If no version matches, the client terminates the provider and falls back to legacy auth.
+The client selects a compatible version and uses it in all subsequent messages. If no version matches, the client terminates the provider. Legacy auth fallback is used only when no provider was explicitly configured or when the user/global config explicitly allows fallback.
 
 This allows providers to support multiple protocol versions simultaneously, enabling forward-compatible upgrades without breaking changes.
 
@@ -187,9 +187,9 @@ No legacy `_` prefixes, no pre-encoded base64. Provider returns plain values, cl
 | Error kind | Meaning | Client behavior |
 |---|---|---|
 | `"url-not-supported"` | Provider does not handle this registry. | Try next provider in chain (see below). |
-| `"not-found"` | No credentials stored for this registry/scope. | Fall back to legacy auth. |
-| `"operation-not-supported"` | Provider does not support this action (e.g. `refresh`). | Fall back to `"get"`. |
-| `"other"` | Generic error. Includes `message` and optional `causedBy` array. | Show error to user. |
+| `"not-found"` | No credentials stored for this registry/scope. | Fail by default if a provider was explicitly configured. Legacy fallback is allowed only through an explicit user/global opt-in. |
+| `"operation-not-supported"` | Provider does not support this action (e.g. `refresh`). | For `refresh`, fall back to `"get"`. For `login`/`logout`, show an unsupported-operation error. |
+| `"other"` | Generic error. Includes `message` and optional `causedBy` array. | Show error to user. Do not silently fall back to legacy credentials unless explicit fallback is enabled. |
 
 **Provider chaining:** Multiple providers can be configured. The client tries them in order — first `Ok` wins, `url-not-supported` means "skip me, try next". Any other error stops the chain.
 
@@ -200,6 +200,8 @@ credentialProvider=npm-credential-provider-github
 ```
 
 This enables a fallback pattern: a primary OAuth provider + a secondary file-based provider as fallback.
+
+Legacy `.npmrc` auth remains the default behavior when no provider is configured. Once a provider is explicitly configured for a registry, silent fallback to plaintext token sources should be avoided because it can mask provider failures and reintroduce the secret-storage behavior the user was trying to remove. A user or administrator may opt into legacy fallback explicitly for migration.
 
 Example of a detailed error:
 ```json
@@ -231,7 +233,13 @@ The client **closes stdin** to signal end of session. The provider should exit c
 | `login` | 5 minutes | User interaction: browser OAuth, SSO redirect, MFA prompt. |
 | `logout` | 30 seconds | May include server-side token revocation. |
 
-If a provider exceeds the timeout, the client kills the process and falls back to legacy auth (for `get`) or shows an error (for `login`/`logout`).
+If a provider exceeds the timeout, the client kills the process. For `get`, npm fails by default unless explicit legacy fallback is enabled. For `login`/`logout`, npm shows an error.
+
+#### Non-interactive and CI behavior
+
+When `interactive` is `false`, providers must not open browsers, prompt for MFA, wait for device-code approval, or ask the user to approve a new trust decision. They may only use credentials and trust decisions that already exist.
+
+In CI, provider execution should be deterministic: the provider must already be configured through user/global config, a machine image, or enterprise policy, and it must resolve from a trusted source. If no usable credential is available, npm should fail with a clear error rather than prompting or falling back silently.
 
 ### 3. Actions
 
@@ -359,7 +367,7 @@ Tokens are **never persisted to disk** by the client.
 
 #### Convention-based discovery (suggestion only)
 
-If no `credentialProvider` is configured for a registry and authentication fails, the client looks for a globally installed package matching the naming convention `npm-credential-provider-<registry-host>`. If found, the client **suggests** it to the user but **never auto-executes** it:
+If no `credentialProvider` is configured for a registry and authentication fails, the client may look for a provider matching the naming convention `npm-credential-provider-<registry-host>` in trusted global discovery locations only. If found, the client **suggests** it to the user but **never auto-installs or auto-executes** it:
 
 ```
 $ npm install @scope/package
@@ -369,7 +377,7 @@ npm WARN to use it, add to ~/.npmrc:
 npm WARN   //gitlab.example.com:credentialProvider=npm-credential-provider-gitlab
 ```
 
-The user must explicitly add the line to `~/.npmrc`. This eliminates typosquatting attacks — a malicious `npm-credential-provider-gitlba` package may be installed, but is never executed without explicit configuration.
+The user must explicitly add the line to user-level or global npm config. Project-local discovery is not performed. This limits typosquatting and shadowing attacks: a malicious `npm-credential-provider-gitlba` package or project-local binary may be present, but it is never executed without explicit trusted configuration.
 
 #### Explicit configuration (required for execution)
 
@@ -377,7 +385,7 @@ The user must explicitly add the line to `~/.npmrc`. This eliminates typosquatti
 //gitlab.example.com:credentialProvider=npm-credential-provider-gitlab
 ```
 
-Explicit configuration takes priority over discovery.
+Explicit trusted configuration takes priority over discovery.
 
 ### 6. Security Model
 
@@ -418,7 +426,7 @@ npm install @scope/package
   |     |-- Read JSON response from provider stdout (single line)
   |     |     |-- "Ok" -> cache token, use for HTTP request
   |     |     |-- "Err: url-not-supported" -> try next provider
-  |     |     |-- "Err: not-found" -> fall back to legacy auth
+  |     |     |-- "Err: not-found" -> fail unless explicit legacy fallback is enabled
   |     |     |-- "Err: other" -> show error to user
   |     |
   |     |-- Use token for HTTP request
@@ -490,6 +498,8 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 ## Backward Compatibility
 
 - If no `credentialProvider` is configured, behavior is identical to current npm
+- `credentialProvider` entries in project or workspace `.npmrc` are ignored by design
+- If a provider is configured and fails, legacy auth fallback requires explicit user/global opt-in
 - Providers that only support registry-level auth can ignore `scope` and `package` fields and return `"granularity": "registry"`
 
 ## Prior Art
