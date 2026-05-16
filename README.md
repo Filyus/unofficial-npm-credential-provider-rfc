@@ -12,4 +12,5 @@ Executable protocol checks:
 
 ```sh
 python -m unittest discover -v
+cargo test --manifest-path poc/rust/Cargo.toml
 ```
