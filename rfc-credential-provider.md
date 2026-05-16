@@ -42,8 +42,10 @@ This RFC draft proposes a protocol shape that addresses these gaps while remaini
 
 ### 1. Configuration
 
+Credential provider execution must be controlled by the user or an administrator, not by project contents. The npm client only accepts `credentialProvider` configuration from user-level or global npm config. Project and workspace `.npmrc` files may configure registries as they do today, but they must not enable or override credential provider execution.
+
 ```ini
-# ~/.npmrc or project .npmrc
+# ~/.npmrc or global npmrc
 
 # Global provider (fallback for all registries)
 credentialProvider=npm-credential-provider-gitlab
@@ -55,7 +57,16 @@ credentialProvider=npm-credential-provider-gitlab
 //gitlab.example.com:credentialProvider=npm-credential-provider-gitlab --instance https://gitlab.example.com
 ```
 
-Provider names are resolved via `PATH` (like any CLI tool). Arguments are allowed.
+Provider commands are resolved deterministically from trusted sources only:
+
+1. npm-shipped providers for npm-owned registries.
+2. Absolute paths configured in user-level or global npm config.
+3. Provider names found in npm-managed global bin directories.
+4. Enterprise-managed allowlists, where npm is running under such policy.
+
+The current working directory and project-local `node_modules/.bin` are never searched. Arbitrary `PATH` lookup is not used as the trust anchor for project installs. If a provider name is ambiguous across trusted sources, npm fails closed and asks the user to configure a more specific provider path.
+
+Arguments are allowed only in user-level or global configuration.
 
 ### 2. Protocol
 
@@ -370,17 +381,21 @@ Explicit configuration takes priority over discovery.
 
 ### 6. Security Model
 
+This feature must not become a project-controlled install hook. Install scripts are selected by package authors and the dependency graph. Credential providers are selected by the user, the machine owner, or an enterprise administrator. A cloned repository, dependency package, lockfile, or project `.npmrc` must not be able to introduce a new credential provider executable.
+
 **Trust boundaries:**
 
-1. **Project `.npmrc`**: May reference providers by **name only** (resolved via PATH or node_modules). Cannot specify absolute paths. This prevents `git clone && npm install` from executing arbitrary commands.
+1. **Project `.npmrc`**: May not configure `credentialProvider`. If this key appears in a project or workspace `.npmrc`, npm ignores it and warns. Project config may continue to configure registry URLs and scopes.
 
-2. **User `~/.npmrc`**: May reference providers by name or absolute path.
+2. **User `~/.npmrc` and global npm config**: May reference providers by absolute path or by a provider name resolved from trusted global locations.
 
-3. **Provider output**: Validated by the client. Only expected JSON fields are accepted. Unexpected fields are ignored.
+3. **Provider resolution**: The current working directory and project `node_modules` are not searched. Local packages cannot shadow global providers. Ambiguous provider names fail closed.
 
-4. **Token storage**: In-memory only. The client never writes tokens to disk. The provider is responsible for its own credential storage (keychain, encrypted file, etc.).
+4. **Provider output**: Validated by the client. Only expected JSON fields are accepted. Unexpected fields are ignored.
 
-5. **Stdin input**: The client sends only the fields defined in the protocol. No environment variables or filesystem paths are leaked to the provider.
+5. **Token storage**: In-memory only. The client never writes tokens to disk. The provider is responsible for its own credential storage (keychain, encrypted file, etc.).
+
+6. **Stdin input**: The client sends only the fields defined in the protocol. No environment variables or filesystem paths are leaked to the provider.
 
 ### 7. Provider Lifecycle
 
