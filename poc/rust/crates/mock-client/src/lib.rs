@@ -20,6 +20,7 @@ pub enum ClientScenario {
 pub struct ExchangeSummary {
     pub selected_version: u32,
     pub outcome: String,
+    pub provider_index: usize,
 }
 
 #[derive(Debug)]
@@ -101,7 +102,26 @@ pub fn run_exchange(
     Ok(ExchangeSummary {
         selected_version,
         outcome,
+        provider_index: 0,
     })
+}
+
+pub fn run_provider_chain(
+    provider_commands: Vec<Command>,
+    scenario: ClientScenario,
+) -> Result<ExchangeSummary, ExchangeError> {
+    for (provider_index, provider_command) in provider_commands.into_iter().enumerate() {
+        let mut summary = run_exchange(provider_command, scenario)?;
+        if summary.outcome == "try-next-provider" {
+            continue;
+        }
+        summary.provider_index = provider_index;
+        return Ok(summary);
+    }
+
+    Err(ExchangeError::Provider(
+        "all providers returned url-not-supported".into(),
+    ))
 }
 
 fn request_for(scenario: ClientScenario) -> Request {

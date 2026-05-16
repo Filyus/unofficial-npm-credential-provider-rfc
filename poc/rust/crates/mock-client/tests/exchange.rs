@@ -1,4 +1,4 @@
-use mock_client::{ClientScenario, run_exchange};
+use mock_client::{ClientScenario, run_exchange, run_provider_chain};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -56,6 +56,53 @@ fn client_tries_next_on_url_not_supported() {
     .expect("url-not-supported is a chain signal");
 
     assert_eq!(summary.outcome, "try-next-provider");
+}
+
+#[test]
+fn provider_chain_uses_second_provider_after_url_not_supported() {
+    let summary = run_provider_chain(
+        vec![
+            provider_command("url-not-supported"),
+            provider_command("get-success"),
+        ],
+        ClientScenario::InstallGet,
+    )
+    .expect("second provider should satisfy request");
+
+    assert_eq!(summary.provider_index, 1);
+    assert_eq!(summary.outcome, "ok");
+}
+
+#[test]
+fn provider_chain_does_not_skip_not_found() {
+    let error = run_provider_chain(
+        vec![
+            provider_command("not-found"),
+            provider_command("get-success"),
+        ],
+        ClientScenario::InstallGet,
+    )
+    .expect_err("not-found should stop the provider chain");
+
+    assert!(error.to_string().contains("not-found fails closed"));
+}
+
+#[test]
+fn provider_chain_fails_when_all_providers_reject_url() {
+    let error = run_provider_chain(
+        vec![
+            provider_command("url-not-supported"),
+            provider_command("url-not-supported"),
+        ],
+        ClientScenario::InstallGet,
+    )
+    .expect_err("all providers rejected the url");
+
+    assert!(
+        error
+            .to_string()
+            .contains("all providers returned url-not-supported")
+    );
 }
 
 #[test]

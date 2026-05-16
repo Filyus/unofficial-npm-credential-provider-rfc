@@ -6,7 +6,7 @@ Crates:
 
 - `credential-provider-protocol`: shared wire types and JSONL helpers.
 - `mock-provider`: a provider process that sends hello and answers requests.
-- `mock-client`: an npm-like client that spawns the provider and validates behavior.
+- `mock-client`: an npm-like client that spawns providers, validates behavior, and demonstrates provider chaining.
 
 Run:
 
