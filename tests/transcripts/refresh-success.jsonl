@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1]}}
+{"from":"client","message":{"v":1,"action":"refresh","registry":"https://registry.example.test/","refreshToken":"opaque-refresh-token"}}
+{"from":"provider","message":{"Ok":{"auth":{"type":"bearer","token":"token-2"},"cache":"expires","expiresAt":1893456000,"refreshToken":"opaque-refresh-token","granularity":"scope"}}}
+{"from":"client","event":"close"}

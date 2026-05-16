@@ -1,0 +1,3 @@
+{"from":"provider","message":{"v":[1]}}
+{"from":"client","message":{"v":1,"action":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"install","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"not-found"}}}
