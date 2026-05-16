@@ -1,14 +1,14 @@
 # RFC: Credential Provider Plugin Protocol
 
 > Status: Draft  
-> Revision: 1  
+> Revision: 2  
 > Date: 2026-05-16
 
-> An alternative proposal to [npm/rfcs#850](https://github.com/npm/rfcs/pull/850), addressing per-package authentication granularity, bidirectional protocol, and provider discovery.
+> A draft protocol proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion, addressing per-package authentication granularity, bidirectional protocol, provider discovery, and provider execution safety.
 
 ## Motivation
 
-The npm ecosystem relies on plaintext tokens in `.npmrc` or environment variables for registry authentication. This design has not changed since 2010. [RFC #850](https://github.com/pwoosam/npm-rfcs/blob/users/pwoosam/credential-provider-plugin/accepted/0000-credential-provider-plugin.md) proposes a credential provider protocol to address this, but it has several architectural gaps:
+The npm ecosystem relies on plaintext tokens in `.npmrc` or environment variables for registry authentication. This design has not changed since 2010. [RFC #850](https://github.com/pwoosam/npm-rfcs/blob/users/pwoosam/credential-provider-plugin/accepted/0000-credential-provider-plugin.md) proposes a credential provider protocol to address this. This draft explores a more explicit protocol and trust model for that direction:
 
 1. **No per-package granularity.** Auth is still per-registry URL. Modern registries (GitLab, GitHub) offer fine-grained tokens scoped to specific projects/packages, but the client cannot leverage this — one registry URL means one token.
 
@@ -20,7 +20,7 @@ The npm ecosystem relies on plaintext tokens in `.npmrc` or environment variable
 
 5. **No discovery.** Providers must be manually configured. Every developer repeats the same setup.
 
-This RFC proposes an alternative that addresses these gaps while remaining simple to implement.
+This RFC draft proposes a protocol shape that addresses these gaps while remaining simple to implement and explicit about provider execution boundaries.
 
 ## Goals
 
