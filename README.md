@@ -4,10 +4,6 @@ This repository contains an independent draft proposal for an npm credential pro
 
 It is not yet an accepted npm RFC.
 
-Primary draft:
-
-- [RFC: Credential Provider Plugin Protocol](./rfc-credential-provider.md)
-
 Related discussion:
 
 - [npm/rfcs#850](https://github.com/npm/rfcs/pull/850)
