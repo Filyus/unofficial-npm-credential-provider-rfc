@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 
 
 def write(message: dict) -> None:
@@ -20,10 +21,35 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--scenario",
-        choices=["get-success", "not-found", "version-mismatch", "refresh-success"],
+        choices=[
+            "get-success",
+            "not-found",
+            "version-mismatch",
+            "refresh-success",
+            "batch-success",
+            "batch-count-mismatch",
+            "login-success",
+            "logout-success",
+            "erase-success",
+            "operation-not-supported",
+            "other-error",
+            "malformed-auth",
+            "expires-missing-expiration",
+            "invalid-json",
+            "no-hello",
+            "slow-hello",
+            "both-ok-err",
+        ],
         default="get-success",
     )
     args = parser.parse_args()
+
+    if args.scenario == "no-hello":
+        return 0
+
+    if args.scenario == "slow-hello":
+        time.sleep(10)
+        return 0
 
     if args.scenario == "version-mismatch":
         write({"v": [2]})
@@ -34,6 +60,63 @@ def main() -> int:
         action = request.get("action")
         if args.scenario == "not-found":
             write({"Err": {"kind": "not-found"}})
+        elif args.scenario == "operation-not-supported":
+            write({"Err": {"kind": "operation-not-supported"}})
+        elif args.scenario == "other-error":
+            write({"Err": {"kind": "other", "message": "provider failed"}})
+        elif args.scenario == "invalid-json":
+            sys.stdout.write("{not-json}\n")
+            sys.stdout.flush()
+        elif args.scenario == "both-ok-err":
+            write({"Ok": {"kind": "login"}, "Err": {"kind": "other"}})
+        elif args.scenario == "malformed-auth":
+            write({"Ok": {"auth": {"type": "bearer"}, "cache": "session"}})
+        elif args.scenario == "expires-missing-expiration":
+            write(
+                {
+                    "Ok": {
+                        "auth": {"type": "bearer", "token": "test-token"},
+                        "cache": "expires",
+                    }
+                }
+            )
+        elif args.scenario == "batch-success" and action == "get-batch":
+            packages = request.get("packages", [])
+            write(
+                {
+                    "Ok": {
+                        "kind": "get-batch",
+                        "results": [
+                            {
+                                "auth": {
+                                    "type": "bearer",
+                                    "token": f"token-for-{package['package']}",
+                                },
+                                "granularity": "package",
+                            }
+                            for package in packages
+                        ],
+                        "cache": "session",
+                    }
+                }
+            )
+        elif args.scenario == "batch-count-mismatch" and action == "get-batch":
+            write(
+                {
+                    "Ok": {
+                        "kind": "get-batch",
+                        "results": [
+                            {
+                                "auth": {"type": "bearer", "token": "only-one"},
+                                "granularity": "package",
+                            }
+                        ],
+                        "cache": "session",
+                    }
+                }
+            )
+        elif args.scenario in {"login-success", "logout-success", "erase-success"}:
+            write({"Ok": {"kind": action}})
         elif args.scenario == "refresh-success" and action == "refresh":
             write(
                 {

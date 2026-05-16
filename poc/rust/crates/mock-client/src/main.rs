@@ -18,6 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some("install-get") => ClientScenario::InstallGet,
                     Some("refresh") => ClientScenario::Refresh,
                     Some("batch-install") => ClientScenario::BatchInstall,
+                    Some("login") => ClientScenario::Login,
+                    Some("logout") => ClientScenario::Logout,
+                    Some("erase") => ClientScenario::Erase,
                     Some(other) => {
                         return Err(format!("unsupported client scenario: {other}").into());
                     }

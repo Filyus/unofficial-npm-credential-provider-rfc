@@ -11,6 +11,9 @@ pub enum ClientScenario {
     InstallGet,
     Refresh,
     BatchInstall,
+    Login,
+    Logout,
+    Erase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +86,7 @@ pub fn run_exchange(
     let response = read_json_line::<ProviderResponse>(&mut reader)?
         .ok_or_else(|| ExchangeError::Provider("provider exited before response".into()))?;
     response.validate_for(&request.action)?;
+    validate_exchange(&request, &response)?;
     let outcome = summarize(&request, &response)?;
 
     let output = child
@@ -121,7 +125,60 @@ fn request_for(scenario: ClientScenario) -> Request {
                 },
             ],
         ),
+        ClientScenario::Login => Request {
+            v: credential_provider_protocol::PROTOCOL_VERSION,
+            action: Action::Login,
+            registry: "https://registry.example.test/".into(),
+            scope: None,
+            package: None,
+            version: None,
+            operation: None,
+            interactive: Some(true),
+            refresh_token: None,
+            packages: None,
+        },
+        ClientScenario::Logout => Request {
+            v: credential_provider_protocol::PROTOCOL_VERSION,
+            action: Action::Logout,
+            registry: "https://registry.example.test/".into(),
+            scope: None,
+            package: None,
+            version: None,
+            operation: None,
+            interactive: None,
+            refresh_token: None,
+            packages: None,
+        },
+        ClientScenario::Erase => Request {
+            v: credential_provider_protocol::PROTOCOL_VERSION,
+            action: Action::Erase,
+            registry: "https://registry.example.test/".into(),
+            scope: Some("@scope".into()),
+            package: None,
+            version: None,
+            operation: None,
+            interactive: None,
+            refresh_token: None,
+            packages: None,
+        },
     }
+}
+
+fn validate_exchange(request: &Request, response: &ProviderResponse) -> Result<(), ExchangeError> {
+    if request.action != Action::GetBatch {
+        return Ok(());
+    }
+    let ProviderResponse::Ok(ok) = response else {
+        return Ok(());
+    };
+    let expected = request.packages.as_ref().map_or(0, Vec::len);
+    let actual = ok.results.as_ref().map_or(0, Vec::len);
+    if expected != actual {
+        return Err(ExchangeError::Provider(format!(
+            "batch result count mismatch: expected {expected}, got {actual}"
+        )));
+    }
+    Ok(())
 }
 
 fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, ExchangeError> {
@@ -130,6 +187,9 @@ fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, E
             if request.action == Action::GetBatch {
                 let count = ok.results.as_ref().map_or(0, Vec::len);
                 return Ok(format!("batch:{count}"));
+            }
+            if let Some(kind) = &ok.kind {
+                return Ok(kind.clone());
             }
             Ok("ok".into())
         }

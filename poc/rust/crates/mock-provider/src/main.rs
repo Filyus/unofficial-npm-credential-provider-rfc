@@ -7,6 +7,10 @@ use std::io::{self, BufReader};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scenario = parse_scenario();
 
+    if scenario == "no-hello" {
+        return Ok(());
+    }
+
     if scenario == "version-mismatch" {
         write_json_line(&mut io::stdout(), &Hello { v: vec![2] })?;
         return Ok(());
@@ -17,11 +21,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
     while let Some(request) = read_json_line::<Request>(&mut reader)? {
+        if scenario == "invalid-json" {
+            println!("{{not-json}}");
+            continue;
+        }
+        if scenario == "both-ok-err" {
+            println!(r#"{{"Ok":{{"kind":"login"}},"Err":{{"kind":"other"}}}}"#);
+            continue;
+        }
+        if scenario == "malformed-auth" {
+            println!(r#"{{"Ok":{{"auth":{{"type":"bearer"}}}}}}"#);
+            continue;
+        }
+
         let response = match scenario.as_str() {
             "not-found" => ProviderResponse::Err(ProviderErr {
                 kind: ErrorKind::NotFound,
                 message: None,
                 caused_by: None,
+            }),
+            "url-not-supported" => ProviderResponse::Err(ProviderErr {
+                kind: ErrorKind::UrlNotSupported,
+                message: None,
+                caused_by: None,
+            }),
+            "operation-not-supported" => ProviderResponse::Err(ProviderErr {
+                kind: ErrorKind::OperationNotSupported,
+                message: None,
+                caused_by: None,
+            }),
+            "other-error" => ProviderResponse::Err(ProviderErr {
+                kind: ErrorKind::Other,
+                message: Some("provider failed".into()),
+                caused_by: Some(vec!["test scenario".into()]),
+            }),
+            "expires-missing-expiration" => ProviderResponse::Ok(ProviderOk {
+                kind: None,
+                auth: Some(credential_provider_protocol::Auth::Bearer {
+                    token: "test-token".into(),
+                }),
+                cache: Some(credential_provider_protocol::CachePolicy::Expires),
+                expires_at: None,
+                operation_independent: None,
+                refresh_token: None,
+                granularity: Some(Granularity::Scope),
+                results: None,
             }),
             "refresh-success" => ProviderResponse::Ok(ProviderOk::refreshed(
                 "refreshed-token",
@@ -43,6 +87,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
                 ProviderResponse::Ok(ProviderOk::batch(results))
             }
+            "batch-count-mismatch" => ProviderResponse::Ok(ProviderOk::batch(vec![TokenResult {
+                auth: credential_provider_protocol::Auth::Bearer {
+                    token: "only-one".into(),
+                },
+                granularity: Some(Granularity::Package),
+            }])),
+            "action-kind-success" => ProviderResponse::Ok(ProviderOk {
+                kind: Some(
+                    match request.action {
+                        credential_provider_protocol::Action::Login => "login",
+                        credential_provider_protocol::Action::Logout => "logout",
+                        credential_provider_protocol::Action::Erase => "erase",
+                        _ => "ok",
+                    }
+                    .into(),
+                ),
+                auth: None,
+                cache: None,
+                expires_at: None,
+                operation_independent: None,
+                refresh_token: None,
+                granularity: None,
+                results: None,
+            }),
             _ => ProviderResponse::Ok(ProviderOk::bearer("test-token", Granularity::Scope)),
         };
         write_json_line(&mut io::stdout(), &response)?;

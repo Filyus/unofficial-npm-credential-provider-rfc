@@ -8,6 +8,10 @@ Related discussion:
 
 - [npm/rfcs#850](https://github.com/npm/rfcs/pull/850)
 
+Test coverage matrix:
+
+- [tests/conformance_matrix.md](./tests/conformance_matrix.md)
+
 Executable protocol checks:
 
 ```sh
