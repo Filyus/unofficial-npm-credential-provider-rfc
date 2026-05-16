@@ -1,6 +1,6 @@
 # Unofficial npm Credential Provider RFC Draft
 
-This repository contains an independent draft proposal for an npm credential provider protocol, intended for discussion and iteration with the npm RFC process.
+This repository contains an independent draft proposal for an npm credential provider protocol, intended for discussion and iteration with the npm RFC process: [rfc-credential-provider.md](./rfc-credential-provider.md).
 
 It is not yet an accepted npm RFC.
 
