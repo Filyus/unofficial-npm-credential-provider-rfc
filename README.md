@@ -7,3 +7,9 @@ It is not yet an accepted npm RFC.
 Related discussion:
 
 - [npm/rfcs#850](https://github.com/npm/rfcs/pull/850)
+
+Executable protocol checks:
+
+```sh
+python -m unittest discover -v
+```
