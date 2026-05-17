@@ -5,14 +5,20 @@ from enum import Enum
 import os
 from typing import Any
 
-
-PROTOCOL_VERSION = 1
-SUPPORTED_ACTIONS = {"login", "logout", "get", "get-batch", "refresh", "erase"}
-SUPPORTED_OPERATIONS = {"install", "publish", "search", "view"}
-SUPPORTED_CACHE = {"never", "session", "expires"}
-SUPPORTED_GRANULARITY = {"registry", "scope", "package"}
-SUPPORTED_AUTH_TYPES = {"bearer", "basic"}
-ERROR_KINDS = {"url-not-supported", "not-found", "operation-not-supported", "other"}
+from tests.generated_policy import (
+    ALLOWED_CONFIG_SOURCES,
+    DEFAULT_CACHE_POLICY,
+    DEFAULT_GRANULARITY,
+    ERROR_KINDS,
+    OPERATION_INDEPENDENT_DEFAULT,
+    PROTOCOL_VERSION,
+    SUPPORTED_ACTIONS,
+    SUPPORTED_AUTH_TYPES,
+    SUPPORTED_CACHE,
+    SUPPORTED_GRANULARITY,
+    SUPPORTED_OPERATIONS,
+    TRUSTED_LOCATION_KINDS,
+)
 
 
 class ProtocolViolation(AssertionError):
@@ -164,16 +170,16 @@ class CredentialClientModel:
     def _handle_token_response(self, request: dict[str, Any], ok: dict[str, Any]) -> None:
         auth = ok.get("auth")
         validate_auth(auth)
-        cache = ok.get("cache", "session")
+        cache = ok.get("cache", DEFAULT_CACHE_POLICY)
         if cache not in SUPPORTED_CACHE:
             raise ProtocolViolation(f"unsupported cache policy: {cache!r}")
         expires_at = ok.get("expiresAt")
         if cache == "expires" and not isinstance(expires_at, int):
             raise ProtocolViolation("cache=expires requires expiresAt")
-        granularity = ok.get("granularity", "registry")
+        granularity = ok.get("granularity", DEFAULT_GRANULARITY)
         if granularity not in SUPPORTED_GRANULARITY:
             raise ProtocolViolation(f"unsupported granularity: {granularity!r}")
-        operation_independent = ok.get("operationIndependent", True)
+        operation_independent = ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT)
         if not isinstance(operation_independent, bool):
             raise ProtocolViolation("operationIndependent must be boolean")
         if cache == "never":
@@ -291,11 +297,8 @@ class ProviderLocation:
     path: str
 
 
-TRUSTED_LOCATION_KINDS = {"builtin", "absolute", "global-bin", "enterprise"}
-
-
 def resolve_provider(command: str, config_source: str, locations: list[ProviderLocation]) -> ProviderLocation:
-    if config_source not in {"user", "global"}:
+    if config_source not in ALLOWED_CONFIG_SOURCES:
         raise ResolutionFailure("credentialProvider may only come from user or global config")
     is_absolute = os.path.isabs(command)
     matches = []

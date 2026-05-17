@@ -20,6 +20,7 @@ Machine-readable spec:
 Executable protocol checks:
 
 ```sh
+python tools/generate_from_policy.py --check
 python -m unittest discover -v
 cargo test --manifest-path poc/rust/Cargo.toml
 ```

@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt;
 use std::io::{self, BufRead, Write};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+#[rustfmt::skip]
+pub mod generated;
+
+pub use generated::PROTOCOL_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
@@ -401,5 +404,100 @@ mod tests {
         request.operation = Some(Operation::Publish);
 
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn generated_action_values_match_serde() {
+        let actual = serialized_values([
+            Action::Login,
+            Action::Logout,
+            Action::Get,
+            Action::GetBatch,
+            Action::Refresh,
+            Action::Erase,
+        ]);
+
+        assert_eq!(actual, generated::ACTIONS);
+    }
+
+    #[test]
+    fn generated_operation_values_match_serde() {
+        let actual = serialized_values([
+            Operation::Install,
+            Operation::Publish,
+            Operation::Search,
+            Operation::View,
+        ]);
+
+        assert_eq!(actual, generated::OPERATIONS);
+    }
+
+    #[test]
+    fn generated_cache_values_match_serde() {
+        let actual = serialized_values([
+            CachePolicy::Never,
+            CachePolicy::Session,
+            CachePolicy::Expires,
+        ]);
+
+        assert_eq!(actual, generated::CACHE_POLICIES);
+    }
+
+    #[test]
+    fn generated_granularity_values_match_serde() {
+        let actual = serialized_values([
+            Granularity::Registry,
+            Granularity::Scope,
+            Granularity::Package,
+        ]);
+
+        assert_eq!(actual, generated::GRANULARITIES);
+    }
+
+    #[test]
+    fn generated_error_kind_values_match_serde() {
+        let actual = serialized_values([
+            ErrorKind::UrlNotSupported,
+            ErrorKind::NotFound,
+            ErrorKind::OperationNotSupported,
+            ErrorKind::Other,
+        ]);
+
+        assert_eq!(actual, generated::ERROR_KINDS);
+    }
+
+    #[test]
+    fn generated_auth_type_values_match_serde() {
+        let bearer = serde_json::to_value(Auth::Bearer {
+            token: "token".into(),
+        })
+        .unwrap();
+        let basic = serde_json::to_value(Auth::Basic {
+            username: "user".into(),
+            password: "secret".into(),
+        })
+        .unwrap();
+        let actual = vec![
+            bearer["type"].as_str().unwrap().to_string(),
+            basic["type"].as_str().unwrap().to_string(),
+        ];
+
+        assert_eq!(actual, generated::AUTH_TYPES);
+    }
+
+    fn serialized_values<T, const N: usize>(values: [T; N]) -> Vec<String>
+    where
+        T: Serialize,
+    {
+        values
+            .into_iter()
+            .map(|value| {
+                serde_json::to_value(value)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
     }
 }
