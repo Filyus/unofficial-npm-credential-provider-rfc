@@ -101,7 +101,7 @@ This allows providers to support multiple protocol versions simultaneously, enab
 {"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false}
 ```
 
-**Publish (write) — includes `version`:**
+**Publish (write):**
 ```json
 {"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","version":"2.4.1","operation":"publish","command":"publish","interactive":true}
 ```
