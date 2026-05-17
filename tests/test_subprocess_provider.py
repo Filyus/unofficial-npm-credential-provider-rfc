@@ -24,9 +24,9 @@ class MockProviderSubprocessTests(unittest.TestCase):
             "refresh-success",
             request={
                 "v": 1,
-                "action": "refresh",
+                "kind": "refresh",
                 "registry": "https://registry.example.test/",
-                "refreshToken": "opaque-refresh-token",
+                "refreshState": "opaque-provider-handle",
             },
         )
 
@@ -37,9 +37,10 @@ class MockProviderSubprocessTests(unittest.TestCase):
             "batch-success",
             request={
                 "v": 1,
-                "action": "get-batch",
+                "kind": "get-batch",
                 "registry": "https://registry.example.test/",
-                "operation": "install",
+                "operation": "read",
+                "command": "install",
                 "interactive": False,
                 "packages": [
                     {"scope": "@scope", "package": "api-client"},
@@ -53,17 +54,17 @@ class MockProviderSubprocessTests(unittest.TestCase):
         self.assertIn(("https://registry.example.test/", "@scope", "ui"), client.cache)
 
     def test_mock_provider_login_logout_erase_success(self) -> None:
-        for scenario, action in (
+        for scenario, kind in (
             ("login-success", "login"),
             ("logout-success", "logout"),
             ("erase-success", "erase"),
         ):
-            with self.subTest(action=action):
+            with self.subTest(kind=kind):
                 client, request, response = self.exchange(
                     scenario,
-                    request={"v": 1, "action": action, "registry": "https://registry.example.test/"},
+                    request={"v": 1, "kind": kind, "registry": "https://registry.example.test/"},
                 )
-                self.assertEqual(client.handle_response(request, response), action)
+                self.assertEqual(client.handle_response(request, response), kind)
 
     def test_mock_provider_not_found_fails_closed(self) -> None:
         client, request, response = self.exchange("not-found")
@@ -123,9 +124,10 @@ class MockProviderSubprocessTests(unittest.TestCase):
             "batch-count-mismatch",
             request={
                 "v": 1,
-                "action": "get-batch",
+                "kind": "get-batch",
                 "registry": "https://registry.example.test/",
-                "operation": "install",
+                "operation": "read",
+                "command": "install",
                 "interactive": False,
                 "packages": [
                     {"scope": "@scope", "package": "api-client"},

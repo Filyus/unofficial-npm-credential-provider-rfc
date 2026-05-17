@@ -7,9 +7,10 @@ from tests.protocol_model import CredentialClientModel, ProtocolViolation
 
 REQUEST = {
     "v": 1,
-    "action": "get",
+    "kind": "get",
     "registry": "https://registry.example.test/",
-    "operation": "install",
+    "operation": "read",
+    "command": "install",
     "interactive": False,
 }
 
@@ -23,25 +24,30 @@ class ResponseValidationTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             self.client.handle_response(REQUEST, {})
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(REQUEST, {"Ok": {}, "Err": {"kind": "other"}})
+            self.client.handle_response(REQUEST, {"Ok": {"kind": "get"}, "Err": {"kind": "other"}})
 
     def test_ok_must_be_object(self) -> None:
         with self.assertRaises(ProtocolViolation):
             self.client.handle_response(REQUEST, {"Ok": "ok"})
 
+    def test_ok_kind_is_required(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            self.client.handle_response(REQUEST, {"Ok": {"auth": {"type": "bearer", "token": "token"}}})
+
     def test_bearer_auth_requires_token(self) -> None:
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(REQUEST, {"Ok": {"auth": {"type": "bearer"}}})
+            self.client.handle_response(REQUEST, {"Ok": {"kind": "get", "auth": {"type": "bearer"}}})
 
     def test_basic_auth_requires_username_and_password(self) -> None:
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(REQUEST, {"Ok": {"auth": {"type": "basic", "username": "u"}}})
+            self.client.handle_response(REQUEST, {"Ok": {"kind": "get", "auth": {"type": "basic", "username": "u"}}})
 
     def test_basic_auth_success(self) -> None:
         outcome = self.client.handle_response(
             REQUEST,
             {
                 "Ok": {
+                    "kind": "get",
                     "auth": {
                         "type": "basic",
                         "username": "deploy-token",
@@ -56,19 +62,20 @@ class ResponseValidationTests(unittest.TestCase):
 
     def test_unknown_auth_type_is_rejected(self) -> None:
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(REQUEST, {"Ok": {"auth": {"type": "digest", "token": "x"}}})
+            self.client.handle_response(REQUEST, {"Ok": {"kind": "get", "auth": {"type": "digest", "token": "x"}}})
 
     def test_login_logout_and_erase_ok_do_not_require_auth(self) -> None:
-        for action in ("login", "logout", "erase"):
-            with self.subTest(action=action):
-                request = {"v": 1, "action": action, "registry": "https://registry.example.test/"}
-                self.assertEqual(self.client.handle_response(request, {"Ok": {"kind": action}}), action)
+        for kind in ("login", "logout", "erase"):
+            with self.subTest(kind=kind):
+                request = {"v": 1, "kind": kind, "registry": "https://registry.example.test/"}
+                self.assertEqual(self.client.handle_response(request, {"Ok": {"kind": kind}}), kind)
 
     def test_unknown_ok_fields_are_ignored(self) -> None:
         outcome = self.client.handle_response(
             REQUEST,
             {
                 "Ok": {
+                    "kind": "get",
                     "auth": {"type": "bearer", "token": "token"},
                     "futureField": {"nested": True},
                 }
@@ -80,7 +87,7 @@ class ResponseValidationTests(unittest.TestCase):
     def test_get_batch_requires_matching_result_count(self) -> None:
         request = {
             **REQUEST,
-            "action": "get-batch",
+            "kind": "get-batch",
             "packages": [
                 {"scope": "@scope", "package": "api-client"},
                 {"scope": "@scope", "package": "ui"},
@@ -102,7 +109,7 @@ class ResponseValidationTests(unittest.TestCase):
     def test_get_batch_caches_each_result(self) -> None:
         request = {
             **REQUEST,
-            "action": "get-batch",
+            "kind": "get-batch",
             "packages": [
                 {"scope": "@scope", "package": "api-client"},
                 {"scope": "@scope", "package": "ui"},

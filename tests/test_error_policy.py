@@ -7,9 +7,10 @@ from tests.protocol_model import CredentialClientModel, ProviderConfig, Provider
 
 REQUEST = {
     "v": 1,
-    "action": "get",
+    "kind": "get",
     "registry": "https://registry.example.test/",
-    "operation": "install",
+    "operation": "read",
+    "command": "install",
     "interactive": False,
 }
 
@@ -42,9 +43,9 @@ class ErrorPolicyTests(unittest.TestCase):
     def test_refresh_operation_not_supported_retries_get(self) -> None:
         refresh_request = {
             "v": 1,
-            "action": "refresh",
+            "kind": "refresh",
             "registry": "https://registry.example.test/",
-            "refreshToken": "opaque-refresh-token",
+            "refreshState": "opaque-provider-handle",
         }
 
         outcome = self.client().handle_response(

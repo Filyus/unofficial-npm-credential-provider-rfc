@@ -1,8 +1,8 @@
-# RFC: Credential Provider Plugin Protocol
+# RFC: Credential Provider Protocol
 
-> Status: Draft  
-> Revision: 2  
-> Date: 2026-05-16
+> Status: Draft
+> Revision: 3
+> Date: 2026-05-17
 
 > A draft protocol proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion, addressing per-package authentication granularity, bidirectional protocol, provider discovery, and provider execution safety.
 
@@ -47,14 +47,14 @@ Credential provider execution must be controlled by the user or an administrator
 ```ini
 # ~/.npmrc or global npmrc
 
-# Global provider (fallback for all registries)
-credentialProvider=npm-credential-provider-gitlab
+# Global provider chain (fallback for all registries)
+credentialProvider[]=npm-credential-provider-gitlab
 
 # Per-registry provider
-//gitlab.example.com:credentialProvider=npm-credential-provider-gitlab
+//gitlab.example.com:credentialProvider[]=npm-credential-provider-gitlab
 
 # Per-registry with arguments
-//gitlab.example.com:credentialProvider=npm-credential-provider-gitlab --instance https://gitlab.example.com
+//gitlab.example.com:credentialProvider[]=npm-credential-provider-gitlab --instance https://gitlab.example.com
 ```
 
 Provider commands are resolved deterministically from trusted sources only:
@@ -67,6 +67,8 @@ Provider commands are resolved deterministically from trusted sources only:
 The current working directory and project-local `node_modules/.bin` are never searched. Arbitrary `PATH` lookup is not used as the trust anchor for project installs. If a provider name is ambiguous across trusted sources, npm fails closed and asks the user to configure a more specific provider path.
 
 Arguments are allowed only in user-level or global configuration.
+
+The client must spawn the resolved provider executable directly with an argv vector and must not invoke it through a shell. npm should pass a sentinel argument such as `--npm-credential-provider` before configured provider arguments so providers can distinguish protocol mode from any standalone CLI mode.
 
 ### 2. Protocol
 
@@ -88,12 +90,12 @@ This allows providers to support multiple protocol versions simultaneously, enab
 
 **Install (read):**
 ```json
-{"v":1,"action":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"install","interactive":false}
+{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false}
 ```
 
 **Publish (write) — includes `version`:**
 ```json
-{"v":1,"action":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","version":"2.4.1","operation":"publish","interactive":true}
+{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","version":"2.4.1","operation":"publish","command":"publish","interactive":true}
 ```
 
 Readable form (publish):
@@ -101,12 +103,13 @@ Readable form (publish):
 ```json
 {
   "v": 1,
-  "action": "get",
+  "kind": "get",
   "registry": "https://gitlab.example.com/api/v4/projects/123/packages/npm/",
   "scope": "@scope",
   "package": "package",
   "version": "2.4.1",
   "operation": "publish",
+  "command": "publish",
   "interactive": true
 }
 ```
@@ -114,22 +117,24 @@ Readable form (publish):
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `v` | number | yes | Negotiated protocol version. |
-| `action` | string | yes | `"login"`, `"logout"`, `"get"`, `"get-batch"`, `"refresh"`, `"erase"`. |
+| `kind` | string | yes | Request kind: `"login"`, `"logout"`, `"get"`, `"get-batch"`, `"refresh"`, `"erase"`. |
 | `registry` | string | yes | Full registry URL for the request. |
 | `scope` | string | no | Package scope (e.g. `@scope`). Null for unscoped packages. |
 | `package` | string | no | Package name (e.g. `package`). May be absent for registry-level operations like `npm search`. |
 | `version` | string | no | Package version. Sent for `"publish"` operation only. Allows provider to scope tokens or log for audit. |
-| `operation` | string | yes | `"install"`, `"publish"`, `"search"`, `"view"`. |
-| `interactive` | boolean | yes | Whether the client can display prompts (for MFA flows). |
+| `operation` | string | for `get` and `get-batch` | Authorization intent: `"read"` or `"publish"`. This is the permission class the returned credential must satisfy. |
+| `command` | string | no | npm command that caused the request, such as `"install"`, `"ci"`, `"publish"`, `"search"`, or `"view"`. This is informational context, not the permission class. |
+| `interactive` | boolean | for `get` and `get-batch` | Whether the client can display prompts (for MFA flows). |
+| `authChallenges` | string[] | no | Authentication challenge headers observed from the registry, such as `WWW-Authenticate` values after a 401/403. |
 
 The client sends all available context: `scope`, `package`, and for publish — `version`. Sending full context costs nothing. Not sending it would permanently prevent future providers from using it. The **provider** decides the granularity via the `granularity` response field — a simple provider ignores everything and returns `"granularity": "registry"`, a scope-aware provider returns `"granularity": "scope"`, etc.
 
-Install and publish are fundamentally different: install is read-only and batched (many packages, speed matters), publish is write and singular (one package, security matters). The protocol reflects this — `get-batch` optimizes install, while publish sends maximum context (`scope` + `package` + `version`) for fine-grained authorization.
+Read and publish are fundamentally different authorization intents: read operations are often batched (many packages, speed matters), while publish is write and singular (one package, security matters). The protocol reflects this — `get-batch` optimizes read flows such as install/ci, while publish sends maximum context (`scope` + `package` + `version`) for fine-grained authorization.
 
 #### Success Response (provider -> client via stdout)
 
 ```json
-{"Ok":{"auth":{"type":"bearer","token":"glpat-xxxxxxxxxxxx"},"cache":"expires","expiresAt":1744200000,"operationIndependent":true,"refreshToken":"rt-xxxxxxxxxxxx","granularity":"scope"}}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"glpat-xxxxxxxxxxxx"},"cache":"expires","expiresAt":1744200000,"operationIndependent":true,"refreshState":"opaque-provider-handle","granularity":"scope"}}
 ```
 
 Readable form:
@@ -137,6 +142,7 @@ Readable form:
 ```json
 {
   "Ok": {
+    "kind": "get",
     "auth": {
       "type": "bearer",
       "token": "glpat-xxxxxxxxxxxx"
@@ -144,7 +150,7 @@ Readable form:
     "cache": "expires",
     "expiresAt": 1744200000,
     "operationIndependent": true,
-    "refreshToken": "rt-xxxxxxxxxxxx",
+    "refreshState": "opaque-provider-handle",
     "granularity": "scope"
   }
 }
@@ -152,12 +158,13 @@ Readable form:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `Ok.auth` | object | yes | Auth credentials. See Auth Types below. |
+| `Ok.kind` | string | yes | Success response kind. Must match the request `kind`. |
+| `Ok.auth` | object | for `get` and `refresh` | Auth credentials. See Auth Types below. |
 | `Ok.auth.type` | string | yes | `"bearer"` or `"basic"`. |
 | `Ok.cache` | string | no | `"never"` — do not cache. `"session"` — cache for current process. `"expires"` — cache until `expiresAt`. Default: `"session"`. |
 | `Ok.expiresAt` | number | no | Unix timestamp (seconds). Required if `cache` is `"expires"`. |
-| `Ok.operationIndependent` | boolean | no | If `true`, token works for any operation (install, publish, etc.). If `false`, client re-requests for different operations. Default: `true`. The client does not enforce operation separation — it's the provider's and registry's responsibility to scope tokens. The `operation` field in the request is informational. |
-| `Ok.refreshToken` | string | no | Opaque string passed back in `"refresh"` action. Provider-defined format. |
+| `Ok.operationIndependent` | boolean | no | If `true`, token works for any operation (`read`, `publish`). If `false`, client re-requests for different operations. Default: `true`. The client does not enforce operation separation — it's the provider's and registry's responsibility to scope tokens. |
+| `Ok.refreshState` | string | no | Opaque provider-defined handle passed back in `"refresh"` requests. Providers should avoid exposing raw OAuth refresh tokens here unless unavoidable. |
 | `Ok.granularity` | string | no | `"registry"`, `"scope"`, or `"package"`. Tells the client how broadly to cache this token. Default: `"registry"`. |
 
 #### Auth Types
@@ -188,15 +195,15 @@ No legacy `_` prefixes, no pre-encoded base64. Provider returns plain values, cl
 |---|---|---|
 | `"url-not-supported"` | Provider does not handle this registry. | Try next provider in chain (see below). |
 | `"not-found"` | No credentials stored for this registry/scope. | Fail by default if a provider was explicitly configured. Legacy fallback is allowed only through an explicit user/global opt-in. |
-| `"operation-not-supported"` | Provider does not support this action (e.g. `refresh`). | For `refresh`, fall back to `"get"`. For `login`/`logout`, show an unsupported-operation error. |
+| `"operation-not-supported"` | Provider does not support this request kind (e.g. `refresh`). | For `refresh`, fall back to `"get"`. For `login`/`logout`, show an unsupported-operation error. |
 | `"other"` | Generic error. Includes `message` and optional `causedBy` array. | Show error to user. Do not silently fall back to legacy credentials unless explicit fallback is enabled. |
 
 **Provider chaining:** Multiple providers can be configured. The client tries them in order — first `Ok` wins, `url-not-supported` means "skip me, try next". Any other error stops the chain.
 
 ```ini
 # ~/.npmrc — two providers, tried in order
-credentialProvider=npm-credential-provider-gitlab
-credentialProvider=npm-credential-provider-github
+credentialProvider[]=npm-credential-provider-gitlab
+credentialProvider[]=npm-credential-provider-github
 ```
 
 This enables a fallback pattern: a primary OAuth provider + a secondary file-based provider as fallback.
@@ -222,9 +229,9 @@ The client keeps the provider process alive for the duration of the npm command.
 
 The client **closes stdin** to signal end of session. The provider should exit cleanly.
 
-**Timeouts per action:**
+**Timeouts per request kind:**
 
-| Action | Timeout | Rationale |
+| Request kind | Timeout | Rationale |
 |---|---|---|
 | `get` | 30 seconds | Network call to credential store or API. |
 | `get-batch` | 60 seconds | Multiple token requests, may involve several API calls. |
@@ -241,14 +248,14 @@ When `interactive` is `false`, providers must not open browsers, prompt for MFA,
 
 In CI, provider execution should be deterministic: the provider must already be configured through user/global config, a machine image, or enterprise policy, and it must resolve from a trusted source. If no usable credential is available, npm should fail with a clear error rather than prompting or falling back silently.
 
-### 3. Actions
+### 3. Request Kinds
 
 #### `login` — Authenticate with Registry
 
 Triggered by `npm login --registry gitlab.example.com`. The client delegates authentication entirely to the provider, enabling OAuth, SSO, device code flow, MFA, and other modern auth methods that `npm login` cannot handle natively.
 
 ```json
-{"v":1,"action":"login","registry":"https://gitlab.example.com/api/v4/packages/npm/","interactive":true}
+{"v":1,"kind":"login","registry":"https://gitlab.example.com/api/v4/packages/npm/","interactive":true}
 ```
 
 Optional fields the client may include:
@@ -285,7 +292,7 @@ If the provider does not support interactive login:
 Triggered by `npm logout --registry gitlab.example.com`. The provider removes all stored credentials for this registry from its secure storage.
 
 ```json
-{"v":1,"action":"logout","registry":"https://gitlab.example.com/api/v4/packages/npm/"}
+{"v":1,"kind":"logout","registry":"https://gitlab.example.com/api/v4/packages/npm/"}
 ```
 
 Response:
@@ -314,10 +321,10 @@ Client sends context, provider returns a token. The primary runtime flow. See re
 When a cached token approaches `expiresAt`, the client sends:
 
 ```json
-{"v":1,"action":"refresh","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","refreshToken":"rt-xxxxxxxxxxxx"}
+{"v":1,"kind":"refresh","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","refreshState":"opaque-provider-handle"}
 ```
 
-The provider uses the refresh token to obtain a new access token without full re-authentication. Returns the same `Ok` response as `get`.
+The provider uses `refreshState` to obtain a new access token without full re-authentication. `refreshState` is an opaque provider-defined handle, not a client-interpreted token. Returns the same credential fields as `get`, with `"Ok": {"kind": "refresh", ...}`.
 
 If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client falls back to `"get"`.
 
@@ -326,7 +333,7 @@ If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client fal
 When the client needs tokens for multiple packages from the same registry (e.g. `npm install` resolving 50 packages from one private registry), it can send a single batch request instead of 50 individual `get` calls:
 
 ```json
-{"v":1,"action":"get-batch","registry":"https://gitlab.example.com/api/v4/packages/npm/","operation":"install","interactive":false,"packages":[{"scope":"@scope","package":"api-client"},{"scope":"@scope","package":"ui"},{"scope":"@other","package":"config"}]}
+{"v":1,"kind":"get-batch","registry":"https://gitlab.example.com/api/v4/packages/npm/","operation":"read","command":"install","interactive":false,"packages":[{"scope":"@scope","package":"api-client"},{"scope":"@scope","package":"ui"},{"scope":"@other","package":"config"}]}
 ```
 
 The provider returns an array of results, one per package (same order):
@@ -344,7 +351,7 @@ If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client fal
 If the registry returns 401/403, the client notifies the provider:
 
 ```json
-{"v":1,"action":"erase","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope"}
+{"v":1,"kind":"erase","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","authChallenges":["WWW-Authenticate: Bearer realm=\"https://gitlab.example.com\""]}
 ```
 
 The provider should invalidate cached credentials. Response: `{"Ok":{"kind":"erase"}}` or an error.
@@ -374,7 +381,7 @@ $ npm install @scope/package
 npm ERR! 401 Unauthorized: @scope/package from https://gitlab.example.com/...
 npm WARN found npm-credential-provider-gitlab installed globally
 npm WARN to use it, add to ~/.npmrc:
-npm WARN   //gitlab.example.com:credentialProvider=npm-credential-provider-gitlab
+npm WARN   //gitlab.example.com:credentialProvider[]=npm-credential-provider-gitlab
 ```
 
 The user must explicitly add the line to user-level or global npm config. Project-local discovery is not performed. This limits typosquatting and shadowing attacks: a malicious `npm-credential-provider-gitlba` package or project-local binary may be present, but it is never executed without explicit trusted configuration.
@@ -382,7 +389,7 @@ The user must explicitly add the line to user-level or global npm config. Projec
 #### Explicit configuration (required for execution)
 
 ```ini
-//gitlab.example.com:credentialProvider=npm-credential-provider-gitlab
+//gitlab.example.com:credentialProvider[]=npm-credential-provider-gitlab
 ```
 
 Explicit trusted configuration takes priority over discovery.
@@ -436,8 +443,8 @@ npm install @scope/package
   |     |-- Check in-memory cache (by granularity + operationIndependent)
   |     |     |-- Hit + cache:"session" -> use cached token
   |     |     |-- Hit + cache:"expires" + not expired -> use cached token
-  |     |     |-- Hit + cache:"expires" + near expiry + has refreshToken -> action: "refresh"
-  |     |     |-- Miss -> action: "get"
+  |     |     |-- Hit + cache:"expires" + near expiry + has refreshState -> kind: "refresh"
+  |     |     |-- Miss -> kind: "get"
   |     |
   |     |-- Send JSON request to provider stdin (single line)
   |     |-- Read JSON response from provider stdout (single line)
@@ -447,7 +454,7 @@ npm install @scope/package
   |     |     |-- "Err: other" -> show error to user
   |     |
   |     |-- Use token for HTTP request
-  |     |     |-- 401/403 -> action: "erase", then retry with "get"
+  |     |     |-- 401/403 -> kind: "erase", then retry with "get"
   |
   |-- Need token for another scope/package (same session)
   |     |-- Reuse same provider process, send another request
@@ -467,27 +474,27 @@ A hypothetical `npm-credential-provider-gitlab` that leverages GitLab fine-grain
 npm install -g npm-credential-provider-gitlab
 
 # 2. Configure in ~/.npmrc
-# //gitlab.example.com:credentialProvider=npm-credential-provider-gitlab --instance https://gitlab.example.com
+# //gitlab.example.com:credentialProvider[]=npm-credential-provider-gitlab --instance https://gitlab.example.com
 
 # 3. Login — provider handles OAuth automatically
 npm login --registry https://gitlab.example.com
 # Opens browser → GitLab OAuth → stores refresh token in OS keychain
 ```
 
-No custom CLI commands needed. Standard `npm login` delegates to the provider's `login` action.
+No custom CLI commands needed. Standard `npm login` delegates to the provider's `login` request kind.
 
 **What happens on `npm install`:**
 
 1. npm spawns provider, provider sends `{"v":[1]}`
 2. npm needs `@scope/package` from `gitlab.example.com`, sends:
    ```
-   {"v":1,"action":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@scope","package":"package","operation":"install","interactive":false}
+   {"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false}
    ```
 3. Provider reads refresh token from OS keychain
 4. Provider requests a short-lived token from GitLab API, scoped to project 42 with `read_package_registry` permission
 5. Provider responds:
    ```
-   {"Ok":{"auth":{"type":"bearer","token":"glpat-short-lived"},"cache":"expires","expiresAt":1744201800,"operationIndependent":true,"refreshToken":"stored-in-keychain","granularity":"scope"}}
+   {"Ok":{"kind":"get","auth":{"type":"bearer","token":"glpat-short-lived"},"cache":"expires","expiresAt":1744201800,"operationIndependent":true,"refreshState":"stored-in-keychain-handle","granularity":"scope"}}
    ```
 6. npm caches token for `@scope` scope (`granularity: "scope"`), uses it for all packages in that scope
 7. npm needs another package from same scope — cache hit, no provider invocation
@@ -499,13 +506,13 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 
 | Aspect | RFC #850 | This proposal |
 |---|---|---|
-| **Actions** | get only | login, logout, get, get-batch, refresh, erase |
-| **Auth flows** | Not specified | OAuth, SSO, device code, MFA via `login` action |
+| **Request kinds** | get only | login, logout, get, get-batch, refresh, erase |
+| **Auth flows** | Not specified | OAuth, SSO, device code, MFA via `login` request kind |
 | **Granularity** | Per-registry only | Per-registry, per-scope, or per-package |
 | **Provider input** | No stdin, args only | JSON on stdin with full context |
 | **Protocol versioning** | None | Hello message `{"v":[1]}` + `v` in every message |
-| **Refresh flow** | None (re-invoke from scratch) | `"refresh"` action with refresh token |
-| **Token rejection** | Not specified | `"erase"` action (like git credential helpers) |
+| **Refresh flow** | None (re-invoke from scratch) | `"refresh"` request kind with opaque `refreshState` |
+| **Token rejection** | Not specified | `"erase"` request kind (like git credential helpers) |
 | **Cache control** | `expiresAt` only | `cache` (`never`/`session`/`expires`) + `operationIndependent` + `granularity` |
 | **Provider chaining** | Not specified | `"url-not-supported"` error → try next provider |
 | **Session model** | One process per request | Provider stays alive, multiple requests per session |
@@ -528,20 +535,20 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 | **Year** | 2012 | 2016 | 2022 | 2023 | 2025 | 2026 |
 | **Format** | key=value | JSON | Plain string | JSON (single-line) | JSON | JSON (single-line) |
 | **Direction** | Bidirectional | Bidirectional | Unidirectional | Bidirectional | Unidirectional | Bidirectional |
-| **Actions** | get, store, erase | get, store, erase | get only | get, login, logout | get only | login, logout, get, get-batch, refresh, erase |
+| **Request kinds** | get, store, erase | get, store, erase | get only | get, login, logout | get only | login, logout, get, get-batch, refresh, erase |
 | **Auth flows (OAuth/SSO)** | No | No | No | Yes (via login) | No | Yes (via login) |
-| **Context on input** | protocol, host, path | ServerURL | None | registry, name, operation, package | None (args only) | registry, scope, package, operation |
+| **Context on input** | protocol, host, path | ServerURL | None | registry, name, operation, package | None (args only) | registry, scope, package, operation, command |
 | **Granularity** | Per-host | Per-ServerURL | Per-registry | Per-registry | Per-registry | Per-registry, per-scope, or per-package |
 | **Versioning** | None | None | None | Hello message `{"v":[1]}` | None | Hello message + `v` in every message |
 | **Auth type** | Implicit (key=value) | Implicit (field presence) | Plain string | Raw token string | Implicit (`_authToken`/`_auth`/`_password`) | Explicit `type: bearer/basic` |
-| **Refresh tokens** | No | No | No | No | No | Yes (`refresh` action) |
+| **Refresh state** | No | No | No | No | No | Yes (`refreshState` opaque handle) |
 | **Cache control** | None (helper stores) | None (helper stores) | None | `never`/`session`/`expires` | `expiresAt` only | `cache` + `expiresAt` + `granularity` + `operationIndependent` |
 | **Provider chaining** | Yes (try next on fail) | No | No | Yes (`url-not-supported`) | No | Yes (`url-not-supported`) |
-| **Session (process reuse)** | No (new process per action) | No | No | Yes (stdin/stdout) | No | Yes (stdin/stdout) |
+| **Session (process reuse)** | No (new process per request) | No | No | Yes (stdin/stdout) | No | Yes (stdin/stdout) |
 | **Batch requests** | No | No | No | No | No | Yes (`get-batch`) |
 | **Discovery** | `git-credential-*` (auto) | `docker-credential-*` (auto) | Explicit config | Explicit config | Explicit config | `npm-credential-provider-*` (suggest only) + explicit |
 | **Structured errors** | No | No | No | Yes (`kind`) | No | Yes (`kind` + `message` + `causedBy`) |
-| **Arguments** | Action as CLI arg | Action as CLI arg | Forbidden | `--cargo-plugin` + args | Allowed in config | Allowed in config |
+| **Arguments** | Action as CLI arg | Action as CLI arg | Forbidden | `--cargo-plugin` + args | Allowed in config | Direct argv + `--npm-credential-provider` sentinel |
 | **Production-tested** | Yes (13 years) | Yes (10 years) | Yes (4 years) | Yes (3 years) | No (RFC stage) | No (proposal) |
 
 ### Git Credential Helpers (2012)

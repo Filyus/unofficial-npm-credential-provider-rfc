@@ -14,15 +14,16 @@
       "name": "request-login",
       "message": {
         "v": 1,
-        "action": "login",
-        "registry": "https://registry.example.test/"
+        "kind": "login",
+        "registry": "https://registry.example.test/",
+        "interactive": true
       }
     },
     {
       "name": "request-logout",
       "message": {
         "v": 1,
-        "action": "logout",
+        "kind": "logout",
         "registry": "https://registry.example.test/"
       }
     },
@@ -30,17 +31,18 @@
       "name": "request-erase",
       "message": {
         "v": 1,
-        "action": "erase",
+        "kind": "erase",
         "registry": "https://registry.example.test/"
       }
     },
     {
-      "name": "request-get-install",
+      "name": "request-get-read-install",
       "message": {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": "https://registry.example.test/",
-        "operation": "install",
+        "operation": "read",
+        "command": "install",
         "interactive": false
       }
     },
@@ -48,9 +50,10 @@
       "name": "request-get-publish",
       "message": {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": "https://registry.example.test/",
         "operation": "publish",
+        "command": "publish",
         "interactive": false,
         "version": "1.2.3"
       }
@@ -59,9 +62,10 @@
       "name": "request-get-batch",
       "message": {
         "v": 1,
-        "action": "get-batch",
+        "kind": "get-batch",
         "registry": "https://registry.example.test/",
-        "operation": "install",
+        "operation": "read",
+        "command": "install",
         "interactive": false,
         "packages": [
           {
@@ -79,15 +83,16 @@
       "name": "request-refresh",
       "message": {
         "v": 1,
-        "action": "refresh",
+        "kind": "refresh",
         "registry": "https://registry.example.test/",
-        "refreshToken": "opaque-refresh-token"
+        "refreshState": "opaque-provider-handle"
       }
     },
     {
       "name": "response-ok-bearer-session",
       "message": {
         "Ok": {
+          "kind": "get",
           "auth": {
             "type": "bearer",
             "token": "token"
@@ -101,6 +106,7 @@
       "name": "response-ok-basic-expires",
       "message": {
         "Ok": {
+          "kind": "get",
           "auth": {
             "type": "basic",
             "username": "user",
@@ -181,10 +187,10 @@
       }
     },
     {
-      "name": "request-unknown-action",
+      "name": "request-unknown-kind",
       "message": {
         "v": 1,
-        "action": "store",
+        "kind": "store",
         "registry": "https://registry.example.test/"
       }
     },
@@ -192,7 +198,7 @@
       "name": "request-get-missing-operation",
       "message": {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": "https://registry.example.test/",
         "interactive": false
       }
@@ -201,16 +207,16 @@
       "name": "request-get-missing-interactive",
       "message": {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": "https://registry.example.test/",
-        "operation": "install"
+        "operation": "read"
       }
     },
     {
-      "name": "request-refresh-missing-token",
+      "name": "request-refresh-missing-state",
       "message": {
         "v": 1,
-        "action": "refresh",
+        "kind": "refresh",
         "registry": "https://registry.example.test/"
       }
     },
@@ -218,7 +224,7 @@
       "name": "request-publish-missing-version",
       "message": {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": "https://registry.example.test/",
         "operation": "publish",
         "interactive": false
@@ -232,6 +238,7 @@
       "name": "response-both-ok-and-err",
       "message": {
         "Ok": {
+          "kind": "get",
           "auth": {
             "type": "bearer",
             "token": "token"
@@ -246,6 +253,7 @@
       "name": "response-bearer-missing-token",
       "message": {
         "Ok": {
+          "kind": "get",
           "auth": {
             "type": "bearer"
           }
@@ -256,11 +264,23 @@
       "name": "response-expires-missing-expires-at",
       "message": {
         "Ok": {
+          "kind": "get",
           "auth": {
             "type": "bearer",
             "token": "token"
           },
           "cache": "expires"
+        }
+      }
+    },
+    {
+      "name": "response-ok-missing-kind",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "bearer",
+            "token": "token"
+          }
         }
       }
     },

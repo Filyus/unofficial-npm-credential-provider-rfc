@@ -57,7 +57,7 @@ def main() -> int:
 
     write({"v": [1]})
     for request in read_requests():
-        action = request.get("action")
+        kind = request.get("kind")
         if args.scenario == "not-found":
             write({"Err": {"kind": "not-found"}})
         elif args.scenario == "operation-not-supported":
@@ -70,17 +70,18 @@ def main() -> int:
         elif args.scenario == "both-ok-err":
             write({"Ok": {"kind": "login"}, "Err": {"kind": "other"}})
         elif args.scenario == "malformed-auth":
-            write({"Ok": {"auth": {"type": "bearer"}, "cache": "session"}})
+            write({"Ok": {"kind": "get", "auth": {"type": "bearer"}, "cache": "session"}})
         elif args.scenario == "expires-missing-expiration":
             write(
                 {
                     "Ok": {
+                        "kind": "get",
                         "auth": {"type": "bearer", "token": "test-token"},
                         "cache": "expires",
                     }
                 }
             )
-        elif args.scenario == "batch-success" and action == "get-batch":
+        elif args.scenario == "batch-success" and kind == "get-batch":
             packages = request.get("packages", [])
             write(
                 {
@@ -100,7 +101,7 @@ def main() -> int:
                     }
                 }
             )
-        elif args.scenario == "batch-count-mismatch" and action == "get-batch":
+        elif args.scenario == "batch-count-mismatch" and kind == "get-batch":
             write(
                 {
                     "Ok": {
@@ -116,15 +117,16 @@ def main() -> int:
                 }
             )
         elif args.scenario in {"login-success", "logout-success", "erase-success"}:
-            write({"Ok": {"kind": action}})
-        elif args.scenario == "refresh-success" and action == "refresh":
+            write({"Ok": {"kind": kind}})
+        elif args.scenario == "refresh-success" and kind == "refresh":
             write(
                 {
                     "Ok": {
+                        "kind": "refresh",
                         "auth": {"type": "bearer", "token": "refreshed-token"},
                         "cache": "expires",
                         "expiresAt": 1893456000,
-                        "refreshToken": "opaque-refresh-token",
+                        "refreshState": "opaque-provider-handle",
                         "granularity": "scope",
                     }
                 }
@@ -133,6 +135,7 @@ def main() -> int:
             write(
                 {
                     "Ok": {
+                        "kind": "get",
                         "auth": {"type": "bearer", "token": "test-token"},
                         "cache": "session",
                         "granularity": "scope",

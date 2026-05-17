@@ -5,8 +5,8 @@ This matrix keeps the executable checks grouped by protocol layer.
 | Layer | Cases |
 |---|---|
 | Handshake | valid v1, malformed hello, no compatible version, fallback-enabled version mismatch, close-before-ready |
-| Request schema | unknown action, missing registry, missing operation, missing interactive, missing `refreshToken`, publish without version, `get-batch` without packages, unknown fields ignored |
-| Response schema | exactly one of `Ok`/`Err`, invalid `Ok`, invalid `Err`, bearer/basic auth validation, unknown auth type, invalid cache, missing `expiresAt`, invalid granularity, invalid `operationIndependent`, unknown fields ignored |
+| Request schema | unknown request kind, missing registry, missing operation, missing interactive, missing `refreshState`, publish without version, `get-batch` without packages, unknown fields ignored |
+| Response schema | exactly one of `Ok`/`Err`, required `Ok.kind`, invalid `Ok`, invalid `Err`, bearer/basic auth validation, unknown auth type, invalid cache, missing `expiresAt`, invalid granularity, invalid `operationIndependent`, unknown fields ignored |
 | JSON Schema | schema artifact is valid draft 2020-12 JSON Schema, generated positive and negative protocol vectors validate when `jsonschema` is installed |
 | Spec consistency | schema enums, policy values, and Python model constants stay in sync |
 | Codegen | generated Python/Rust constants, policy summary, and protocol vectors are fresh relative to `spec/policy-v1.json` |

@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
-    Action, ErrorKind, Hello, PackageContext, ProtocolError, ProviderResponse, Request, negotiate,
-    read_json_line, write_json_line,
+    ErrorKind, Hello, NpmCommand, PackageContext, ProtocolError, ProviderResponse, Request,
+    RequestKind, negotiate, read_json_line, write_json_line,
 };
 use std::fmt;
 use std::io::{BufReader, Write};
@@ -86,7 +86,7 @@ pub fn run_exchange(
 
     let response = read_json_line::<ProviderResponse>(&mut reader)?
         .ok_or_else(|| ExchangeError::Provider("provider exited before response".into()))?;
-    response.validate_for(&request.action)?;
+    response.validate_for(&request.kind)?;
     validate_exchange(&request, &response)?;
     let outcome = summarize(&request, &response)?;
 
@@ -147,45 +147,51 @@ fn request_for(scenario: ClientScenario) -> Request {
         ),
         ClientScenario::Login => Request {
             v: credential_provider_protocol::PROTOCOL_VERSION,
-            action: Action::Login,
+            kind: RequestKind::Login,
             registry: "https://registry.example.test/".into(),
             scope: None,
             package: None,
             version: None,
             operation: None,
+            command: None,
             interactive: Some(true),
-            refresh_token: None,
+            refresh_state: None,
+            auth_challenges: None,
             packages: None,
         },
         ClientScenario::Logout => Request {
             v: credential_provider_protocol::PROTOCOL_VERSION,
-            action: Action::Logout,
+            kind: RequestKind::Logout,
             registry: "https://registry.example.test/".into(),
             scope: None,
             package: None,
             version: None,
             operation: None,
+            command: None,
             interactive: None,
-            refresh_token: None,
+            refresh_state: None,
+            auth_challenges: None,
             packages: None,
         },
         ClientScenario::Erase => Request {
             v: credential_provider_protocol::PROTOCOL_VERSION,
-            action: Action::Erase,
+            kind: RequestKind::Erase,
             registry: "https://registry.example.test/".into(),
             scope: Some("@scope".into()),
             package: None,
             version: None,
             operation: None,
+            command: Some(NpmCommand::Install),
             interactive: None,
-            refresh_token: None,
+            refresh_state: None,
+            auth_challenges: None,
             packages: None,
         },
     }
 }
 
 fn validate_exchange(request: &Request, response: &ProviderResponse) -> Result<(), ExchangeError> {
-    if request.action != Action::GetBatch {
+    if request.kind != RequestKind::GetBatch {
         return Ok(());
     }
     let ProviderResponse::Ok(ok) = response else {
@@ -204,12 +210,15 @@ fn validate_exchange(request: &Request, response: &ProviderResponse) -> Result<(
 fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, ExchangeError> {
     match response {
         ProviderResponse::Ok(ok) => {
-            if request.action == Action::GetBatch {
+            if request.kind == RequestKind::GetBatch {
                 let count = ok.results.as_ref().map_or(0, Vec::len);
                 return Ok(format!("batch:{count}"));
             }
-            if let Some(kind) = &ok.kind {
-                return Ok(kind.clone());
+            if matches!(
+                ok.kind,
+                RequestKind::Login | RequestKind::Logout | RequestKind::Erase
+            ) {
+                return Ok(kind_name(&ok.kind).into());
             }
             Ok("ok".into())
         }
@@ -225,5 +234,16 @@ fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, E
                 err.message.clone().unwrap_or_else(|| "other".into()),
             )),
         },
+    }
+}
+
+fn kind_name(kind: &RequestKind) -> &'static str {
+    match kind {
+        RequestKind::Login => "login",
+        RequestKind::Logout => "logout",
+        RequestKind::Get => "get",
+        RequestKind::GetBatch => "get-batch",
+        RequestKind::Refresh => "refresh",
+        RequestKind::Erase => "erase",
     }
 }

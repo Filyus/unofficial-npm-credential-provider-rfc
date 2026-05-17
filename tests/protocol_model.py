@@ -12,11 +12,12 @@ from tests.generated_policy import (
     ERROR_KINDS,
     OPERATION_INDEPENDENT_DEFAULT,
     PROTOCOL_VERSION,
-    SUPPORTED_ACTIONS,
     SUPPORTED_AUTH_TYPES,
     SUPPORTED_CACHE,
+    SUPPORTED_COMMANDS,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
+    SUPPORTED_REQUEST_KINDS,
     TRUSTED_LOCATION_KINDS,
 )
 
@@ -49,8 +50,9 @@ class ProviderConfig:
 @dataclass(frozen=True)
 class RequestContext:
     registry: str
-    action: str = "get"
-    operation: str = "install"
+    kind: str = "get"
+    operation: str = "read"
+    command: str | None = "install"
     interactive: bool = False
     scope: str | None = None
     package: str | None = None
@@ -96,11 +98,13 @@ class CredentialClientModel:
         self._require_state(ClientState.READY)
         request = {
             "v": self.version,
-            "action": context.action,
+            "kind": context.kind,
             "registry": context.registry,
             "operation": context.operation,
             "interactive": context.interactive,
         }
+        if context.command is not None:
+            request["command"] = context.command
         if context.scope is not None:
             request["scope"] = context.scope
         if context.package is not None:
@@ -120,11 +124,15 @@ class CredentialClientModel:
         if not isinstance(ok, dict):
             raise ProtocolViolation("Ok response must be an object")
         kind = ok.get("kind")
+        if kind != request.get("kind"):
+            raise ProtocolViolation("Ok.kind must match request kind")
         if kind in {"login", "logout", "erase"}:
             return kind
         if kind == "get-batch":
             self._handle_batch_response(request, ok)
             return "ok"
+        if kind not in {"get", "refresh"}:
+            raise ProtocolViolation(f"unsupported Ok kind: {kind!r}")
         self._handle_token_response(request, ok)
         return "ok"
 
@@ -140,7 +148,7 @@ class CredentialClientModel:
             raise ProtocolViolation(f"unsupported error kind: {kind!r}")
         if kind == "url-not-supported":
             return "try-next-provider"
-        if kind == "operation-not-supported" and request.get("action") == "refresh":
+        if kind == "operation-not-supported" and request.get("kind") == "refresh":
             return "retry-get"
         if kind == "not-found" and (not self.config.configured or self.config.legacy_fallback):
             return "legacy-auth"
@@ -154,9 +162,9 @@ class CredentialClientModel:
         if len(packages) != len(results):
             raise ProtocolViolation("get-batch result count must match request count")
         shared = {
-            "cache": ok.get("cache", "session"),
+            "cache": ok.get("cache", DEFAULT_CACHE_POLICY),
             "expiresAt": ok.get("expiresAt"),
-            "operationIndependent": ok.get("operationIndependent", True),
+            "operationIndependent": ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT),
         }
         for package, result in zip(packages, results):
             merged = {**shared, **result}
@@ -218,20 +226,23 @@ def validate_request(message: dict[str, Any]) -> None:
         raise ProtocolViolation("request must be an object")
     if message.get("v") != PROTOCOL_VERSION:
         raise ProtocolViolation("request must use negotiated protocol version")
-    if message.get("action") not in SUPPORTED_ACTIONS:
-        raise ProtocolViolation(f"unsupported action: {message.get('action')!r}")
+    if message.get("kind") not in SUPPORTED_REQUEST_KINDS:
+        raise ProtocolViolation(f"unsupported request kind: {message.get('kind')!r}")
     if not isinstance(message.get("registry"), str):
         raise ProtocolViolation("request requires registry string")
-    action = message["action"]
-    if action in {"get", "get-batch"}:
+    command = message.get("command")
+    if command is not None and command not in SUPPORTED_COMMANDS:
+        raise ProtocolViolation(f"unsupported npm command: {command!r}")
+    kind = message["kind"]
+    if kind in {"get", "get-batch"}:
         if message.get("operation") not in SUPPORTED_OPERATIONS:
             raise ProtocolViolation("get requests require a supported operation")
         if not isinstance(message.get("interactive"), bool):
             raise ProtocolViolation("get requests require interactive boolean")
-    if action == "get-batch" and not isinstance(message.get("packages"), list):
+    if kind == "get-batch" and not isinstance(message.get("packages"), list):
         raise ProtocolViolation("get-batch requires packages[]")
-    if action == "refresh" and not isinstance(message.get("refreshToken"), str):
-        raise ProtocolViolation("refresh requires refreshToken")
+    if kind == "refresh" and not isinstance(message.get("refreshState"), str):
+        raise ProtocolViolation("refresh requires refreshState")
     if message.get("operation") == "publish" and not isinstance(message.get("version"), str):
         raise ProtocolViolation("publish requires version")
 

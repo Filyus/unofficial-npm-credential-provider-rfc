@@ -33,14 +33,14 @@ fn client_and_provider_exchange_batch_success() {
 }
 
 #[test]
-fn client_and_provider_exchange_action_successes() {
+fn client_and_provider_exchange_request_kind_successes() {
     for scenario in [
         ClientScenario::Login,
         ClientScenario::Logout,
         ClientScenario::Erase,
     ] {
-        let summary = run_exchange(provider_command("action-kind-success"), scenario)
-            .expect("action succeeds");
+        let summary = run_exchange(provider_command("request-kind-success"), scenario)
+            .expect("request kind succeeds");
 
         assert_eq!(summary.selected_version, 1);
         assert!(["login", "logout", "erase"].contains(&summary.outcome.as_str()));

@@ -9,8 +9,9 @@ Source: `spec/policy-v1.json`.
 | Field | Values |
 | --- | --- |
 | Protocol version | `1` |
-| Actions | `login`, `logout`, `get`, `get-batch`, `refresh`, `erase` |
-| Operations | `install`, `publish`, `search`, `view` |
+| Request kinds | `login`, `logout`, `get`, `get-batch`, `refresh`, `erase` |
+| Operations | `read`, `publish` |
+| npm commands | `install`, `ci`, `publish`, `search`, `view` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |

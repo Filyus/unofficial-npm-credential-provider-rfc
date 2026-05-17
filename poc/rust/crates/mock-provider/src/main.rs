@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
-    ErrorKind, Granularity, Hello, ProviderErr, ProviderOk, ProviderResponse, Request, TokenResult,
-    read_json_line, write_json_line,
+    ErrorKind, Granularity, Hello, ProviderErr, ProviderOk, ProviderResponse, Request, RequestKind,
+    TokenResult, read_json_line, write_json_line,
 };
 use std::io::{self, BufReader};
 
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         if scenario == "malformed-auth" {
-            println!(r#"{{"Ok":{{"auth":{{"type":"bearer"}}}}}}"#);
+            println!(r#"{{"Ok":{{"kind":"get","auth":{{"type":"bearer"}}}}}}"#);
             continue;
         }
 
@@ -56,23 +56,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 caused_by: Some(vec!["test scenario".into()]),
             }),
             "expires-missing-expiration" => ProviderResponse::Ok(ProviderOk {
-                kind: None,
+                kind: RequestKind::Get,
                 auth: Some(credential_provider_protocol::Auth::Bearer {
                     token: "test-token".into(),
                 }),
                 cache: Some(credential_provider_protocol::CachePolicy::Expires),
                 expires_at: None,
                 operation_independent: None,
-                refresh_token: None,
+                refresh_state: None,
                 granularity: Some(Granularity::Scope),
                 results: None,
             }),
             "refresh-success" => ProviderResponse::Ok(ProviderOk::refreshed(
                 "refreshed-token",
                 request
-                    .refresh_token
+                    .refresh_state
                     .clone()
-                    .unwrap_or_else(|| "opaque-refresh-token".into()),
+                    .unwrap_or_else(|| "opaque-provider-handle".into()),
             )),
             "batch-success" => {
                 let packages = request.packages.clone().unwrap_or_default();
@@ -93,21 +93,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 granularity: Some(Granularity::Package),
             }])),
-            "action-kind-success" => ProviderResponse::Ok(ProviderOk {
-                kind: Some(
-                    match request.action {
-                        credential_provider_protocol::Action::Login => "login",
-                        credential_provider_protocol::Action::Logout => "logout",
-                        credential_provider_protocol::Action::Erase => "erase",
-                        _ => "ok",
-                    }
-                    .into(),
-                ),
+            "request-kind-success" => ProviderResponse::Ok(ProviderOk {
+                kind: request.kind.clone(),
                 auth: None,
                 cache: None,
                 expires_at: None,
                 operation_independent: None,
-                refresh_token: None,
+                refresh_state: None,
                 granularity: None,
                 results: None,
             }),

@@ -9,21 +9,25 @@ REGISTRY = "https://registry.example.test/"
 
 
 def request(
-    operation: str = "install",
+    operation: str = "read",
     scope: str | None = "@scope",
     package: str | None = "pkg",
 ) -> dict:
     message = {
         "v": 1,
-        "action": "get",
+        "kind": "get",
         "registry": REGISTRY,
         "operation": operation,
+        "command": "install",
         "interactive": False,
     }
     if scope is not None:
         message["scope"] = scope
     if package is not None:
         message["package"] = package
+    if operation == "publish":
+        message["version"] = "1.2.3"
+        message["command"] = "publish"
     return message
 
 
@@ -33,6 +37,7 @@ def ok(
     **extra: object,
 ) -> dict:
     payload = {
+        "kind": "get",
         "auth": {"type": "bearer", "token": "token"},
         "cache": cache,
         "granularity": granularity,
@@ -79,7 +84,7 @@ class CachePolicyTests(unittest.TestCase):
     def test_default_cache_is_session_and_default_granularity_is_registry(self) -> None:
         self.client.handle_response(
             request(),
-            {"Ok": {"auth": {"type": "bearer", "token": "token"}}},
+            {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}}},
         )
 
         entry = self.client.cache[(REGISTRY,)]

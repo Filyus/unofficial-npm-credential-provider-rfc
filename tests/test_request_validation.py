@@ -7,9 +7,10 @@ from tests.protocol_model import CredentialClientModel, ProtocolViolation, Reque
 
 BASE_GET = {
     "v": 1,
-    "action": "get",
+    "kind": "get",
     "registry": "https://registry.example.test/",
-    "operation": "install",
+    "operation": "read",
+    "command": "install",
     "interactive": False,
 }
 
@@ -28,7 +29,7 @@ class RequestValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(request["v"], 1)
-        self.assertEqual(request["action"], "get")
+        self.assertEqual(request["kind"], "get")
         self.assertEqual(request["scope"], "@scope")
 
     def test_request_must_be_object(self) -> None:
@@ -39,9 +40,9 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate_request({**BASE_GET, "v": 2})
 
-    def test_unknown_action_is_rejected(self) -> None:
+    def test_unknown_kind_is_rejected(self) -> None:
         with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "action": "store"})
+            validate_request({**BASE_GET, "kind": "store"})
 
     def test_registry_is_required(self) -> None:
         with self.assertRaises(ProtocolViolation):
@@ -58,29 +59,33 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate_request({**BASE_GET, "interactive": "false"})
 
-    def test_get_supports_search_and_view_operations(self) -> None:
-        validate_request({**BASE_GET, "operation": "search"})
-        validate_request({**BASE_GET, "operation": "view"})
+    def test_get_supports_search_and_view_commands(self) -> None:
+        validate_request({**BASE_GET, "command": "search"})
+        validate_request({**BASE_GET, "command": "view"})
+
+    def test_unknown_command_is_rejected(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "command": "unknown"})
 
     def test_get_batch_requires_packages(self) -> None:
         with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "action": "get-batch"})
+            validate_request({**BASE_GET, "kind": "get-batch"})
 
     def test_get_batch_accepts_package_list(self) -> None:
         validate_request(
             {
                 **BASE_GET,
-                "action": "get-batch",
+                "kind": "get-batch",
                 "packages": [{"scope": "@scope", "package": "pkg"}],
             }
         )
 
-    def test_refresh_requires_refresh_token(self) -> None:
+    def test_refresh_requires_refresh_state(self) -> None:
         with self.assertRaises(ProtocolViolation):
             validate_request(
                 {
                     "v": 1,
-                    "action": "refresh",
+                    "kind": "refresh",
                     "registry": "https://registry.example.test/",
                 }
             )

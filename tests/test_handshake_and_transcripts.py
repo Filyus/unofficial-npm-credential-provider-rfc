@@ -68,7 +68,7 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(client.state.value, "closed")
         self.assertEqual(client.cache, {})
 
-    def test_refresh_transcript_validates_refresh_token(self) -> None:
+    def test_refresh_transcript_validates_refresh_state(self) -> None:
         client = validate_transcript(str(TRANSCRIPTS / "refresh-success.jsonl"))
 
         self.assertIn(("https://registry.example.test/", None), client.cache)

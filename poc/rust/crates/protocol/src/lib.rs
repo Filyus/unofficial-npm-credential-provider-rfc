@@ -22,7 +22,7 @@ impl Hello {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Action {
+pub enum RequestKind {
     Login,
     Logout,
     Get,
@@ -34,7 +34,15 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
+    Read,
+    Publish,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NpmCommand {
     Install,
+    Ci,
     Publish,
     Search,
     View,
@@ -50,7 +58,7 @@ pub struct PackageContext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
     pub v: u32,
-    pub action: Action,
+    pub kind: RequestKind,
     pub registry: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
@@ -61,9 +69,13 @@ pub struct Request {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<NpmCommand>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
-    #[serde(rename = "refreshToken", skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
+    #[serde(rename = "refreshState", skip_serializing_if = "Option::is_none")]
+    pub refresh_state: Option<String>,
+    #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
+    pub auth_challenges: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages: Option<Vec<PackageContext>>,
 }
@@ -72,29 +84,33 @@ impl Request {
     pub fn get_install(registry: impl Into<String>, scope: Option<&str>, package: &str) -> Self {
         Self {
             v: PROTOCOL_VERSION,
-            action: Action::Get,
+            kind: RequestKind::Get,
             registry: registry.into(),
             scope: scope.map(str::to_string),
             package: Some(package.to_string()),
             version: None,
-            operation: Some(Operation::Install),
+            operation: Some(Operation::Read),
+            command: Some(NpmCommand::Install),
             interactive: Some(false),
-            refresh_token: None,
+            refresh_state: None,
+            auth_challenges: None,
             packages: None,
         }
     }
 
-    pub fn refresh(registry: impl Into<String>, refresh_token: impl Into<String>) -> Self {
+    pub fn refresh(registry: impl Into<String>, refresh_state: impl Into<String>) -> Self {
         Self {
             v: PROTOCOL_VERSION,
-            action: Action::Refresh,
+            kind: RequestKind::Refresh,
             registry: registry.into(),
             scope: None,
             package: None,
             version: None,
             operation: None,
+            command: None,
             interactive: None,
-            refresh_token: Some(refresh_token.into()),
+            refresh_state: Some(refresh_state.into()),
+            auth_challenges: None,
             packages: None,
         }
     }
@@ -102,14 +118,16 @@ impl Request {
     pub fn get_batch(registry: impl Into<String>, packages: Vec<PackageContext>) -> Self {
         Self {
             v: PROTOCOL_VERSION,
-            action: Action::GetBatch,
+            kind: RequestKind::GetBatch,
             registry: registry.into(),
             scope: None,
             package: None,
             version: None,
-            operation: Some(Operation::Install),
+            operation: Some(Operation::Read),
+            command: Some(NpmCommand::Install),
             interactive: Some(false),
-            refresh_token: None,
+            refresh_state: None,
+            auth_challenges: None,
             packages: Some(packages),
         }
     }
@@ -120,23 +138,23 @@ impl Request {
                 "request version must match negotiated protocol version".into(),
             ));
         }
-        match self.action {
-            Action::Get => {
+        match self.kind {
+            RequestKind::Get => {
                 require(self.operation.is_some(), "get requires operation")?;
                 require(self.interactive.is_some(), "get requires interactive")?;
             }
-            Action::GetBatch => {
+            RequestKind::GetBatch => {
                 require(self.operation.is_some(), "get-batch requires operation")?;
                 require(self.interactive.is_some(), "get-batch requires interactive")?;
                 require(self.packages.is_some(), "get-batch requires packages")?;
             }
-            Action::Refresh => {
+            RequestKind::Refresh => {
                 require(
-                    self.refresh_token.is_some(),
-                    "refresh requires refreshToken",
+                    self.refresh_state.is_some(),
+                    "refresh requires refreshState",
                 )?;
             }
-            Action::Login | Action::Logout | Action::Erase => {}
+            RequestKind::Login | RequestKind::Logout | RequestKind::Erase => {}
         }
         if self.operation == Some(Operation::Publish) {
             require(self.version.is_some(), "publish requires version")?;
@@ -177,8 +195,7 @@ pub struct TokenResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderOk {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    pub kind: RequestKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<Auth>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,8 +207,8 @@ pub struct ProviderOk {
         skip_serializing_if = "Option::is_none"
     )]
     pub operation_independent: Option<bool>,
-    #[serde(rename = "refreshToken", skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
+    #[serde(rename = "refreshState", skip_serializing_if = "Option::is_none")]
+    pub refresh_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granularity: Option<Granularity>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,29 +218,29 @@ pub struct ProviderOk {
 impl ProviderOk {
     pub fn bearer(token: impl Into<String>, granularity: Granularity) -> Self {
         Self {
-            kind: None,
+            kind: RequestKind::Get,
             auth: Some(Auth::Bearer {
                 token: token.into(),
             }),
             cache: Some(CachePolicy::Session),
             expires_at: None,
             operation_independent: None,
-            refresh_token: None,
+            refresh_state: None,
             granularity: Some(granularity),
             results: None,
         }
     }
 
-    pub fn refreshed(token: impl Into<String>, refresh_token: impl Into<String>) -> Self {
+    pub fn refreshed(token: impl Into<String>, refresh_state: impl Into<String>) -> Self {
         Self {
-            kind: None,
+            kind: RequestKind::Refresh,
             auth: Some(Auth::Bearer {
                 token: token.into(),
             }),
             cache: Some(CachePolicy::Expires),
             expires_at: Some(1_893_456_000),
             operation_independent: Some(true),
-            refresh_token: Some(refresh_token.into()),
+            refresh_state: Some(refresh_state.into()),
             granularity: Some(Granularity::Scope),
             results: None,
         }
@@ -231,30 +248,30 @@ impl ProviderOk {
 
     pub fn batch(results: Vec<TokenResult>) -> Self {
         Self {
-            kind: Some("get-batch".into()),
+            kind: RequestKind::GetBatch,
             auth: None,
             cache: Some(CachePolicy::Session),
             expires_at: None,
             operation_independent: None,
-            refresh_token: None,
+            refresh_state: None,
             granularity: None,
             results: Some(results),
         }
     }
 
-    pub fn validate_for(&self, action: &Action) -> Result<(), ProtocolError> {
-        if self.kind.as_deref() == Some("get-batch") {
-            require(
-                matches!(action, Action::GetBatch),
-                "get-batch response requires get-batch request",
-            )?;
+    pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
+        require(&self.kind == kind, "Ok.kind must match request kind")?;
+        if self.kind == RequestKind::GetBatch {
             require(
                 self.results.is_some(),
                 "get-batch response requires results",
             )?;
             return Ok(());
         }
-        if matches!(action, Action::Login | Action::Logout | Action::Erase) {
+        if matches!(
+            self.kind,
+            RequestKind::Login | RequestKind::Logout | RequestKind::Erase
+        ) {
             return Ok(());
         }
         require(self.auth.is_some(), "token response requires auth")?;
@@ -293,9 +310,9 @@ pub enum ProviderResponse {
 }
 
 impl ProviderResponse {
-    pub fn validate_for(&self, action: &Action) -> Result<(), ProtocolError> {
+    pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         match self {
-            ProviderResponse::Ok(ok) => ok.validate_for(action),
+            ProviderResponse::Ok(ok) => ok.validate_for(kind),
             ProviderResponse::Err(_) => Ok(()),
         }
     }
@@ -386,7 +403,7 @@ mod tests {
 
         assert_eq!(
             json,
-            r#"{"Ok":{"auth":{"type":"bearer","token":"token"},"cache":"session","granularity":"scope"}}"#
+            r#"{"Ok":{"kind":"get","auth":{"type":"bearer","token":"token"},"cache":"session","granularity":"scope"}}"#
         );
     }
 
@@ -407,29 +424,37 @@ mod tests {
     }
 
     #[test]
-    fn generated_action_values_match_serde() {
+    fn generated_request_kind_values_match_serde() {
         let actual = serialized_values([
-            Action::Login,
-            Action::Logout,
-            Action::Get,
-            Action::GetBatch,
-            Action::Refresh,
-            Action::Erase,
+            RequestKind::Login,
+            RequestKind::Logout,
+            RequestKind::Get,
+            RequestKind::GetBatch,
+            RequestKind::Refresh,
+            RequestKind::Erase,
         ]);
 
-        assert_eq!(actual, generated::ACTIONS);
+        assert_eq!(actual, generated::REQUEST_KINDS);
     }
 
     #[test]
     fn generated_operation_values_match_serde() {
-        let actual = serialized_values([
-            Operation::Install,
-            Operation::Publish,
-            Operation::Search,
-            Operation::View,
-        ]);
+        let actual = serialized_values([Operation::Read, Operation::Publish]);
 
         assert_eq!(actual, generated::OPERATIONS);
+    }
+
+    #[test]
+    fn generated_command_values_match_serde() {
+        let actual = serialized_values([
+            NpmCommand::Install,
+            NpmCommand::Ci,
+            NpmCommand::Publish,
+            NpmCommand::Search,
+            NpmCommand::View,
+        ]);
+
+        assert_eq!(actual, generated::COMMANDS);
     }
 
     #[test]

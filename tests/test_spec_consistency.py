@@ -29,17 +29,23 @@ class SpecConsistencyTests(unittest.TestCase):
     def test_policy_version_matches_python_model(self) -> None:
         self.assertEqual(self.policy["protocolVersion"], protocol_model.PROTOCOL_VERSION)
 
-    def test_action_enum_matches_policy_and_python_model(self) -> None:
-        schema_actions = set(self.schema["$defs"]["request"]["properties"]["action"]["enum"])
+    def test_request_kind_enum_matches_policy_and_python_model(self) -> None:
+        schema_kinds = set(self.schema["$defs"]["request"]["properties"]["kind"]["enum"])
 
-        self.assertEqual(schema_actions, set(self.policy["wire"]["actions"]))
-        self.assertEqual(schema_actions, protocol_model.SUPPORTED_ACTIONS)
+        self.assertEqual(schema_kinds, set(self.policy["wire"]["requestKinds"]))
+        self.assertEqual(schema_kinds, protocol_model.SUPPORTED_REQUEST_KINDS)
 
     def test_operation_enum_matches_policy_and_python_model(self) -> None:
         schema_operations = set(self.schema["$defs"]["request"]["properties"]["operation"]["enum"])
 
         self.assertEqual(schema_operations, set(self.policy["wire"]["operations"]))
         self.assertEqual(schema_operations, protocol_model.SUPPORTED_OPERATIONS)
+
+    def test_command_enum_matches_policy_and_python_model(self) -> None:
+        schema_commands = set(self.schema["$defs"]["request"]["properties"]["command"]["enum"])
+
+        self.assertEqual(schema_commands, set(self.policy["wire"]["commands"]))
+        self.assertEqual(schema_commands, protocol_model.SUPPORTED_COMMANDS)
 
     def test_auth_type_enum_matches_policy_and_python_model(self) -> None:
         schema_auth_types = {
@@ -89,9 +95,10 @@ class SpecConsistencyTests(unittest.TestCase):
         client.receive_hello({"v": [1]})
         request = {
             "v": 1,
-            "action": "get",
+            "kind": "get",
             "registry": "https://registry.example.test/",
-            "operation": "install",
+            "operation": "read",
+            "command": "install",
             "interactive": False,
         }
 
@@ -115,12 +122,13 @@ class SpecConsistencyTests(unittest.TestCase):
         client.receive_hello({"v": [1]})
         request = {
             "v": 1,
-            "action": "get",
+            "kind": "get",
             "registry": "https://registry.example.test/",
-            "operation": "install",
+            "operation": "read",
+            "command": "install",
             "interactive": False,
         }
-        client.handle_response(request, {"Ok": {"auth": {"type": "bearer", "token": "token"}}})
+        client.handle_response(request, {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}}})
         entry = client.cache[("https://registry.example.test/",)]
 
         self.assertEqual(entry.cache, self.policy["cache"]["defaultPolicy"])

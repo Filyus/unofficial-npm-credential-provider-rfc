@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "protocolVersion": 1,
   "wire": {
-    "actions": ["login", "logout", "get", "get-batch", "refresh", "erase"],
-    "operations": ["install", "publish", "search", "view"],
+    "requestKinds": ["login", "logout", "get", "get-batch", "refresh", "erase"],
+    "operations": ["read", "publish"],
+    "commands": ["install", "ci", "publish", "search", "view"],
     "authTypes": ["bearer", "basic"],
     "cachePolicies": ["never", "session", "expires"],
     "granularities": ["registry", "scope", "package"],

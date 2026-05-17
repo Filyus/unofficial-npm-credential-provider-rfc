@@ -1,4 +1,4 @@
 {"from":"provider","message":{"v":[1]}}
-{"from":"client","message":{"v":1,"action":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"install","interactive":false}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","command":"install","interactive":false}}
 {"from":"provider","message":{"Err":{"kind":"url-not-supported"}}}
 {"from":"client","event":"close"}
