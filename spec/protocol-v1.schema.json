@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://filyus.github.io/unofficial-npm-credential-provider-rfc/schema/protocol-v1.schema.json",
+  "$id": "https://filyus.github.io/unofficial-npm-credential-provider-rfc/spec/protocol-v1.schema.json",
   "title": "npm Credential Provider Protocol v1",
   "description": "Machine-readable schema for the draft npm credential provider JSONL protocol.",
   "oneOf": [

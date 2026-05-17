@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "protocolVersion": 1,
+  "wire": {
+    "actions": ["login", "logout", "get", "get-batch", "refresh", "erase"],
+    "operations": ["install", "publish", "search", "view"],
+    "authTypes": ["bearer", "basic"],
+    "cachePolicies": ["never", "session", "expires"],
+    "granularities": ["registry", "scope", "package"],
+    "errorKinds": ["url-not-supported", "not-found", "operation-not-supported", "other"]
+  },
+  "errors": {
+    "url-not-supported": {
+      "default": "try-next-provider"
+    },
+    "not-found": {
+      "configuredProvider": "fail",
+      "providerNotConfigured": "legacy-auth",
+      "legacyFallbackEnabled": "legacy-auth"
+    },
+    "operation-not-supported": {
+      "refresh": "retry-get",
+      "default": "fail"
+    },
+    "other": {
+      "default": "fail"
+    }
+  },
+  "fallback": {
+    "noProviderConfigured": "legacy-auth",
+    "providerConfiguredFailure": "fail",
+    "providerConfiguredFailureWithExplicitLegacyFallback": "legacy-auth"
+  },
+  "resolution": {
+    "allowedConfigSources": ["user", "global"],
+    "trustedLocationKinds": ["builtin", "absolute", "global-bin", "enterprise"],
+    "untrustedLocationKinds": ["project-node_modules", "cwd", "path"],
+    "ambiguousTrustedProvider": "fail",
+    "missingProvider": "fail"
+  },
+  "cache": {
+    "defaultPolicy": "session",
+    "defaultGranularity": "registry",
+    "expiresRequires": ["expiresAt"],
+    "operationIndependentDefault": true,
+    "storePolicies": ["session", "expires"],
+    "doNotStorePolicies": ["never"]
+  },
+  "nonInteractive": {
+    "interactiveFalseAllowsPrompts": false,
+    "ciRequiresPreconfiguredTrust": true,
+    "missingCredentialBehavior": "fail"
+  }
+}

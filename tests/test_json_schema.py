@@ -6,7 +6,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = ROOT / "schema" / "protocol-v1.schema.json"
+SCHEMA_PATH = ROOT / "spec" / "protocol-v1.schema.json"
 
 
 class JsonSchemaArtifactTests(unittest.TestCase):

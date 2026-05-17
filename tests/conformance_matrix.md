@@ -8,6 +8,7 @@ This matrix keeps the executable checks grouped by protocol layer.
 | Request schema | unknown action, missing registry, missing operation, missing interactive, missing `refreshToken`, publish without version, `get-batch` without packages, unknown fields ignored |
 | Response schema | exactly one of `Ok`/`Err`, invalid `Ok`, invalid `Err`, bearer/basic auth validation, unknown auth type, invalid cache, missing `expiresAt`, invalid granularity, invalid `operationIndependent`, unknown fields ignored |
 | JSON Schema | schema artifact is valid draft 2020-12 JSON Schema, positive and negative protocol examples validate when `jsonschema` is installed |
+| Spec consistency | schema enums, policy values, and Python model constants stay in sync |
 | Errors | `url-not-supported`, `not-found` fail-closed, explicit legacy fallback, `operation-not-supported` for `refresh`, `operation-not-supported` for `get`, `other` |
 | Cache | `registry`, `scope`, `package`, `cache=never`, `cache=session`, `cache=expires`, `operationIndependent=false`, batch result count |
 | Resolution | project config rejected, workspace config rejected, global/user config accepted, project `node_modules` ignored, current directory ignored, PATH-like locations ignored, ambiguous trusted providers fail closed |

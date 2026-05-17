@@ -12,9 +12,10 @@ Test coverage matrix:
 
 - [tests/conformance_matrix.md](./tests/conformance_matrix.md)
 
-Machine-readable schema:
+Machine-readable spec:
 
-- [schema/protocol-v1.schema.json](./schema/protocol-v1.schema.json)
+- [spec/protocol-v1.schema.json](./spec/protocol-v1.schema.json)
+- [spec/policy-v1.json](./spec/policy-v1.json)
 
 Executable protocol checks:
 
