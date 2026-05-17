@@ -7,12 +7,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "spec" / "protocol-v1.schema.json"
+VECTOR_PATH = ROOT / "tests" / "generated_protocol_vectors.json"
 
 
 class JsonSchemaArtifactTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        cls.vectors = json.loads(VECTOR_PATH.read_text(encoding="utf-8"))
 
     def test_schema_file_is_valid_json_and_names_protocol_version(self) -> None:
         self.assertEqual(self.schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
@@ -46,70 +48,19 @@ class JsonSchemaArtifactTests(unittest.TestCase):
         validator = jsonschema.Draft202012Validator(self.schema)
         jsonschema.Draft202012Validator.check_schema(self.schema)
 
-        valid_messages = [
-            {"v": [1]},
-            {
-                "v": 1,
-                "action": "get",
-                "registry": "https://registry.example.test/",
-                "operation": "install",
-                "interactive": False,
-            },
-            {
-                "v": 1,
-                "action": "refresh",
-                "registry": "https://registry.example.test/",
-                "refreshToken": "opaque-refresh-token",
-            },
-            {
-                "Ok": {
-                    "auth": {"type": "bearer", "token": "token"},
-                    "cache": "session",
-                    "granularity": "scope",
-                }
-            },
-            {
-                "Ok": {
-                    "auth": {"type": "basic", "username": "user", "password": "secret"},
-                    "cache": "expires",
-                    "expiresAt": 1893456000,
-                }
-            },
-            {
-                "Err": {
-                    "kind": "other",
-                    "message": "provider failed",
-                    "causedBy": ["test"],
-                }
-            },
-        ]
-        invalid_messages = [
-            {"v": []},
-            {
-                "v": 1,
-                "action": "refresh",
-                "registry": "https://registry.example.test/",
-            },
-            {
-                "v": 1,
-                "action": "get",
-                "registry": "https://registry.example.test/",
-                "interactive": False,
-            },
-            {"Ok": {"auth": {"type": "bearer"}}},
-            {"Ok": {"auth": {"type": "bearer", "token": "token"}, "cache": "expires"}},
-            {"Ok": {"kind": "login"}, "Err": {"kind": "other"}},
-            {"Err": {"kind": "permission-denied"}},
-        ]
+        for vector in self.vectors["validMessages"]:
+            with self.subTest(valid=vector["name"]):
+                validator.validate(vector["message"])
 
-        for message in valid_messages:
-            with self.subTest(valid=message):
-                validator.validate(message)
-
-        for message in invalid_messages:
-            with self.subTest(invalid=message):
+        for vector in self.vectors["invalidMessages"]:
+            with self.subTest(invalid=vector["name"]):
                 with self.assertRaises(jsonschema.ValidationError):
-                    validator.validate(message)
+                    validator.validate(vector["message"])
+
+    def test_generated_vectors_have_unique_names(self) -> None:
+        names = [case["name"] for case in self.vectors["validMessages"] + self.vectors["invalidMessages"]]
+
+        self.assertEqual(len(names), len(set(names)))
 
     def import_jsonschema(self):
         try:

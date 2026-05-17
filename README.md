@@ -12,10 +12,12 @@ Test coverage matrix:
 
 - [tests/conformance_matrix.md](./tests/conformance_matrix.md)
 
-Machine-readable spec:
+Spec artifacts:
 
 - [spec/protocol-v1.schema.json](./spec/protocol-v1.schema.json)
 - [spec/policy-v1.json](./spec/policy-v1.json)
+- [spec/generated-policy-summary.md](./spec/generated-policy-summary.md)
+- [tests/generated_protocol_vectors.json](./tests/generated_protocol_vectors.json)
 
 Executable protocol checks:
 

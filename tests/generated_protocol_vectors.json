@@ -1,0 +1,276 @@
+{
+  "generatedFrom": "spec/policy-v1.json",
+  "protocolVersion": 1,
+  "validMessages": [
+    {
+      "name": "hello-current-version",
+      "message": {
+        "v": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "request-login",
+      "message": {
+        "v": 1,
+        "action": "login",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-logout",
+      "message": {
+        "v": 1,
+        "action": "logout",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-erase",
+      "message": {
+        "v": 1,
+        "action": "erase",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-get-install",
+      "message": {
+        "v": 1,
+        "action": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "install",
+        "interactive": false
+      }
+    },
+    {
+      "name": "request-get-publish",
+      "message": {
+        "v": 1,
+        "action": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "publish",
+        "interactive": false,
+        "version": "1.2.3"
+      }
+    },
+    {
+      "name": "request-get-batch",
+      "message": {
+        "v": 1,
+        "action": "get-batch",
+        "registry": "https://registry.example.test/",
+        "operation": "install",
+        "interactive": false,
+        "packages": [
+          {
+            "scope": "@scope",
+            "package": "api-client"
+          },
+          {
+            "scope": "@scope",
+            "package": "ui"
+          }
+        ]
+      }
+    },
+    {
+      "name": "request-refresh",
+      "message": {
+        "v": 1,
+        "action": "refresh",
+        "registry": "https://registry.example.test/",
+        "refreshToken": "opaque-refresh-token"
+      }
+    },
+    {
+      "name": "response-ok-bearer-session",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "bearer",
+            "token": "token"
+          },
+          "cache": "session",
+          "granularity": "scope"
+        }
+      }
+    },
+    {
+      "name": "response-ok-basic-expires",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "basic",
+            "username": "user",
+            "password": "secret"
+          },
+          "cache": "expires",
+          "expiresAt": 1893456000,
+          "granularity": "registry"
+        }
+      }
+    },
+    {
+      "name": "response-ok-get-batch",
+      "message": {
+        "Ok": {
+          "kind": "get-batch",
+          "results": [
+            {
+              "auth": {
+                "type": "bearer",
+                "token": "api"
+              },
+              "granularity": "package"
+            },
+            {
+              "auth": {
+                "type": "bearer",
+                "token": "ui"
+              },
+              "granularity": "package"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "response-err-url-not-supported",
+      "message": {
+        "Err": {
+          "kind": "url-not-supported",
+          "message": "url-not-supported example"
+        }
+      }
+    },
+    {
+      "name": "response-err-not-found",
+      "message": {
+        "Err": {
+          "kind": "not-found",
+          "message": "not-found example"
+        }
+      }
+    },
+    {
+      "name": "response-err-operation-not-supported",
+      "message": {
+        "Err": {
+          "kind": "operation-not-supported",
+          "message": "operation-not-supported example"
+        }
+      }
+    },
+    {
+      "name": "response-err-other",
+      "message": {
+        "Err": {
+          "kind": "other",
+          "message": "other example"
+        }
+      }
+    }
+  ],
+  "invalidMessages": [
+    {
+      "name": "hello-empty-versions",
+      "message": {
+        "v": []
+      }
+    },
+    {
+      "name": "request-unknown-action",
+      "message": {
+        "v": 1,
+        "action": "store",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-get-missing-operation",
+      "message": {
+        "v": 1,
+        "action": "get",
+        "registry": "https://registry.example.test/",
+        "interactive": false
+      }
+    },
+    {
+      "name": "request-get-missing-interactive",
+      "message": {
+        "v": 1,
+        "action": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "install"
+      }
+    },
+    {
+      "name": "request-refresh-missing-token",
+      "message": {
+        "v": 1,
+        "action": "refresh",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-publish-missing-version",
+      "message": {
+        "v": 1,
+        "action": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "publish",
+        "interactive": false
+      }
+    },
+    {
+      "name": "response-empty",
+      "message": {}
+    },
+    {
+      "name": "response-both-ok-and-err",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "bearer",
+            "token": "token"
+          }
+        },
+        "Err": {
+          "kind": "other"
+        }
+      }
+    },
+    {
+      "name": "response-bearer-missing-token",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "bearer"
+          }
+        }
+      }
+    },
+    {
+      "name": "response-expires-missing-expires-at",
+      "message": {
+        "Ok": {
+          "auth": {
+            "type": "bearer",
+            "token": "token"
+          },
+          "cache": "expires"
+        }
+      }
+    },
+    {
+      "name": "response-unknown-error-kind",
+      "message": {
+        "Err": {
+          "kind": "permission-denied"
+        }
+      }
+    }
+  ]
+}
