@@ -97,6 +97,30 @@ class RequestValidationTests(unittest.TestCase):
     def test_publish_operation_accepts_version(self) -> None:
         validate_request({**BASE_GET, "operation": "publish", "version": "1.2.3"})
 
+    def test_retry_requires_http_status(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "retry": True})
+
+    def test_http_status_must_be_valid_http_status(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "retry": True, "httpStatus": 99})
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "httpStatus": 600})
+
+    def test_retry_accepts_auth_challenges(self) -> None:
+        validate_request(
+            {
+                **BASE_GET,
+                "retry": True,
+                "httpStatus": 401,
+                "authChallenges": ['Bearer realm="https://registry.example.test/"'],
+            }
+        )
+
+    def test_auth_challenges_must_be_strings(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "authChallenges": ["challenge", 401]})
+
     def test_unknown_request_fields_are_ignored(self) -> None:
         validate_request({**BASE_GET, "futureField": {"nested": True}})
 

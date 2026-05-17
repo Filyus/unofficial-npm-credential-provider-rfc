@@ -34,6 +34,21 @@ class HandshakeTests(unittest.TestCase):
 
         self.assertEqual(client.state, ClientState.FAILED)
 
+    def test_hello_capabilities_are_recorded(self) -> None:
+        client = CredentialClientModel()
+
+        client.receive_hello({"v": [1], "capabilities": ["refresh", "get-batch", "future"]})
+
+        self.assertEqual(client.capabilities, frozenset({"refresh", "get-batch"}))
+
+    def test_malformed_hello_capabilities_are_rejected(self) -> None:
+        client = CredentialClientModel()
+
+        with self.assertRaises(ProtocolViolation):
+            client.receive_hello({"v": [1], "capabilities": "refresh"})
+
+        self.assertEqual(client.state, ClientState.FAILED)
+
     def test_version_mismatch_fails_closed_when_provider_configured(self) -> None:
         with self.assertRaises(ProtocolViolation):
             validate_transcript(str(TRANSCRIPTS / "version-mismatch.jsonl"))

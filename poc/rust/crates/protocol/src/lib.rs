@@ -10,12 +10,20 @@ pub use generated::PROTOCOL_VERSION;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub v: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
 }
 
 impl Hello {
     pub fn v1() -> Self {
         Self {
             v: vec![PROTOCOL_VERSION],
+            capabilities: Some(
+                generated::CAPABILITIES
+                    .iter()
+                    .map(|capability| (*capability).to_string())
+                    .collect(),
+            ),
         }
     }
 }
@@ -72,6 +80,10 @@ pub struct Request {
     pub command: Option<NpmCommand>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<bool>,
+    #[serde(rename = "httpStatus", skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
     #[serde(rename = "refreshState", skip_serializing_if = "Option::is_none")]
     pub refresh_state: Option<String>,
     #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
@@ -92,6 +104,8 @@ impl Request {
             operation: Some(Operation::Read),
             command: Some(NpmCommand::Install),
             interactive: Some(false),
+            retry: None,
+            http_status: None,
             refresh_state: None,
             auth_challenges: None,
             packages: None,
@@ -109,6 +123,8 @@ impl Request {
             operation: None,
             command: None,
             interactive: None,
+            retry: None,
+            http_status: None,
             refresh_state: Some(refresh_state.into()),
             auth_challenges: None,
             packages: None,
@@ -126,6 +142,8 @@ impl Request {
             operation: Some(Operation::Read),
             command: Some(NpmCommand::Install),
             interactive: Some(false),
+            retry: None,
+            http_status: None,
             refresh_state: None,
             auth_challenges: None,
             packages: Some(packages),
@@ -158,6 +176,15 @@ impl Request {
         }
         if self.operation == Some(Operation::Publish) {
             require(self.version.is_some(), "publish requires version")?;
+        }
+        if self.retry == Some(true) {
+            require(self.http_status.is_some(), "retry=true requires httpStatus")?;
+        }
+        if let Some(http_status) = self.http_status {
+            require(
+                (100..=599).contains(&http_status),
+                "httpStatus must be an HTTP status code",
+            )?;
         }
         Ok(())
     }
@@ -409,9 +436,23 @@ mod tests {
 
     #[test]
     fn version_mismatch_fails_negotiation() {
-        let error = negotiate(&Hello { v: vec![2] }).unwrap_err();
+        let error = negotiate(&Hello {
+            v: vec![2],
+            capabilities: None,
+        })
+        .unwrap_err();
 
         assert!(matches!(error, ProtocolError::NoCompatibleVersion { .. }));
+    }
+
+    #[test]
+    fn hello_v1_advertises_generated_capabilities() {
+        let expected = generated::CAPABILITIES
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect();
+
+        assert_eq!(Hello::v1().capabilities, Some(expected));
     }
 
     #[test]
@@ -420,6 +461,21 @@ mod tests {
             Request::get_install("https://registry.example.test/", Some("@scope"), "pkg");
         request.operation = Some(Operation::Publish);
 
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn retry_requires_valid_http_status() {
+        let mut request =
+            Request::get_install("https://registry.example.test/", Some("@scope"), "pkg");
+        request.retry = Some(true);
+
+        assert!(request.validate().is_err());
+
+        request.http_status = Some(401);
+        assert!(request.validate().is_ok());
+
+        request.http_status = Some(99);
         assert!(request.validate().is_err());
     }
 

@@ -47,6 +47,12 @@ class SpecConsistencyTests(unittest.TestCase):
         self.assertEqual(schema_commands, set(self.policy["wire"]["commands"]))
         self.assertEqual(schema_commands, protocol_model.SUPPORTED_COMMANDS)
 
+    def test_capabilities_match_policy_and_python_model(self) -> None:
+        hello_properties = self.schema["$defs"]["hello"]["properties"]
+
+        self.assertIn("capabilities", hello_properties)
+        self.assertEqual(set(self.policy["wire"]["capabilities"]), protocol_model.SUPPORTED_CAPABILITIES)
+
     def test_auth_type_enum_matches_policy_and_python_model(self) -> None:
         schema_auth_types = {
             self.schema["$defs"]["bearerAuth"]["properties"]["type"]["const"],

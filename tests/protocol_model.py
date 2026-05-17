@@ -14,6 +14,7 @@ from tests.generated_policy import (
     PROTOCOL_VERSION,
     SUPPORTED_AUTH_TYPES,
     SUPPORTED_CACHE,
+    SUPPORTED_CAPABILITIES,
     SUPPORTED_COMMANDS,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
@@ -77,6 +78,7 @@ class CredentialClientModel:
     config: ProviderConfig = field(default_factory=ProviderConfig)
     state: ClientState = ClientState.SPAWNED
     version: int | None = None
+    capabilities: frozenset[str] = field(default_factory=frozenset)
     cache: dict[tuple[Any, ...], CacheEntry] = field(default_factory=dict)
 
     def receive_hello(self, message: dict[str, Any]) -> int:
@@ -85,12 +87,17 @@ class CredentialClientModel:
         if not isinstance(versions, list) or not all(isinstance(v, int) for v in versions):
             self.state = ClientState.FAILED
             raise ProtocolViolation("provider hello must contain v: number[]")
+        capabilities = message.get("capabilities", [])
+        if not isinstance(capabilities, list) or not all(isinstance(capability, str) for capability in capabilities):
+            self.state = ClientState.FAILED
+            raise ProtocolViolation("provider hello capabilities must be string[]")
         if PROTOCOL_VERSION not in versions:
             self.state = ClientState.FAILED
             if self.config.configured and not self.config.legacy_fallback:
                 raise ProtocolViolation("no compatible protocol version")
             return 0
         self.version = PROTOCOL_VERSION
+        self.capabilities = frozenset(capability for capability in capabilities if capability in SUPPORTED_CAPABILITIES)
         self.state = ClientState.READY
         return PROTOCOL_VERSION
 
@@ -245,6 +252,21 @@ def validate_request(message: dict[str, Any]) -> None:
         raise ProtocolViolation("refresh requires refreshState")
     if message.get("operation") == "publish" and not isinstance(message.get("version"), str):
         raise ProtocolViolation("publish requires version")
+    retry = message.get("retry")
+    if retry is not None and not isinstance(retry, bool):
+        raise ProtocolViolation("retry must be boolean")
+    http_status = message.get("httpStatus")
+    if http_status is not None and (
+        not isinstance(http_status, int) or isinstance(http_status, bool) or not 100 <= http_status <= 599
+    ):
+        raise ProtocolViolation("httpStatus must be an HTTP status code")
+    if retry is True and http_status is None:
+        raise ProtocolViolation("retry=true requires httpStatus")
+    auth_challenges = message.get("authChallenges")
+    if auth_challenges is not None and (
+        not isinstance(auth_challenges, list) or not all(isinstance(challenge, str) for challenge in auth_challenges)
+    ):
+        raise ProtocolViolation("authChallenges must be string[]")
 
 
 def validate_auth(auth: Any) -> None:

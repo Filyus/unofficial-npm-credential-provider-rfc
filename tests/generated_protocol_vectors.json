@@ -3,10 +3,27 @@
   "protocolVersion": 1,
   "validMessages": [
     {
-      "name": "hello-current-version",
+      "name": "hello-minimal",
       "message": {
         "v": [
           1
+        ]
+      }
+    },
+    {
+      "name": "hello-with-capabilities",
+      "message": {
+        "v": [
+          1
+        ],
+        "capabilities": [
+          "get-batch",
+          "refresh",
+          "login",
+          "logout",
+          "erase",
+          "auth-challenges",
+          "retry-context"
         ]
       }
     },
@@ -44,6 +61,22 @@
         "operation": "read",
         "command": "install",
         "interactive": false
+      }
+    },
+    {
+      "name": "request-get-retry-after-401",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "command": "install",
+        "interactive": false,
+        "retry": true,
+        "httpStatus": 401,
+        "authChallenges": [
+          "Bearer realm=\"https://registry.example.test/\""
+        ]
       }
     },
     {
@@ -187,6 +220,15 @@
       }
     },
     {
+      "name": "hello-invalid-capabilities",
+      "message": {
+        "v": [
+          1
+        ],
+        "capabilities": "refresh"
+      }
+    },
+    {
       "name": "request-unknown-kind",
       "message": {
         "v": 1,
@@ -210,6 +252,29 @@
         "kind": "get",
         "registry": "https://registry.example.test/",
         "operation": "read"
+      }
+    },
+    {
+      "name": "request-retry-missing-http-status",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "interactive": false,
+        "retry": true
+      }
+    },
+    {
+      "name": "request-invalid-http-status",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "interactive": false,
+        "retry": true,
+        "httpStatus": 99
       }
     },
     {

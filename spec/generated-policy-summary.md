@@ -12,6 +12,7 @@ Source: `spec/policy-v1.json`.
 | Request kinds | `login`, `logout`, `get`, `get-batch`, `refresh`, `erase` |
 | Operations | `read`, `publish` |
 | npm commands | `install`, `ci`, `publish`, `search`, `view` |
+| Capabilities | `get-batch`, `refresh`, `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |
@@ -65,3 +66,11 @@ Source: `spec/policy-v1.json`.
 | `interactiveFalseAllowsPrompts` | `false` |
 | `ciRequiresPreconfiguredTrust` | `true` |
 | `missingCredentialBehavior` | `fail` |
+
+## Limits
+
+| Setting | Value |
+| --- | --- |
+| `lineSize` | `implementation-defined` |
+| `batchSize` | `implementation-defined` |
+| `oversizeBehavior` | `fail` |

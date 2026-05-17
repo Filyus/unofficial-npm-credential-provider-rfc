@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 3
+> Revision: 4
 > Date: 2026-05-17
 
 > A draft protocol proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion, addressing per-package authentication granularity, bidirectional protocol, provider discovery, and provider execution safety.
@@ -72,7 +72,7 @@ The client must spawn the resolved provider executable directly with an argv vec
 
 ### 2. Protocol
 
-The client communicates with the provider via **stdin/stdout** using **single-line JSON messages** (no embedded newlines). The provider is invoked as a child process.
+The client communicates with the provider via **stdin/stdout** using **single-line JSON messages** (no embedded newlines). The provider is invoked as a child process. Stdin is reserved for protocol JSON only; providers must not read interactive secrets, MFA codes, or device-code confirmations from stdin.
 
 #### Version Negotiation (inspired by Cargo)
 
@@ -81,6 +81,14 @@ On startup, the provider sends a hello message listing supported protocol versio
 ```json
 {"v":[1]}
 ```
+
+Providers may also advertise optional capabilities:
+
+```json
+{"v":[1],"capabilities":["get-batch","refresh","auth-challenges","retry-context"]}
+```
+
+Capabilities are advisory. The client may use them to avoid probing unsupported flows, but it must still handle `{"Err":{"kind":"operation-not-supported"}}`. Unknown capabilities are ignored so new providers can advertise future behavior without breaking older clients.
 
 The client selects a compatible version and uses it in all subsequent messages. If no version matches, the client terminates the provider. Legacy auth fallback is used only when no provider was explicitly configured or when the user/global config explicitly allows fallback.
 
@@ -125,7 +133,9 @@ Readable form (publish):
 | `operation` | string | for `get` and `get-batch` | Authorization intent: `"read"` or `"publish"`. This is the permission class the returned credential must satisfy. |
 | `command` | string | no | npm command that caused the request, such as `"install"`, `"ci"`, `"publish"`, `"search"`, or `"view"`. This is informational context, not the permission class. |
 | `interactive` | boolean | for `get` and `get-batch` | Whether the client can display prompts (for MFA flows). |
-| `authChallenges` | string[] | no | Authentication challenge headers observed from the registry, such as `WWW-Authenticate` values after a 401/403. |
+| `retry` | boolean | no | `true` when this request follows a failed registry authentication attempt. |
+| `httpStatus` | number | when `retry` is `true` | HTTP status from the failed registry response. Must be 100-599. |
+| `authChallenges` | string[] | no | Authentication challenge headers observed from the registry, such as `WWW-Authenticate` values after a 401/403. Often sent with `erase` or retry requests. |
 
 The client sends all available context: `scope`, `package`, and for publish — `version`. Sending full context costs nothing. Not sending it would permanently prevent future providers from using it. The **provider** decides the granularity via the `granularity` response field — a simple provider ignores everything and returns `"granularity": "registry"`, a scope-aware provider returns `"granularity": "scope"`, etc.
 
@@ -221,13 +231,15 @@ Example of a detailed error:
 }
 ```
 
-Provider writes diagnostic info to stderr (for `--loglevel verbose`).
+Provider writes diagnostic info to stderr (for `--loglevel verbose`). Providers must not write tokens, passwords, `refreshState` values, authorization headers, or other bearer-equivalent secrets to stderr or any ordinary log. Stdout is reserved for protocol JSON responses only.
 
 #### Session Lifecycle
 
 The client keeps the provider process alive for the duration of the npm command. Multiple requests can be sent within one session (e.g., tokens for different scopes during a single `npm install`).
 
 The client **closes stdin** to signal end of session. The provider should exit cleanly.
+
+Clients and providers should enforce implementation-defined maximum JSON line size and maximum `get-batch` size. Oversized input fails closed: the receiver rejects the message, does not partially process it, and does not fall back to legacy credentials unless explicit legacy fallback is enabled.
 
 **Timeouts per request kind:**
 
@@ -245,6 +257,8 @@ If a provider exceeds the timeout, the client kills the process. For `get`, npm 
 #### Non-interactive and CI behavior
 
 When `interactive` is `false`, providers must not open browsers, prompt for MFA, wait for device-code approval, or ask the user to approve a new trust decision. They may only use credentials and trust decisions that already exist.
+
+When `interactive` is `true`, providers may use browser flows, OS-native prompts, or stderr status text. They still must not use stdin for interactive input because stdin belongs to the protocol stream.
 
 In CI, provider execution should be deterministic: the provider must already be configured through user/global config, a machine image, or enterprise policy, and it must resolve from a trusted source. If no usable credential is available, npm should fail with a clear error rather than prompting or falling back silently.
 
@@ -356,6 +370,14 @@ If the registry returns 401/403, the client notifies the provider:
 
 The provider should invalidate cached credentials. Response: `{"Ok":{"kind":"erase"}}` or an error.
 
+After `erase`, the client may retry `get` with explicit retry context:
+
+```json
+{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["WWW-Authenticate: Bearer realm=\"https://gitlab.example.com\""]}
+```
+
+This separates cache invalidation from credential acquisition. Providers can use `httpStatus` and `authChallenges` to distinguish expired credentials from missing permission, SSO enforcement, or registry-specific challenge flows.
+
 ### 4. Caching
 
 The client caches tokens in-memory based on the `granularity` field:
@@ -406,11 +428,11 @@ This feature must not become a project-controlled install hook. Install scripts 
 
 3. **Provider resolution**: The current working directory and project `node_modules` are not searched. Local packages cannot shadow global providers. Ambiguous provider names fail closed.
 
-4. **Provider output**: Validated by the client. Only expected JSON fields are accepted. Unexpected fields are ignored.
+4. **Provider output**: Validated by the client. Only expected JSON fields are accepted. Unexpected fields are ignored. Stdout contains protocol JSON only; stderr diagnostics must not contain secrets.
 
-5. **Token storage**: In-memory only. The client never writes tokens to disk. The provider is responsible for its own credential storage (keychain, encrypted file, etc.).
+5. **Token storage**: In-memory only. The client never writes tokens to disk. The provider is responsible for its own credential storage (keychain, encrypted file, etc.). Providers must not write credentials or `credentialProvider` configuration to project, user, or global `.npmrc` as a side effect of protocol requests; any npm config mutation must be a separate explicit user command outside this protocol.
 
-6. **Stdin input**: The client sends only the fields defined in the protocol. No environment variables or filesystem paths are leaked to the provider.
+6. **Stdin input**: The client sends only the fields defined in the protocol. No environment variables or filesystem paths are leaked to the provider. Stdin is not an interactive input channel.
 
 #### Threat model
 
@@ -426,6 +448,9 @@ Generative AI and other automation lower the cost of producing plausible malicio
 | Typosquatting | The `npm-credential-provider-*` naming convention could attract lookalike packages. | Discovery is suggest-only, trusted-global-only, and never auto-installs or auto-executes. |
 | Compromised provider package | A previously trusted provider could be replaced or updated maliciously. | High-assurance environments may pin providers by absolute path, package version, integrity hash, or enterprise allowlist. |
 | Silent plaintext fallback | A provider failure could accidentally re-enable legacy token use. | Legacy fallback after provider selection requires explicit user/global opt-in. |
+| Secret leakage through logs | Providers could accidentally print tokens, passwords, refresh handles, or auth headers. | Stdout is protocol-only; stderr/logging must redact bearer-equivalent secrets. |
+| Provider mutates npm config | A provider could persist credentials or provider config into `.npmrc` during install. | Protocol requests must not mutate project/user/global `.npmrc`; any config change must be an explicit user action outside the protocol. |
+| Oversized messages or batches | A malicious or buggy peer could cause memory or CPU pressure. | Implementations enforce maximum JSON line and batch sizes, and reject oversize input fail-closed. |
 
 Provider integrity pinning is intentionally optional for the baseline protocol because it adds operational complexity, but the resolution model should leave room for it. Enterprise and CI deployments should be able to require a resolved provider identity such as `{ name, version, integrity }` or an absolute path plus checksum.
 
@@ -435,7 +460,7 @@ Provider integrity pinning is intentionally optional for the baseline protocol b
 npm install @scope/package
   |
   |-- Spawn provider as child process
-  |     |-- Provider sends hello: {"v":[1]}
+  |     |-- Provider sends hello: {"v":[1],"capabilities":[...]}
   |     |-- Client selects version
   |
   |-- Need token for registry X, scope Y, package Z
@@ -454,7 +479,7 @@ npm install @scope/package
   |     |     |-- "Err: other" -> show error to user
   |     |
   |     |-- Use token for HTTP request
-  |     |     |-- 401/403 -> kind: "erase", then retry with "get"
+  |     |     |-- 401/403 -> kind: "erase", then retry with kind: "get", retry: true, httpStatus
   |
   |-- Need token for another scope/package (same session)
   |     |-- Reuse same provider process, send another request
@@ -485,7 +510,7 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 
 **What happens on `npm install`:**
 
-1. npm spawns provider, provider sends `{"v":[1]}`
+1. npm spawns provider, provider sends `{"v":[1],"capabilities":["get-batch","refresh","auth-challenges","retry-context"]}`
 2. npm needs `@scope/package` from `gitlab.example.com`, sends:
    ```
    {"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false}
@@ -511,8 +536,10 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 | **Granularity** | Per-registry only | Per-registry, per-scope, or per-package |
 | **Provider input** | No stdin, args only | JSON on stdin with full context |
 | **Protocol versioning** | None | Hello message `{"v":[1]}` + `v` in every message |
+| **Capability negotiation** | None | Optional hello `capabilities` array; unsupported operations still return structured errors |
 | **Refresh flow** | None (re-invoke from scratch) | `"refresh"` request kind with opaque `refreshState` |
 | **Token rejection** | Not specified | `"erase"` request kind (like git credential helpers) |
+| **Retry context** | Not specified | `retry`, `httpStatus`, and `authChallenges` on post-failure requests |
 | **Cache control** | `expiresAt` only | `cache` (`never`/`session`/`expires`) + `operationIndependent` + `granularity` |
 | **Provider chaining** | Not specified | `"url-not-supported"` error → try next provider |
 | **Session model** | One process per request | Provider stays alive, multiple requests per session |
@@ -540,6 +567,7 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 | **Context on input** | protocol, host, path | ServerURL | None | registry, name, operation, package | None (args only) | registry, scope, package, operation, command |
 | **Granularity** | Per-host | Per-ServerURL | Per-registry | Per-registry | Per-registry | Per-registry, per-scope, or per-package |
 | **Versioning** | None | None | None | Hello message `{"v":[1]}` | None | Hello message + `v` in every message |
+| **Capability negotiation** | No | No | No | No | No | Optional hello `capabilities` |
 | **Auth type** | Implicit (key=value) | Implicit (field presence) | Plain string | Raw token string | Implicit (`_authToken`/`_auth`/`_password`) | Explicit `type: bearer/basic` |
 | **Refresh state** | No | No | No | No | No | Yes (`refreshState` opaque handle) |
 | **Cache control** | None (helper stores) | None (helper stores) | None | `never`/`session`/`expires` | `expiresAt` only | `cache` + `expiresAt` + `granularity` + `operationIndependent` |

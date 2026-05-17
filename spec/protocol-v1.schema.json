@@ -19,6 +19,11 @@
           "items": { "type": "integer", "minimum": 1 },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
         }
       },
       "additionalProperties": true
@@ -56,6 +61,14 @@
         },
         "interactive": {
           "type": "boolean"
+        },
+        "retry": {
+          "type": "boolean"
+        },
+        "httpStatus": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
         },
         "refreshState": {
           "type": "string",
@@ -114,6 +127,15 @@
           },
           "then": {
             "required": ["version"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "retry": { "const": true } },
+            "required": ["retry"]
+          },
+          "then": {
+            "required": ["httpStatus"]
           }
         }
       ],

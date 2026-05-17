@@ -5,6 +5,7 @@
     "requestKinds": ["login", "logout", "get", "get-batch", "refresh", "erase"],
     "operations": ["read", "publish"],
     "commands": ["install", "ci", "publish", "search", "view"],
+    "capabilities": ["get-batch", "refresh", "login", "logout", "erase", "auth-challenges", "retry-context"],
     "authTypes": ["bearer", "basic"],
     "cachePolicies": ["never", "session", "expires"],
     "granularities": ["registry", "scope", "package"],
@@ -51,5 +52,10 @@
     "interactiveFalseAllowsPrompts": false,
     "ciRequiresPreconfiguredTrust": true,
     "missingCredentialBehavior": "fail"
+  },
+  "limits": {
+    "lineSize": "implementation-defined",
+    "batchSize": "implementation-defined",
+    "oversizeBehavior": "fail"
   }
 }

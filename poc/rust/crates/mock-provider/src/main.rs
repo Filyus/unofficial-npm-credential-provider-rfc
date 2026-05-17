@@ -12,7 +12,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if scenario == "version-mismatch" {
-        write_json_line(&mut io::stdout(), &Hello { v: vec![2] })?;
+        write_json_line(
+            &mut io::stdout(),
+            &Hello {
+                v: vec![2],
+                capabilities: None,
+            },
+        )?;
         return Ok(());
     }
 

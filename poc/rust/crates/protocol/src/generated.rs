@@ -20,6 +20,15 @@ pub const COMMANDS: &[&str] = &[
     "search",
     "view",
 ];
+pub const CAPABILITIES: &[&str] = &[
+    "get-batch",
+    "refresh",
+    "login",
+    "logout",
+    "erase",
+    "auth-challenges",
+    "retry-context",
+];
 pub const AUTH_TYPES: &[&str] = &[
     "bearer",
     "basic",
