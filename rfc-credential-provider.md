@@ -28,10 +28,13 @@ The registries companies run next to npmjs.com already hand out short-lived cred
 - **AWS CodeArtifact**: tokens last 12 hours by default and 15 minutes at least; "When the lifetime expires, you must fetch another token." `aws codeartifact login --tool npm` writes the token into npm's config ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)).
 - **Google Artifact Registry**: "Access tokens are valid for 60 minutes … If your access token has expired, you must generate a new access token" ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)).
 - **Azure Artifacts**: `vsts-npm-auth` writes a personal access token into the user `.npmrc`.
+- **GitLab Artifact Registry**: `glab artifact-registry login --docker` registers glab as a Docker credential helper that exchanges a fresh token on every pull or push, but for npm the same command can only write an `_authToken` (15 minutes by default) into `~/.npmrc` ([docs](https://docs.gitlab.com/cli/artifact-registry/login/)).
 
 So the trust in the third party already exists; what this proposal removes is the step that turns a short-lived credential into a file on disk, renewed by hand.
 
 ### npmjs.com itself is moving away from long-lived publish tokens
+
+Since December 9, 2025, `npm login` issues "a two-hour session token instead of long-lived tokens", and classic tokens are revoked ([GitHub Changelog](https://github.blog/changelog/2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available/)); new granular write tokens default to 7 days and are capped at 90 ([GitHub Changelog](https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/)). npm still saves the two-hour token as `_authToken` in the user `~/.npmrc` (`npm login` → `config.setCredentialsByURI()` → `config.save('user')`), so even the registry's own credentials are now short-lived secrets that npm can only keep by writing them to disk.
 
 npm now offers stage-only granular tokens: they can `npm stage publish` a version for a maintainer to approve with 2FA, but cannot publish directly. Direct publishing with a granular access token is scheduled for removal in January 2027, and since August 2026 bypass-2FA tokens can no longer perform account-governance actions ([npm docs](https://docs.npmjs.com/about-access-tokens)). Credentials are becoming shorter-lived and more finely split by action. A client that can only read one static token per registry fits that direction poorly.
 
@@ -71,7 +74,19 @@ tokenHelper=/usr/local/bin/default-registry-token
 - **What it prints.** The token on stdout. npm trims trailing whitespace and sends `Authorization: Bearer <token>`. If the output already starts with an auth scheme (ASCII letters followed by a space, such as `Bearer …` or `Basic …`), npm uses it as the header value as is.
 - **When it fails.** A non-zero exit, empty output, or running longer than 60 seconds fails the request with an error naming the helper. npm does not fall back to another credential for that registry. stderr is shown to the user as warnings.
 
-A helper is often a two-line script around a vendor CLI, for example `aws codeartifact get-authorization-token --domain my-domain --query authorizationToken --output text`, or `gh auth token` for GitHub Packages. Phase 1 has no context, no cache control and no way to learn that a token was rejected; those are what Phase 2 adds.
+Vendor CLIs already print what a helper needs; since a helper takes no arguments, each becomes a two-line script:
+
+| Registry | Command printing the credential | Lifetime | Header |
+|---|---|---|---|
+| AWS CodeArtifact | `aws codeartifact get-authorization-token --domain D --domain-owner ACCOUNT --query authorizationToken --output text` | 12 h default, 15 min–12 h ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)) | Bearer |
+| Google Artifact Registry | `gcloud auth print-access-token` | 60 min ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)) | Bearer |
+| GitHub Packages | `gh auth token` (after `gh auth refresh -s read:packages`) | until revoked | Bearer |
+| JFrog Artifactory | `jf atc --expiry=3600 \| jq -r .access_token` | as requested, within the platform limit | Bearer |
+| Azure Artifacts | a script printing `Basic <base64(user:PAT)>` | PAT lifetime | Basic: the documented npm scheme for Azure feeds is username + PAT ([docs](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops)), which the scheme pass-through above covers |
+
+For npmjs.com itself a helper helps less: the two-hour session token comes from an interactive browser login with 2FA, so a helper can keep it in the OS keychain instead of `~/.npmrc` but cannot renew it silently.
+
+Phase 1 has no context, no cache control and no way to learn that a token was rejected; those are what Phase 2 adds.
 
 ### Phase 2: `credentialProvider`
 
