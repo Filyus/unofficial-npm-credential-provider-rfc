@@ -4,7 +4,7 @@ from __future__ import annotations
 PROTOCOL_VERSION = 1
 SUPPORTED_REQUEST_KINDS = frozenset(['login', 'logout', 'get', 'get-batch', 'refresh', 'erase'])
 SUPPORTED_OPERATIONS = frozenset(['read', 'publish'])
-SUPPORTED_COMMANDS = frozenset(['install', 'ci', 'publish', 'search', 'view'])
+KNOWN_COMMANDS = frozenset(['install', 'ci', 'publish', 'search', 'view'])
 SUPPORTED_CAPABILITIES = frozenset(['get-batch', 'refresh', 'login', 'logout', 'erase', 'auth-challenges', 'retry-context'])
 SUPPORTED_AUTH_TYPES = frozenset(['bearer', 'basic'])
 SUPPORTED_CACHE = frozenset(['never', 'session', 'expires'])
@@ -15,3 +15,4 @@ ALLOWED_CONFIG_SOURCES = frozenset(['user', 'global'])
 DEFAULT_CACHE_POLICY = 'session'
 DEFAULT_GRANULARITY = 'registry'
 OPERATION_INDEPENDENT_DEFAULT = True
+EXPIRY_MARGIN_SECONDS = 60

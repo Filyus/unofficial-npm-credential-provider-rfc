@@ -13,7 +13,7 @@ pub const OPERATIONS: &[&str] = &[
     "read",
     "publish",
 ];
-pub const COMMANDS: &[&str] = &[
+pub const KNOWN_COMMANDS: &[&str] = &[
     "install",
     "ci",
     "publish",
@@ -62,3 +62,4 @@ pub const ALLOWED_CONFIG_SOURCES: &[&str] = &[
 pub const DEFAULT_CACHE_POLICY: &str = "session";
 pub const DEFAULT_GRANULARITY: &str = "registry";
 pub const OPERATION_INDEPENDENT_DEFAULT: bool = true;
+pub const EXPIRY_MARGIN_SECONDS: u64 = 60;

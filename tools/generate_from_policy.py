@@ -59,7 +59,7 @@ def render_python(policy: dict) -> str:
             f"PROTOCOL_VERSION = {policy['protocolVersion']}",
             f"SUPPORTED_REQUEST_KINDS = frozenset({wire['requestKinds']!r})",
             f"SUPPORTED_OPERATIONS = frozenset({wire['operations']!r})",
-            f"SUPPORTED_COMMANDS = frozenset({wire['commands']!r})",
+            f"KNOWN_COMMANDS = frozenset({wire['knownCommands']!r})",
             f"SUPPORTED_CAPABILITIES = frozenset({wire['capabilities']!r})",
             f"SUPPORTED_AUTH_TYPES = frozenset({wire['authTypes']!r})",
             f"SUPPORTED_CACHE = frozenset({wire['cachePolicies']!r})",
@@ -70,6 +70,7 @@ def render_python(policy: dict) -> str:
             f"DEFAULT_CACHE_POLICY = {cache['defaultPolicy']!r}",
             f"DEFAULT_GRANULARITY = {cache['defaultGranularity']!r}",
             f"OPERATION_INDEPENDENT_DEFAULT = {cache['operationIndependentDefault']!r}",
+            f"EXPIRY_MARGIN_SECONDS = {cache['expiryMarginSeconds']!r}",
             "",
         ]
     )
@@ -87,7 +88,7 @@ def render_rust(policy: dict) -> str:
             f"pub const PROTOCOL_VERSION: u32 = {policy['protocolVersion']};",
             f"pub const REQUEST_KINDS: &[&str] = &{rust_string_array(wire['requestKinds'])};",
             f"pub const OPERATIONS: &[&str] = &{rust_string_array(wire['operations'])};",
-            f"pub const COMMANDS: &[&str] = &{rust_string_array(wire['commands'])};",
+            f"pub const KNOWN_COMMANDS: &[&str] = &{rust_string_array(wire['knownCommands'])};",
             f"pub const CAPABILITIES: &[&str] = &{rust_string_array(wire['capabilities'])};",
             f"pub const AUTH_TYPES: &[&str] = &{rust_string_array(wire['authTypes'])};",
             f"pub const CACHE_POLICIES: &[&str] = &{rust_string_array(wire['cachePolicies'])};",
@@ -98,6 +99,7 @@ def render_rust(policy: dict) -> str:
             f"pub const DEFAULT_CACHE_POLICY: &str = {json.dumps(cache['defaultPolicy'])};",
             f"pub const DEFAULT_GRANULARITY: &str = {json.dumps(cache['defaultGranularity'])};",
             f"pub const OPERATION_INDEPENDENT_DEFAULT: bool = {str(cache['operationIndependentDefault']).lower()};",
+            f"pub const EXPIRY_MARGIN_SECONDS: u64 = {cache['expiryMarginSeconds']};",
             "",
         ]
     )
@@ -126,7 +128,7 @@ def render_policy_summary(policy: dict) -> str:
         f"| Protocol version | `{policy['protocolVersion']}` |",
         f"| Request kinds | {markdown_values(wire['requestKinds'])} |",
         f"| Operations | {markdown_values(wire['operations'])} |",
-        f"| npm commands | {markdown_values(wire['commands'])} |",
+        f"| Known npm commands (informational, open-ended) | {markdown_values(wire['knownCommands'])} |",
         f"| Capabilities | {markdown_values(wire['capabilities'])} |",
         f"| Auth types | {markdown_values(wire['authTypes'])} |",
         f"| Cache policies | {markdown_values(wire['cachePolicies'])} |",
@@ -140,6 +142,7 @@ def render_policy_summary(policy: dict) -> str:
         f"| Default cache policy | `{cache['defaultPolicy']}` |",
         f"| Default granularity | `{cache['defaultGranularity']}` |",
         f"| `cache=expires` requires | {markdown_values(cache['expiresRequires'])} |",
+        f"| Treat as expired this many seconds before `expiresAt` | `{cache['expiryMarginSeconds']}` |",
         f"| Operation-independent by default | `{json_bool(cache['operationIndependentDefault'])}` |",
         f"| Stored policies | {markdown_values(cache['storePolicies'])} |",
         f"| Non-stored policies | {markdown_values(cache['doNotStorePolicies'])} |",
@@ -239,6 +242,17 @@ def render_vectors(policy: dict) -> str:
                 "registry": registry,
                 "operation": "read",
                 "command": "install",
+                "interactive": False,
+            },
+        },
+        {
+            "name": "request-get-unlisted-command",
+            "message": {
+                "v": version,
+                "kind": "get",
+                "registry": registry,
+                "operation": "read",
+                "command": "outdated",
                 "interactive": False,
             },
         },
@@ -394,6 +408,19 @@ def render_vectors(policy: dict) -> str:
                 "interactive": False,
                 "retry": True,
                 "httpStatus": 99,
+            },
+        },
+        {
+            "name": "request-get-batch-publish",
+            "message": {
+                "v": version,
+                "kind": "get-batch",
+                "registry": registry,
+                "operation": "publish",
+                "command": "publish",
+                "interactive": False,
+                "version": "1.2.3",
+                "packages": [{"scope": "@scope", "package": "api-client"}],
             },
         },
         {

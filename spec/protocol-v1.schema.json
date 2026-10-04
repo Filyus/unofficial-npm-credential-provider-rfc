@@ -57,7 +57,9 @@
           "enum": ["read", "publish"]
         },
         "command": {
-          "enum": ["install", "ci", "publish", "search", "view"]
+          "description": "Informational npm command name. Open-ended: policy knownCommands lists examples, and providers must accept other values.",
+          "type": "string",
+          "minLength": 1
         },
         "interactive": {
           "type": "boolean"
@@ -108,7 +110,8 @@
             "required": ["kind"]
           },
           "then": {
-            "required": ["operation", "interactive", "packages"]
+            "required": ["operation", "interactive", "packages"],
+            "properties": { "operation": { "const": "read" } }
           }
         },
         {

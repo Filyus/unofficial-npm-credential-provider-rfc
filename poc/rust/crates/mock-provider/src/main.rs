@@ -26,7 +26,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
+    let mut served = 0_u32;
     while let Some(request) = read_json_line::<Request>(&mut reader)? {
+        served += 1;
+        // A kind this provider does not know comes from a newer client; the
+        // answer is a structured refusal, never a crash or a guess.
+        if request.kind == RequestKind::Unsupported {
+            write_json_line(
+                &mut io::stdout(),
+                &ProviderResponse::Err(ProviderErr {
+                    kind: ErrorKind::OperationNotSupported,
+                    message: None,
+                    caused_by: None,
+                }),
+            )?;
+            continue;
+        }
         if scenario == "invalid-json" {
             println!("{{not-json}}");
             continue;
@@ -86,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .into_iter()
                     .map(|package| TokenResult {
                         auth: credential_provider_protocol::Auth::Bearer {
-                            token: format!("token-for-{}", package.package),
+                            token: format!("token-for-{}", package.package).into(),
                         },
                         granularity: Some(Granularity::Package),
                     })
@@ -109,6 +124,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 granularity: None,
                 results: None,
             }),
+            "session-counter" => ProviderResponse::Ok(ProviderOk::bearer(
+                format!("token-{served}"),
+                Granularity::Package,
+            )),
             _ => ProviderResponse::Ok(ProviderOk::bearer("test-token", Granularity::Scope)),
         };
         write_json_line(&mut io::stdout(), &response)?;

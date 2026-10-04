@@ -63,13 +63,33 @@ class RequestValidationTests(unittest.TestCase):
         validate_request({**BASE_GET, "command": "search"})
         validate_request({**BASE_GET, "command": "view"})
 
-    def test_unknown_command_is_rejected(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "command": "unknown"})
+    def test_unlisted_command_is_accepted_because_command_is_informational(self) -> None:
+        validate_request({**BASE_GET, "command": "outdated"})
+
+    def test_command_must_be_a_non_empty_string(self) -> None:
+        for command in ("", 7):
+            with self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, "command": command})
 
     def test_get_batch_requires_packages(self) -> None:
         with self.assertRaises(ProtocolViolation):
             validate_request({**BASE_GET, "kind": "get-batch"})
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "kind": "get-batch", "packages": []})
+        with self.assertRaises(ProtocolViolation):
+            validate_request({**BASE_GET, "kind": "get-batch", "packages": [{"scope": "@scope"}]})
+
+    def test_get_batch_is_read_only(self) -> None:
+        with self.assertRaises(ProtocolViolation):
+            validate_request(
+                {
+                    **BASE_GET,
+                    "kind": "get-batch",
+                    "operation": "publish",
+                    "version": "1.2.3",
+                    "packages": [{"scope": "@scope", "package": "pkg"}],
+                }
+            )
 
     def test_get_batch_accepts_package_list(self) -> None:
         validate_request(

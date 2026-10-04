@@ -64,6 +64,17 @@
       }
     },
     {
+      "name": "request-get-unlisted-command",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "command": "outdated",
+        "interactive": false
+      }
+    },
+    {
       "name": "request-get-retry-after-401",
       "message": {
         "v": 1,
@@ -275,6 +286,24 @@
         "interactive": false,
         "retry": true,
         "httpStatus": 99
+      }
+    },
+    {
+      "name": "request-get-batch-publish",
+      "message": {
+        "v": 1,
+        "kind": "get-batch",
+        "registry": "https://registry.example.test/",
+        "operation": "publish",
+        "command": "publish",
+        "interactive": false,
+        "version": "1.2.3",
+        "packages": [
+          {
+            "scope": "@scope",
+            "package": "api-client"
+          }
+        ]
       }
     },
     {

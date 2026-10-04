@@ -88,7 +88,7 @@ Providers may also advertise optional capabilities:
 {"v":[1],"capabilities":["get-batch","refresh","auth-challenges","retry-context"]}
 ```
 
-Capabilities are advisory. The client may use them to avoid probing unsupported flows, but it must still handle `{"Err":{"kind":"operation-not-supported"}}`. Unknown capabilities are ignored so new providers can advertise future behavior without breaking older clients.
+Capabilities are advisory. The client may use them to avoid probing unsupported flows, but it must still handle `{"Err":{"kind":"operation-not-supported"}}`. Unknown capabilities are ignored so new providers can advertise future behavior without breaking older clients. In the other direction, a provider answers a request `kind` it does not recognize with `operation-not-supported` and keeps serving the session, so newer clients can add request kinds without breaking older providers.
 
 The client selects a compatible version and uses it in all subsequent messages. If no version matches, the client terminates the provider. Legacy auth fallback is used only when no provider was explicitly configured or when the user/global config explicitly allows fallback.
 
@@ -131,11 +131,11 @@ Readable form (publish):
 | `package` | string | no | Package name (e.g. `package`). May be absent for registry-level operations like `npm search`. |
 | `version` | string | no | Package version. Sent for `"publish"` operation only. Allows provider to scope tokens or log for audit. |
 | `operation` | string | for `get` and `get-batch` | Authorization intent: `"read"` or `"publish"`. This is the permission class the returned credential must satisfy. |
-| `command` | string | no | npm command that caused the request, such as `"install"`, `"ci"`, `"publish"`, `"search"`, or `"view"`. This is informational context, not the permission class. |
+| `command` | string | no | npm command that caused the request, such as `"install"`, `"ci"`, `"publish"`, `"search"`, or `"view"`. This is informational context, not the permission class, and the set is open: providers must accept command names they do not know. |
 | `interactive` | boolean | for `get` and `get-batch` | Whether the client can display prompts (for MFA flows). |
 | `retry` | boolean | no | `true` when this request follows a failed registry authentication attempt. |
 | `httpStatus` | number | when `retry` is `true` | HTTP status from the failed registry response. Must be 100-599. |
-| `authChallenges` | string[] | no | Authentication challenge headers observed from the registry, such as `WWW-Authenticate` values after a 401/403. Often sent with `erase` or retry requests. |
+| `authChallenges` | string[] | no | `WWW-Authenticate` header values (without the header name) observed from the registry after a 401/403. Often sent with `erase` or retry requests. |
 
 The client sends all available context: `scope`, `package`, and for publish — `version`. Sending full context costs nothing. Not sending it would permanently prevent future providers from using it. The **provider** decides the granularity via the `granularity` response field — a simple provider ignores everything and returns `"granularity": "registry"`, a scope-aware provider returns `"granularity": "scope"`, etc.
 
@@ -356,7 +356,7 @@ The provider returns an array of results, one per package (same order):
 {"Ok":{"kind":"get-batch","results":[{"auth":{"type":"bearer","token":"glpat-aaa"},"granularity":"scope"},{"auth":{"type":"bearer","token":"glpat-aaa"},"granularity":"scope"},{"auth":{"type":"bearer","token":"glpat-bbb"},"granularity":"scope"}],"cache":"session"}}
 ```
 
-The provider may return the same token for multiple packages (as above — `@scope/*` shares one token). Cache fields (`cache`, `expiresAt`, `operationIndependent`) apply to all tokens in the batch. Per-token overrides are not supported — if tokens have different lifetimes, use individual `get` calls.
+The provider may return the same token for multiple packages (as above — `@scope/*` shares one token). Cache fields (`cache`, `expiresAt`, `operationIndependent`) apply to all tokens in the batch. Per-token overrides are not supported — if tokens have different lifetimes, use individual `get` calls. `get-batch` is for `operation: "read"` only; publish is always a single `get` carrying the package `version`.
 
 If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client falls back to individual `get` calls. This keeps simple providers simple — `get-batch` is an optimization, not a requirement.
 
@@ -365,7 +365,7 @@ If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client fal
 If the registry returns 401/403, the client notifies the provider:
 
 ```json
-{"v":1,"kind":"erase","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","authChallenges":["WWW-Authenticate: Bearer realm=\"https://gitlab.example.com\""]}
+{"v":1,"kind":"erase","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","authChallenges":["Bearer realm=\"https://gitlab.example.com\""]}
 ```
 
 The provider should invalidate cached credentials. Response: `{"Ok":{"kind":"erase"}}` or an error.
@@ -373,7 +373,7 @@ The provider should invalidate cached credentials. Response: `{"Ok":{"kind":"era
 After `erase`, the client may retry `get` with explicit retry context:
 
 ```json
-{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["WWW-Authenticate: Bearer realm=\"https://gitlab.example.com\""]}
+{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","package":"package","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["Bearer realm=\"https://gitlab.example.com\""]}
 ```
 
 This separates cache invalidation from credential acquisition. Providers can use `httpStatus` and `authChallenges` to distinguish expired credentials from missing permission, SSO enforcement, or registry-specific challenge flows.
@@ -388,7 +388,9 @@ The client caches tokens in-memory based on the `granularity` field:
 | `"scope"` | registry URL + scope | Different tokens for `@scope-a/*` and `@scope-b/*` on the same registry. |
 | `"package"` | registry URL + scope + package | Different tokens per individual package. Maximum granularity. |
 
-When the client needs a token, it checks the cache from most specific to least specific. On cache miss, it invokes the provider.
+The cache key also records the granularity level itself, and the operation when `operationIndependent` is `false`, so entries from different levels can never collide (an unscoped package named `read` must not match a scope-level entry bound to operation `read`).
+
+When the client needs a token, it checks the cache from most specific to least specific: package, then scope, then registry, and at each level an entry bound to the requested operation before an operation-independent one. An entry with `cache: "expires"` stops matching 60 seconds before `expiresAt`, so a request is never sent with a token about to lapse; the next level is then tried, and if nothing matches, the client invokes the provider.
 
 Tokens are **never persisted to disk** by the client.
 

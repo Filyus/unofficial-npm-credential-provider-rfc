@@ -27,6 +27,8 @@ name = "mock-client"
 version = "0.1.0"
 dependencies = [
  "credential-provider-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

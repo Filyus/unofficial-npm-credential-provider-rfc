@@ -4,7 +4,7 @@
   "wire": {
     "requestKinds": ["login", "logout", "get", "get-batch", "refresh", "erase"],
     "operations": ["read", "publish"],
-    "commands": ["install", "ci", "publish", "search", "view"],
+    "knownCommands": ["install", "ci", "publish", "search", "view"],
     "capabilities": ["get-batch", "refresh", "login", "logout", "erase", "auth-challenges", "retry-context"],
     "authTypes": ["bearer", "basic"],
     "cachePolicies": ["never", "session", "expires"],
@@ -22,6 +22,7 @@
     },
     "operation-not-supported": {
       "refresh": "retry-get",
+      "get-batch": "individual-get",
       "default": "fail"
     },
     "other": {
@@ -44,6 +45,7 @@
     "defaultPolicy": "session",
     "defaultGranularity": "registry",
     "expiresRequires": ["expiresAt"],
+    "expiryMarginSeconds": 60,
     "operationIndependentDefault": true,
     "storePolicies": ["session", "expires"],
     "doNotStorePolicies": ["never"]

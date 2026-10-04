@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests.protocol_model import CredentialClientModel, ProtocolViolation
+from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation
 
 
 REQUEST = {
@@ -136,8 +136,8 @@ class ResponseValidationTests(unittest.TestCase):
             },
         )
 
-        self.assertIn(("https://registry.example.test/", "@scope", "api-client"), self.client.cache)
-        self.assertIn(("https://registry.example.test/", "@scope", "ui"), self.client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client"), self.client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui"), self.client.cache)
 
 
 if __name__ == "__main__":

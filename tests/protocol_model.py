@@ -3,19 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 from tests.generated_policy import (
     ALLOWED_CONFIG_SOURCES,
     DEFAULT_CACHE_POLICY,
     DEFAULT_GRANULARITY,
     ERROR_KINDS,
+    EXPIRY_MARGIN_SECONDS,
     OPERATION_INDEPENDENT_DEFAULT,
     PROTOCOL_VERSION,
     SUPPORTED_AUTH_TYPES,
     SUPPORTED_CACHE,
     SUPPORTED_CAPABILITIES,
-    SUPPORTED_COMMANDS,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
     SUPPORTED_REQUEST_KINDS,
@@ -73,13 +73,25 @@ class CacheEntry:
     operation_independent: bool = True
 
 
+class CacheKey(NamedTuple):
+    """Granularity is part of the key, so entries of different levels never
+    collide: a bare tuple made the package-level key for the unscoped package
+    `read` equal to the scope-level key of a token bound to operation `read`."""
+
+    granularity: str
+    registry: str
+    scope: str | None = None
+    package: str | None = None
+    operation: str | None = None
+
+
 @dataclass
 class CredentialClientModel:
     config: ProviderConfig = field(default_factory=ProviderConfig)
     state: ClientState = ClientState.SPAWNED
     version: int | None = None
     capabilities: frozenset[str] = field(default_factory=frozenset)
-    cache: dict[tuple[Any, ...], CacheEntry] = field(default_factory=dict)
+    cache: dict[CacheKey, CacheEntry] = field(default_factory=dict)
 
     def receive_hello(self, message: dict[str, Any]) -> int:
         self._require_state(ClientState.SPAWNED)
@@ -143,6 +155,36 @@ class CredentialClientModel:
         self._handle_token_response(request, ok)
         return "ok"
 
+    def lookup(
+        self,
+        registry: str,
+        scope: str | None = None,
+        package: str | None = None,
+        operation: str = "read",
+        now: int = 0,
+    ) -> CacheEntry | None:
+        """Most specific entry first: package, then scope, then registry; at each
+        level a token bound to this operation before an operation-independent one.
+        An `expires` entry stops matching `EXPIRY_MARGIN_SECONDS` before
+        `expiresAt`, so a request never leaves with a token about to lapse."""
+        for granularity in ("package", "scope", "registry"):
+            for bound_operation in (operation, None):
+                key = CacheKey(
+                    granularity,
+                    registry,
+                    scope if granularity != "registry" else None,
+                    package if granularity == "package" else None,
+                    bound_operation,
+                )
+                entry = self.cache.get(key)
+                if entry is None:
+                    continue
+                if entry.cache == "expires" and now >= entry.expires_at - EXPIRY_MARGIN_SECONDS:
+                    del self.cache[key]
+                    continue
+                return entry
+        return None
+
     def close(self) -> None:
         self._require_state(ClientState.READY)
         self.state = ClientState.CLOSED
@@ -157,6 +199,8 @@ class CredentialClientModel:
             return "try-next-provider"
         if kind == "operation-not-supported" and request.get("kind") == "refresh":
             return "retry-get"
+        if kind == "operation-not-supported" and request.get("kind") == "get-batch":
+            return "individual-get"
         if kind == "not-found" and (not self.config.configured or self.config.legacy_fallback):
             return "legacy-auth"
         raise ProviderFailure(kind)
@@ -174,7 +218,9 @@ class CredentialClientModel:
             "operationIndependent": ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT),
         }
         for package, result in zip(packages, results):
-            merged = {**shared, **result}
+            # Batch-level cache fields win: per-result overrides are not part of
+            # the protocol, so one inside a result is an ignored unknown field.
+            merged = {**result, **shared}
             package_request = {
                 **request,
                 "scope": package.get("scope"),
@@ -189,7 +235,9 @@ class CredentialClientModel:
         if cache not in SUPPORTED_CACHE:
             raise ProtocolViolation(f"unsupported cache policy: {cache!r}")
         expires_at = ok.get("expiresAt")
-        if cache == "expires" and not isinstance(expires_at, int):
+        if expires_at is not None and (not isinstance(expires_at, int) or isinstance(expires_at, bool)):
+            raise ProtocolViolation("expiresAt must be an integer Unix timestamp")
+        if cache == "expires" and expires_at is None:
             raise ProtocolViolation("cache=expires requires expiresAt")
         granularity = ok.get("granularity", DEFAULT_GRANULARITY)
         if granularity not in SUPPORTED_GRANULARITY:
@@ -217,15 +265,14 @@ class CredentialClientModel:
             raise ProtocolViolation(f"expected state {expected.value}, got {self.state.value}")
 
 
-def cache_key(entry: CacheEntry) -> tuple[Any, ...]:
-    key: list[Any] = [entry.registry]
-    if entry.granularity in {"scope", "package"}:
-        key.append(entry.scope)
-    if entry.granularity == "package":
-        key.append(entry.package)
-    if not entry.operation_independent:
-        key.append(entry.operation)
-    return tuple(key)
+def cache_key(entry: CacheEntry) -> CacheKey:
+    return CacheKey(
+        entry.granularity,
+        entry.registry,
+        entry.scope if entry.granularity in {"scope", "package"} else None,
+        entry.package if entry.granularity == "package" else None,
+        None if entry.operation_independent else entry.operation,
+    )
 
 
 def validate_request(message: dict[str, Any]) -> None:
@@ -238,16 +285,22 @@ def validate_request(message: dict[str, Any]) -> None:
     if not isinstance(message.get("registry"), str):
         raise ProtocolViolation("request requires registry string")
     command = message.get("command")
-    if command is not None and command not in SUPPORTED_COMMANDS:
-        raise ProtocolViolation(f"unsupported npm command: {command!r}")
+    if command is not None and (not isinstance(command, str) or not command):
+        raise ProtocolViolation("command must be a non-empty string")
     kind = message["kind"]
     if kind in {"get", "get-batch"}:
         if message.get("operation") not in SUPPORTED_OPERATIONS:
             raise ProtocolViolation("get requests require a supported operation")
         if not isinstance(message.get("interactive"), bool):
             raise ProtocolViolation("get requests require interactive boolean")
-    if kind == "get-batch" and not isinstance(message.get("packages"), list):
-        raise ProtocolViolation("get-batch requires packages[]")
+    if kind == "get-batch":
+        packages = message.get("packages")
+        if not isinstance(packages, list) or not packages:
+            raise ProtocolViolation("get-batch requires packages[]")
+        if not all(isinstance(entry, dict) and isinstance(entry.get("package"), str) for entry in packages):
+            raise ProtocolViolation("get-batch packages[] entries require a package name")
+        if message.get("operation") != "read":
+            raise ProtocolViolation("get-batch is for read operations only")
     if kind == "refresh" and not isinstance(message.get("refreshState"), str):
         raise ProtocolViolation("refresh requires refreshState")
     if message.get("operation") == "publish" and not isinstance(message.get("version"), str):

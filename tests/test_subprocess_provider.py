@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 
-from tests.protocol_model import CredentialClientModel, ProtocolViolation, ProviderFailure, RequestContext
+from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation, ProviderFailure, RequestContext
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -17,7 +17,7 @@ class MockProviderSubprocessTests(unittest.TestCase):
         client, request, response = self.exchange("get-success")
 
         self.assertEqual(client.handle_response(request, response), "ok")
-        self.assertIn(("https://registry.example.test/", "@scope"), client.cache)
+        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope"), client.cache)
 
     def test_mock_provider_refresh_success(self) -> None:
         client, request, response = self.exchange(
@@ -50,8 +50,8 @@ class MockProviderSubprocessTests(unittest.TestCase):
         )
 
         self.assertEqual(client.handle_response(request, response), "ok")
-        self.assertIn(("https://registry.example.test/", "@scope", "api-client"), client.cache)
-        self.assertIn(("https://registry.example.test/", "@scope", "ui"), client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client"), client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui"), client.cache)
 
     def test_mock_provider_login_logout_erase_success(self) -> None:
         for scenario, kind in (

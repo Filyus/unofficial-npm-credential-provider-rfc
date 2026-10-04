@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tests.protocol_model import (
+    CacheKey,
     ClientState,
     CredentialClientModel,
     ProviderConfig,
@@ -71,9 +72,9 @@ class TranscriptTests(unittest.TestCase):
         client = validate_transcript(str(TRANSCRIPTS / "get-success.jsonl"))
 
         self.assertEqual(client.state.value, "closed")
-        self.assertIn(("https://registry.example.test/", "@scope"), client.cache)
+        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope"), client.cache)
         self.assertEqual(
-            client.cache[("https://registry.example.test/", "@scope")].auth["token"],
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
             "token-1",
         )
 
@@ -86,7 +87,7 @@ class TranscriptTests(unittest.TestCase):
     def test_refresh_transcript_validates_refresh_state(self) -> None:
         client = validate_transcript(str(TRANSCRIPTS / "refresh-success.jsonl"))
 
-        self.assertIn(("https://registry.example.test/", None), client.cache)
+        self.assertIn(CacheKey("scope", "https://registry.example.test/"), client.cache)
 
     def test_not_found_fails_without_explicit_legacy_fallback(self) -> None:
         with self.assertRaises(ProviderFailure):

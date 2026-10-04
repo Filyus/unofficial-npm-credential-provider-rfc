@@ -6,6 +6,7 @@ import unittest
 
 from tests import protocol_model
 from tests.protocol_model import (
+    CacheKey,
     CredentialClientModel,
     ProviderConfig,
     ProviderFailure,
@@ -41,11 +42,39 @@ class SpecConsistencyTests(unittest.TestCase):
         self.assertEqual(schema_operations, set(self.policy["wire"]["operations"]))
         self.assertEqual(schema_operations, protocol_model.SUPPORTED_OPERATIONS)
 
-    def test_command_enum_matches_policy_and_python_model(self) -> None:
-        schema_commands = set(self.schema["$defs"]["request"]["properties"]["command"]["enum"])
+    def test_command_is_open_ended_in_schema_and_python_model(self) -> None:
+        schema_command = self.schema["$defs"]["request"]["properties"]["command"]
 
-        self.assertEqual(schema_commands, set(self.policy["wire"]["commands"]))
-        self.assertEqual(schema_commands, protocol_model.SUPPORTED_COMMANDS)
+        self.assertNotIn("enum", schema_command)
+        self.assertEqual(schema_command["type"], "string")
+        self.assertTrue(self.policy["wire"]["knownCommands"])
+        request = {
+            "v": 1,
+            "kind": "get",
+            "registry": "https://registry.example.test/",
+            "operation": "read",
+            "command": "outdated",
+            "interactive": False,
+        }
+        self.assertNotIn("outdated", self.policy["wire"]["knownCommands"])
+        protocol_model.validate_request(request)
+
+    def test_get_batch_operation_not_supported_matches_policy(self) -> None:
+        client = CredentialClientModel()
+        client.receive_hello({"v": [1]})
+        batch = {
+            "v": 1,
+            "kind": "get-batch",
+            "registry": "https://registry.example.test/",
+            "operation": "read",
+            "interactive": False,
+            "packages": [{"scope": "@scope", "package": "pkg"}],
+        }
+
+        self.assertEqual(
+            client.handle_response(batch, {"Err": {"kind": "operation-not-supported"}}),
+            self.policy["errors"]["operation-not-supported"]["get-batch"],
+        )
 
     def test_capabilities_match_policy_and_python_model(self) -> None:
         hello_properties = self.schema["$defs"]["hello"]["properties"]
@@ -135,7 +164,7 @@ class SpecConsistencyTests(unittest.TestCase):
             "interactive": False,
         }
         client.handle_response(request, {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}}})
-        entry = client.cache[("https://registry.example.test/",)]
+        entry = client.cache[CacheKey("registry", "https://registry.example.test/")]
 
         self.assertEqual(entry.cache, self.policy["cache"]["defaultPolicy"])
         self.assertEqual(entry.granularity, self.policy["cache"]["defaultGranularity"])

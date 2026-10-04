@@ -1,6 +1,76 @@
-use mock_client::{ClientScenario, run_exchange, run_provider_chain};
+use credential_provider_protocol::{Auth, ErrorKind, ProviderResponse, Request, RequestKind};
+use mock_client::{ClientScenario, ProviderSession, run_exchange, run_provider_chain};
 use std::path::PathBuf;
 use std::process::Command;
+
+#[test]
+fn one_session_serves_sequential_requests_from_one_process() {
+    let mut session =
+        ProviderSession::spawn(provider_command("session-counter")).expect("provider starts");
+    let registry = "https://registry.example.test/";
+
+    let first = session
+        .request(&Request::get_install(
+            registry,
+            Some("@scope"),
+            "api-client",
+        ))
+        .expect("first request");
+    let second = session
+        .request(&Request::get_install(registry, Some("@scope"), "ui"))
+        .expect("second request");
+
+    assert_eq!(bearer_token(&first), "token-1");
+    assert_eq!(bearer_token(&second), "token-2");
+    session
+        .close()
+        .expect("closing stdin ends the provider cleanly");
+}
+
+#[test]
+fn provider_refuses_unknown_kind_and_keeps_serving() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    let registry = "https://registry.example.test/";
+
+    let refused = session
+        .send_raw(&serde_json::json!({"v": 1, "kind": "store", "registry": registry}))
+        .expect("provider answers instead of exiting");
+    let ProviderResponse::Err(err) = refused else {
+        panic!("unknown kind must be refused, got {refused:?}");
+    };
+    assert_eq!(err.kind, ErrorKind::OperationNotSupported);
+
+    let served = session
+        .request(&Request::get_install(registry, Some("@scope"), "pkg"))
+        .expect("session survives the refusal");
+    assert!(matches!(served, ProviderResponse::Ok(_)));
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn operation_not_supported_falls_back_where_policy_says_so() {
+    for (scenario, expected) in [
+        (ClientScenario::Refresh, "retry-get"),
+        (ClientScenario::BatchInstall, "individual-get"),
+    ] {
+        let summary = run_exchange(provider_command("operation-not-supported"), scenario)
+            .expect("refresh and get-batch have a fallback");
+
+        assert_eq!(summary.outcome, expected);
+    }
+}
+
+fn bearer_token(response: &ProviderResponse) -> &str {
+    let ProviderResponse::Ok(ok) = response else {
+        panic!("expected Ok, got {response:?}");
+    };
+    assert_eq!(ok.kind, RequestKind::Get);
+    match ok.auth.as_ref() {
+        Some(Auth::Bearer { token }) => token.expose(),
+        other => panic!("expected bearer auth, got {other:?}"),
+    }
+}
 
 #[test]
 fn client_and_provider_exchange_get_success() {

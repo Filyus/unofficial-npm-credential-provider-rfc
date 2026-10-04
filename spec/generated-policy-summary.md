@@ -11,7 +11,7 @@ Source: `spec/policy-v1.json`.
 | Protocol version | `1` |
 | Request kinds | `login`, `logout`, `get`, `get-batch`, `refresh`, `erase` |
 | Operations | `read`, `publish` |
-| npm commands | `install`, `ci`, `publish`, `search`, `view` |
+| Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
 | Capabilities | `get-batch`, `refresh`, `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
@@ -25,6 +25,7 @@ Source: `spec/policy-v1.json`.
 | Default cache policy | `session` |
 | Default granularity | `registry` |
 | `cache=expires` requires | `expiresAt` |
+| Treat as expired this many seconds before `expiresAt` | `60` |
 | Operation-independent by default | `true` |
 | Stored policies | `session`, `expires` |
 | Non-stored policies | `never` |
@@ -48,6 +49,7 @@ Source: `spec/policy-v1.json`.
 | `not-found` | `providerNotConfigured` | `legacy-auth` |
 | `not-found` | `legacyFallbackEnabled` | `legacy-auth` |
 | `operation-not-supported` | `refresh` | `retry-get` |
+| `operation-not-supported` | `get-batch` | `individual-get` |
 | `operation-not-supported` | `default` | `fail` |
 | `other` | `default` | `fail` |
 
