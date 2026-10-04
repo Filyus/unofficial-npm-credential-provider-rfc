@@ -71,51 +71,27 @@ class RequestValidationTests(unittest.TestCase):
             with self.assertRaises(ProtocolViolation):
                 validate_request({**BASE_GET, "command": command})
 
-    def test_get_batch_requires_packages(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "kind": "get-batch"})
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "kind": "get-batch", "packages": []})
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "kind": "get-batch", "packages": [{"scope": "@scope"}]})
+    def test_removed_request_kinds_are_rejected(self) -> None:
+        for kind in ("get-batch", "refresh"):
+            with self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, "kind": kind})
 
-    def test_get_batch_is_read_only(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request(
-                {
-                    **BASE_GET,
-                    "kind": "get-batch",
-                    "operation": "publish",
-                    "version": "1.2.3",
-                    "packages": [{"scope": "@scope", "package": "pkg"}],
-                }
-            )
+    def test_every_npm_write_action_is_an_operation(self) -> None:
+        for operation in ("deprecate", "dist-tag", "unpublish", "owner", "access"):
+            with self.subTest(operation=operation):
+                validate_request({**BASE_GET, "operation": operation})
 
-    def test_get_batch_accepts_package_list(self) -> None:
-        validate_request(
-            {
-                **BASE_GET,
-                "kind": "get-batch",
-                "packages": [{"scope": "@scope", "package": "pkg"}],
-            }
-        )
+    def test_coarse_or_unknown_operation_is_rejected(self) -> None:
+        for operation in ("write", "admin", "yank"):
+            with self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, "operation": operation})
 
-    def test_refresh_requires_refresh_state(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request(
-                {
-                    "v": 1,
-                    "kind": "refresh",
-                    "registry": "https://registry.example.test/",
-                }
-            )
-
-    def test_publish_operation_requires_version(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "operation": "publish"})
-
-    def test_publish_operation_accepts_version(self) -> None:
-        validate_request({**BASE_GET, "operation": "publish", "version": "1.2.3"})
+    def test_publish_and_stage_require_version(self) -> None:
+        for operation in ("publish", "stage"):
+            with self.subTest(operation=operation):
+                with self.assertRaises(ProtocolViolation):
+                    validate_request({**BASE_GET, "operation": operation})
+                validate_request({**BASE_GET, "operation": operation, "version": "1.2.3"})
 
     def test_retry_requires_http_status(self) -> None:
         with self.assertRaises(ProtocolViolation):

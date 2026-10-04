@@ -17,8 +17,6 @@
           1
         ],
         "capabilities": [
-          "get-batch",
-          "refresh",
           "login",
           "logout",
           "erase",
@@ -103,33 +101,30 @@
       }
     },
     {
-      "name": "request-get-batch",
+      "name": "request-get-stage",
       "message": {
         "v": 1,
-        "kind": "get-batch",
+        "kind": "get",
         "registry": "https://registry.example.test/",
-        "operation": "read",
-        "command": "install",
+        "scope": "@scope",
+        "package": "pkg",
+        "operation": "stage",
+        "command": "stage",
         "interactive": false,
-        "packages": [
-          {
-            "scope": "@scope",
-            "package": "api-client"
-          },
-          {
-            "scope": "@scope",
-            "package": "ui"
-          }
-        ]
+        "version": "1.2.3"
       }
     },
     {
-      "name": "request-refresh",
+      "name": "request-get-unpublish-whole-package",
       "message": {
         "v": 1,
-        "kind": "refresh",
+        "kind": "get",
         "registry": "https://registry.example.test/",
-        "refreshState": "opaque-provider-handle"
+        "scope": "@scope",
+        "package": "pkg",
+        "operation": "unpublish",
+        "command": "unpublish",
+        "interactive": true
       }
     },
     {
@@ -159,30 +154,6 @@
           "cache": "expires",
           "expiresAt": 1893456000,
           "granularity": "registry"
-        }
-      }
-    },
-    {
-      "name": "response-ok-get-batch",
-      "message": {
-        "Ok": {
-          "kind": "get-batch",
-          "results": [
-            {
-              "auth": {
-                "type": "bearer",
-                "token": "api"
-              },
-              "granularity": "package"
-            },
-            {
-              "auth": {
-                "type": "bearer",
-                "token": "ui"
-              },
-              "granularity": "package"
-            }
-          ]
         }
       }
     },
@@ -236,7 +207,7 @@
         "v": [
           1
         ],
-        "capabilities": "refresh"
+        "capabilities": "erase"
       }
     },
     {
@@ -289,29 +260,32 @@
       }
     },
     {
-      "name": "request-get-batch-publish",
-      "message": {
-        "v": 1,
-        "kind": "get-batch",
-        "registry": "https://registry.example.test/",
-        "operation": "publish",
-        "command": "publish",
-        "interactive": false,
-        "version": "1.2.3",
-        "packages": [
-          {
-            "scope": "@scope",
-            "package": "api-client"
-          }
-        ]
-      }
-    },
-    {
-      "name": "request-refresh-missing-state",
+      "name": "request-removed-kind-refresh",
       "message": {
         "v": 1,
         "kind": "refresh",
-        "registry": "https://registry.example.test/"
+        "registry": "https://registry.example.test/",
+        "refreshState": "handle"
+      }
+    },
+    {
+      "name": "request-unknown-operation",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "write",
+        "interactive": false
+      }
+    },
+    {
+      "name": "request-stage-missing-version",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "stage",
+        "interactive": false
       }
     },
     {

@@ -178,33 +178,16 @@ class CacheLookupTests(unittest.TestCase):
 
         self.assertEqual(self.token_for(scope="@scope", package="pkg", now=1_000), "session")
 
-    def test_batch_results_cannot_override_batch_cache_fields(self) -> None:
-        batch = {
-            "v": 1,
-            "kind": "get-batch",
-            "registry": REGISTRY,
-            "operation": "read",
-            "interactive": False,
-            "packages": [{"scope": "@scope", "package": "pkg"}],
-        }
+    def test_stage_token_does_not_serve_publish(self) -> None:
+        # npmjs.com stage-only tokens can `npm stage publish` but not `npm publish`,
+        # so a provider binds the token it returns for `stage` to that operation.
         self.client.handle_response(
-            batch,
-            {
-                "Ok": {
-                    "kind": "get-batch",
-                    "cache": "session",
-                    "results": [
-                        {
-                            "auth": {"type": "bearer", "token": "token"},
-                            "granularity": "scope",
-                            "cache": "never",
-                        }
-                    ],
-                }
-            },
+            {**request("publish"), "operation": "stage", "command": "stage"},
+            ok("scope", token="stage-only", operationIndependent=False),
         )
 
-        self.assertEqual(self.client.cache[CacheKey("scope", REGISTRY, "@scope")].cache, "session")
+        self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="stage"), "stage-only")
+        self.assertIsNone(self.token_for(scope="@scope", package="pkg", operation="publish"))
 
 
 if __name__ == "__main__":

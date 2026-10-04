@@ -59,6 +59,7 @@ def render_python(policy: dict) -> str:
             f"PROTOCOL_VERSION = {policy['protocolVersion']}",
             f"SUPPORTED_REQUEST_KINDS = frozenset({wire['requestKinds']!r})",
             f"SUPPORTED_OPERATIONS = frozenset({wire['operations']!r})",
+            f"OPERATIONS_REQUIRING_VERSION = frozenset({wire['operationsRequiringVersion']!r})",
             f"KNOWN_COMMANDS = frozenset({wire['knownCommands']!r})",
             f"SUPPORTED_CAPABILITIES = frozenset({wire['capabilities']!r})",
             f"SUPPORTED_AUTH_TYPES = frozenset({wire['authTypes']!r})",
@@ -71,6 +72,8 @@ def render_python(policy: dict) -> str:
             f"DEFAULT_GRANULARITY = {cache['defaultGranularity']!r}",
             f"OPERATION_INDEPENDENT_DEFAULT = {cache['operationIndependentDefault']!r}",
             f"EXPIRY_MARGIN_SECONDS = {cache['expiryMarginSeconds']!r}",
+            f"TOKEN_HELPER_CONFIG_SOURCES = frozenset({policy['tokenHelper']['allowedConfigSources']!r})",
+            f"TOKEN_HELPER_TIMEOUT_SECONDS = {policy['tokenHelper']['timeoutSeconds']!r}",
             "",
         ]
     )
@@ -88,6 +91,7 @@ def render_rust(policy: dict) -> str:
             f"pub const PROTOCOL_VERSION: u32 = {policy['protocolVersion']};",
             f"pub const REQUEST_KINDS: &[&str] = &{rust_string_array(wire['requestKinds'])};",
             f"pub const OPERATIONS: &[&str] = &{rust_string_array(wire['operations'])};",
+            f"pub const OPERATIONS_REQUIRING_VERSION: &[&str] = &{rust_string_array(wire['operationsRequiringVersion'])};",
             f"pub const KNOWN_COMMANDS: &[&str] = &{rust_string_array(wire['knownCommands'])};",
             f"pub const CAPABILITIES: &[&str] = &{rust_string_array(wire['capabilities'])};",
             f"pub const AUTH_TYPES: &[&str] = &{rust_string_array(wire['authTypes'])};",
@@ -128,6 +132,7 @@ def render_policy_summary(policy: dict) -> str:
         f"| Protocol version | `{policy['protocolVersion']}` |",
         f"| Request kinds | {markdown_values(wire['requestKinds'])} |",
         f"| Operations | {markdown_values(wire['operations'])} |",
+        f"| Operations that require `version` | {markdown_values(wire['operationsRequiringVersion'])} |",
         f"| Known npm commands (informational, open-ended) | {markdown_values(wire['knownCommands'])} |",
         f"| Capabilities | {markdown_values(wire['capabilities'])} |",
         f"| Auth types | {markdown_values(wire['authTypes'])} |",
@@ -202,6 +207,15 @@ def render_policy_summary(policy: dict) -> str:
     )
     for setting, value in limits.items():
         lines.append(f"| `{setting}` | `{json_value(value)}` |")
+
+    for title, section in (
+        ("Forward Compatibility", policy["forwardCompatibility"]),
+        ("Token Helper (Phase 1)", policy["tokenHelper"]),
+    ):
+        lines.extend(["", f"## {title}", "", "| Setting | Value |", "| --- | --- |"])
+        for setting, value in section.items():
+            rendered = markdown_values(value) if isinstance(value, list) else f"`{json_value(value)}`"
+            lines.append(f"| `{setting}` | {rendered} |")
 
     lines.append("")
     return "\n".join(lines)
@@ -283,27 +297,30 @@ def render_vectors(policy: dict) -> str:
             },
         },
         {
-            "name": "request-get-batch",
+            "name": "request-get-stage",
             "message": {
                 "v": version,
-                "kind": "get-batch",
+                "kind": "get",
                 "registry": registry,
-                "operation": "read",
-                "command": "install",
+                "scope": "@scope",
+                "package": "pkg",
+                "operation": "stage",
+                "command": "stage",
                 "interactive": False,
-                "packages": [
-                    {"scope": "@scope", "package": "api-client"},
-                    {"scope": "@scope", "package": "ui"},
-                ],
+                "version": "1.2.3",
             },
         },
         {
-            "name": "request-refresh",
+            "name": "request-get-unpublish-whole-package",
             "message": {
                 "v": version,
-                "kind": "refresh",
+                "kind": "get",
                 "registry": registry,
-                "refreshState": "opaque-provider-handle",
+                "scope": "@scope",
+                "package": "pkg",
+                "operation": "unpublish",
+                "command": "unpublish",
+                "interactive": True,
             },
         },
         {
@@ -329,24 +346,6 @@ def render_vectors(policy: dict) -> str:
                 }
             },
         },
-        {
-            "name": "response-ok-get-batch",
-            "message": {
-                "Ok": {
-                    "kind": "get-batch",
-                    "results": [
-                        {
-                            "auth": {"type": "bearer", "token": "api"},
-                            "granularity": "package",
-                        },
-                        {
-                            "auth": {"type": "bearer", "token": "ui"},
-                            "granularity": "package",
-                        },
-                    ],
-                }
-            },
-        },
     ]
     valid_messages.extend(
         {
@@ -363,7 +362,7 @@ def render_vectors(policy: dict) -> str:
         },
         {
             "name": "hello-invalid-capabilities",
-            "message": {"v": [version], "capabilities": "refresh"},
+            "message": {"v": [version], "capabilities": "erase"},
         },
         {
             "name": "request-unknown-kind",
@@ -411,21 +410,28 @@ def render_vectors(policy: dict) -> str:
             },
         },
         {
-            "name": "request-get-batch-publish",
+            "name": "request-removed-kind-refresh",
+            "message": {"v": version, "kind": "refresh", "registry": registry, "refreshState": "handle"},
+        },
+        {
+            "name": "request-unknown-operation",
             "message": {
                 "v": version,
-                "kind": "get-batch",
+                "kind": "get",
                 "registry": registry,
-                "operation": "publish",
-                "command": "publish",
+                "operation": "write",
                 "interactive": False,
-                "version": "1.2.3",
-                "packages": [{"scope": "@scope", "package": "api-client"}],
             },
         },
         {
-            "name": "request-refresh-missing-state",
-            "message": {"v": version, "kind": "refresh", "registry": registry},
+            "name": "request-stage-missing-version",
+            "message": {
+                "v": version,
+                "kind": "get",
+                "registry": registry,
+                "operation": "stage",
+                "interactive": False,
+            },
         },
         {
             "name": "request-publish-missing-version",

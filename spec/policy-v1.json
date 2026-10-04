@@ -2,14 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "protocolVersion": 1,
   "wire": {
-    "requestKinds": ["login", "logout", "get", "get-batch", "refresh", "erase"],
-    "operations": ["read", "publish"],
+    "requestKinds": ["login", "logout", "get", "erase"],
+    "operations": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"],
+    "operationsRequiringVersion": ["publish", "stage"],
     "knownCommands": ["install", "ci", "publish", "search", "view"],
-    "capabilities": ["get-batch", "refresh", "login", "logout", "erase", "auth-challenges", "retry-context"],
+    "capabilities": ["login", "logout", "erase", "auth-challenges", "retry-context"],
     "authTypes": ["bearer", "basic"],
     "cachePolicies": ["never", "session", "expires"],
     "granularities": ["registry", "scope", "package"],
     "errorKinds": ["url-not-supported", "not-found", "operation-not-supported", "other"]
+  },
+  "forwardCompatibility": {
+    "unknownRequestKind": "operation-not-supported",
+    "unknownOperation": "operation-not-supported",
+    "unknownFields": "ignore",
+    "unknownCapabilities": "ignore"
   },
   "errors": {
     "url-not-supported": {
@@ -21,8 +28,6 @@
       "legacyFallbackEnabled": "legacy-auth"
     },
     "operation-not-supported": {
-      "refresh": "retry-get",
-      "get-batch": "individual-get",
       "default": "fail"
     },
     "other": {
@@ -41,6 +46,15 @@
     "ambiguousTrustedProvider": "fail",
     "missingProvider": "fail"
   },
+  "tokenHelper": {
+    "allowedConfigSources": ["user", "global"],
+    "absolutePathOnly": true,
+    "arguments": false,
+    "timeoutSeconds": 60,
+    "runsPerRegistryPerProcess": 1,
+    "emptyOutput": "fail",
+    "nonZeroExit": "fail"
+  },
   "cache": {
     "defaultPolicy": "session",
     "defaultGranularity": "registry",
@@ -57,7 +71,6 @@
   },
   "limits": {
     "lineSize": "implementation-defined",
-    "batchSize": "implementation-defined",
     "oversizeBehavior": "fail"
   }
 }

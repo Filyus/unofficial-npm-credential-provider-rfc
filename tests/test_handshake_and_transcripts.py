@@ -38,15 +38,15 @@ class HandshakeTests(unittest.TestCase):
     def test_hello_capabilities_are_recorded(self) -> None:
         client = CredentialClientModel()
 
-        client.receive_hello({"v": [1], "capabilities": ["refresh", "get-batch", "future"]})
+        client.receive_hello({"v": [1], "capabilities": ["login", "erase", "future"]})
 
-        self.assertEqual(client.capabilities, frozenset({"refresh", "get-batch"}))
+        self.assertEqual(client.capabilities, frozenset({"login", "erase"}))
 
     def test_malformed_hello_capabilities_are_rejected(self) -> None:
         client = CredentialClientModel()
 
         with self.assertRaises(ProtocolViolation):
-            client.receive_hello({"v": [1], "capabilities": "refresh"})
+            client.receive_hello({"v": [1], "capabilities": "erase"})
 
         self.assertEqual(client.state, ClientState.FAILED)
 
@@ -84,10 +84,13 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(client.state.value, "closed")
         self.assertEqual(client.cache, {})
 
-    def test_refresh_transcript_validates_refresh_state(self) -> None:
-        client = validate_transcript(str(TRANSCRIPTS / "refresh-success.jsonl"))
+    def test_erase_then_retry_transcript_replaces_the_rejected_token(self) -> None:
+        client = validate_transcript(str(TRANSCRIPTS / "erase-retry.jsonl"))
 
-        self.assertIn(CacheKey("scope", "https://registry.example.test/"), client.cache)
+        self.assertEqual(
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
+            "token-2",
+        )
 
     def test_not_found_fails_without_explicit_legacy_fallback(self) -> None:
         with self.assertRaises(ProviderFailure):

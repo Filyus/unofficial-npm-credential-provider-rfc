@@ -49,16 +49,33 @@ fn provider_refuses_unknown_kind_and_keeps_serving() {
 }
 
 #[test]
-fn operation_not_supported_falls_back_where_policy_says_so() {
-    for (scenario, expected) in [
-        (ClientScenario::Refresh, "retry-get"),
-        (ClientScenario::BatchInstall, "individual-get"),
-    ] {
-        let summary = run_exchange(provider_command("operation-not-supported"), scenario)
-            .expect("refresh and get-batch have a fallback");
+fn provider_refuses_unknown_operation_instead_of_serving_it_as_read() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
 
-        assert_eq!(summary.outcome, expected);
-    }
+    let refused = session
+        .send_raw(&serde_json::json!({
+            "v": 1,
+            "kind": "get",
+            "registry": "https://registry.example.test/",
+            "operation": "transfer-ownership",
+            "interactive": false
+        }))
+        .expect("provider answers instead of exiting");
+
+    let ProviderResponse::Err(err) = refused else {
+        panic!("unknown operation must be refused, got {refused:?}");
+    };
+    assert_eq!(err.kind, ErrorKind::OperationNotSupported);
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn publish_request_carries_the_version() {
+    let summary = run_exchange(provider_command("get-success"), ClientScenario::PublishGet)
+        .expect("publish get succeeds");
+
+    assert_eq!(summary.outcome, "ok");
 }
 
 fn bearer_token(response: &ProviderResponse) -> &str {
@@ -82,24 +99,14 @@ fn client_and_provider_exchange_get_success() {
 }
 
 #[test]
-fn client_and_provider_exchange_refresh_success() {
-    let summary = run_exchange(provider_command("refresh-success"), ClientScenario::Refresh)
-        .expect("refresh exchange should pass");
-
-    assert_eq!(summary.selected_version, 1);
-    assert_eq!(summary.outcome, "ok");
-}
-
-#[test]
-fn client_and_provider_exchange_batch_success() {
+fn client_accepts_an_expiring_token() {
     let summary = run_exchange(
-        provider_command("batch-success"),
-        ClientScenario::BatchInstall,
+        provider_command("expiring-token"),
+        ClientScenario::InstallGet,
     )
-    .expect("batch exchange should pass");
+    .expect("expiring token is a valid get answer");
 
-    assert_eq!(summary.selected_version, 1);
-    assert_eq!(summary.outcome, "batch:2");
+    assert_eq!(summary.outcome, "ok");
 }
 
 #[test]
@@ -261,17 +268,6 @@ fn client_rejects_missing_expiration() {
             .to_string()
             .contains("cache=expires requires expiresAt")
     );
-}
-
-#[test]
-fn client_rejects_batch_result_count_mismatch() {
-    let error = run_exchange(
-        provider_command("batch-count-mismatch"),
-        ClientScenario::BatchInstall,
-    )
-    .expect_err("batch result count mismatch should fail");
-
-    assert!(error.to_string().contains("batch result count mismatch"));
 }
 
 fn provider_command(scenario: &str) -> Command {

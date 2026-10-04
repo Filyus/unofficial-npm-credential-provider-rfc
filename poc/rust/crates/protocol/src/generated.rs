@@ -5,13 +5,21 @@ pub const REQUEST_KINDS: &[&str] = &[
     "login",
     "logout",
     "get",
-    "get-batch",
-    "refresh",
     "erase",
 ];
 pub const OPERATIONS: &[&str] = &[
     "read",
     "publish",
+    "stage",
+    "deprecate",
+    "dist-tag",
+    "unpublish",
+    "owner",
+    "access",
+];
+pub const OPERATIONS_REQUIRING_VERSION: &[&str] = &[
+    "publish",
+    "stage",
 ];
 pub const KNOWN_COMMANDS: &[&str] = &[
     "install",
@@ -21,8 +29,6 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "view",
 ];
 pub const CAPABILITIES: &[&str] = &[
-    "get-batch",
-    "refresh",
     "login",
     "logout",
     "erase",

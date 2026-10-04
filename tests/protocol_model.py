@@ -12,6 +12,7 @@ from tests.generated_policy import (
     ERROR_KINDS,
     EXPIRY_MARGIN_SECONDS,
     OPERATION_INDEPENDENT_DEFAULT,
+    OPERATIONS_REQUIRING_VERSION,
     PROTOCOL_VERSION,
     SUPPORTED_AUTH_TYPES,
     SUPPORTED_CACHE,
@@ -19,6 +20,7 @@ from tests.generated_policy import (
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
     SUPPORTED_REQUEST_KINDS,
+    TOKEN_HELPER_CONFIG_SOURCES,
     TRUSTED_LOCATION_KINDS,
 )
 
@@ -147,10 +149,7 @@ class CredentialClientModel:
             raise ProtocolViolation("Ok.kind must match request kind")
         if kind in {"login", "logout", "erase"}:
             return kind
-        if kind == "get-batch":
-            self._handle_batch_response(request, ok)
-            return "ok"
-        if kind not in {"get", "refresh"}:
+        if kind != "get":
             raise ProtocolViolation(f"unsupported Ok kind: {kind!r}")
         self._handle_token_response(request, ok)
         return "ok"
@@ -166,7 +165,9 @@ class CredentialClientModel:
         """Most specific entry first: package, then scope, then registry; at each
         level a token bound to this operation before an operation-independent one.
         An `expires` entry stops matching `EXPIRY_MARGIN_SECONDS` before
-        `expiresAt`, so a request never leaves with a token about to lapse."""
+        `expiresAt`, so a request never leaves with a token about to lapse; the
+        miss that follows is a plain `get`, and a provider with refresh state
+        refreshes on its own side."""
         for granularity in ("package", "scope", "registry"):
             for bound_operation in (operation, None):
                 key = CacheKey(
@@ -197,36 +198,9 @@ class CredentialClientModel:
             raise ProtocolViolation(f"unsupported error kind: {kind!r}")
         if kind == "url-not-supported":
             return "try-next-provider"
-        if kind == "operation-not-supported" and request.get("kind") == "refresh":
-            return "retry-get"
-        if kind == "operation-not-supported" and request.get("kind") == "get-batch":
-            return "individual-get"
         if kind == "not-found" and (not self.config.configured or self.config.legacy_fallback):
             return "legacy-auth"
         raise ProviderFailure(kind)
-
-    def _handle_batch_response(self, request: dict[str, Any], ok: dict[str, Any]) -> None:
-        packages = request.get("packages")
-        results = ok.get("results")
-        if not isinstance(packages, list) or not isinstance(results, list):
-            raise ProtocolViolation("get-batch requires packages[] and results[]")
-        if len(packages) != len(results):
-            raise ProtocolViolation("get-batch result count must match request count")
-        shared = {
-            "cache": ok.get("cache", DEFAULT_CACHE_POLICY),
-            "expiresAt": ok.get("expiresAt"),
-            "operationIndependent": ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT),
-        }
-        for package, result in zip(packages, results):
-            # Batch-level cache fields win: per-result overrides are not part of
-            # the protocol, so one inside a result is an ignored unknown field.
-            merged = {**result, **shared}
-            package_request = {
-                **request,
-                "scope": package.get("scope"),
-                "package": package.get("package"),
-            }
-            self._handle_token_response(package_request, merged)
 
     def _handle_token_response(self, request: dict[str, Any], ok: dict[str, Any]) -> None:
         auth = ok.get("auth")
@@ -288,23 +262,14 @@ def validate_request(message: dict[str, Any]) -> None:
     if command is not None and (not isinstance(command, str) or not command):
         raise ProtocolViolation("command must be a non-empty string")
     kind = message["kind"]
-    if kind in {"get", "get-batch"}:
-        if message.get("operation") not in SUPPORTED_OPERATIONS:
+    operation = message.get("operation")
+    if kind == "get":
+        if operation not in SUPPORTED_OPERATIONS:
             raise ProtocolViolation("get requests require a supported operation")
         if not isinstance(message.get("interactive"), bool):
             raise ProtocolViolation("get requests require interactive boolean")
-    if kind == "get-batch":
-        packages = message.get("packages")
-        if not isinstance(packages, list) or not packages:
-            raise ProtocolViolation("get-batch requires packages[]")
-        if not all(isinstance(entry, dict) and isinstance(entry.get("package"), str) for entry in packages):
-            raise ProtocolViolation("get-batch packages[] entries require a package name")
-        if message.get("operation") != "read":
-            raise ProtocolViolation("get-batch is for read operations only")
-    if kind == "refresh" and not isinstance(message.get("refreshState"), str):
-        raise ProtocolViolation("refresh requires refreshState")
-    if message.get("operation") == "publish" and not isinstance(message.get("version"), str):
-        raise ProtocolViolation("publish requires version")
+    if operation in OPERATIONS_REQUIRING_VERSION and not isinstance(message.get("version"), str):
+        raise ProtocolViolation(f"{operation} requires version")
     retry = message.get("retry")
     if retry is not None and not isinstance(retry, bool):
         raise ProtocolViolation("retry must be boolean")
@@ -400,3 +365,31 @@ def resolve_provider(command: str, config_source: str, locations: list[ProviderL
     if len(matches) > 1:
         raise ResolutionFailure("provider name is ambiguous across trusted locations")
     return matches[0]
+
+
+class TokenHelperFailure(RuntimeError):
+    """A Phase 1 `tokenHelper` could not produce a header; npm fails the request."""
+
+
+def check_token_helper_config(value: str, config_source: str) -> None:
+    """Phase 1 accepts pnpm's `tokenHelper` exactly as pnpm does: from user or
+    global config only, as an absolute path with no arguments."""
+    if config_source not in TOKEN_HELPER_CONFIG_SOURCES:
+        raise ResolutionFailure("tokenHelper may only come from user or global config")
+    if not (os.path.isabs(value) or value.startswith("/")) or any(char.isspace() for char in value):
+        raise ResolutionFailure("tokenHelper must be an absolute path with no arguments")
+
+
+def token_helper_header(exit_code: int, stdout: str) -> str:
+    """Maps a `tokenHelper` run to an `Authorization` header value the way pnpm
+    does: a raw token gets `Bearer `, output that already starts with a scheme
+    (`Bearer x`, `Basic x`) is used as is."""
+    if exit_code != 0:
+        raise TokenHelperFailure("tokenHelper exited with a non-zero status")
+    token = stdout.rstrip()
+    if not token:
+        raise TokenHelperFailure("tokenHelper printed an empty token")
+    scheme, _, rest = token.partition(" ")
+    if rest and scheme.isascii() and scheme.isalpha():
+        return token
+    return f"Bearer {token}"

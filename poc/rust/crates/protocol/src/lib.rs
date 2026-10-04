@@ -39,8 +39,6 @@ pub enum RequestKind {
     Login,
     Logout,
     Get,
-    GetBatch,
-    Refresh,
     Erase,
     /// A kind this build does not know, sent by a newer client. A provider
     /// answers it with `operation-not-supported`; a client never sends it.
@@ -48,23 +46,36 @@ pub enum RequestKind {
     Unsupported,
 }
 
+/// The npm action a credential must authorize. npm names the action and the
+/// provider maps it onto its registry's own tiers, because those differ: npmjs
+/// splits stage-only from direct publish, GitHub Packages and Azure Artifacts
+/// put deletion in a tier above write.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Operation {
     Read,
     Publish,
+    Stage,
+    Deprecate,
+    DistTag,
+    Unpublish,
+    Owner,
+    Access,
+    /// An action this build does not know. A provider must not treat it as
+    /// `read`; it answers `operation-not-supported`.
+    #[serde(other)]
+    Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PackageContext {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
-    pub package: String,
+impl Operation {
+    pub fn requires_version(&self) -> bool {
+        matches!(self, Self::Publish | Self::Stage)
+    }
 }
 
-/// A bearer-equivalent value: a token, a password or a `refreshState`. It is
-/// written to the wire as a plain string, and `Debug` never shows it, so a
-/// logged request or response cannot leak it.
+/// A bearer-equivalent value: a token or a password. It is written to the
+/// wire as a plain string, and `Debug` never shows it, so a logged request or
+/// response cannot leak it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Secret(String);
@@ -116,38 +127,16 @@ pub struct Request {
     pub retry: Option<bool>,
     #[serde(rename = "httpStatus", skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
-    #[serde(rename = "refreshState", skip_serializing_if = "Option::is_none")]
-    pub refresh_state: Option<Secret>,
     #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
     pub auth_challenges: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub packages: Option<Vec<PackageContext>>,
 }
 
 impl Request {
-    pub fn get_install(registry: impl Into<String>, scope: Option<&str>, package: &str) -> Self {
+    /// A request carrying only the fields every kind has.
+    pub fn bare(kind: RequestKind, registry: impl Into<String>) -> Self {
         Self {
             v: PROTOCOL_VERSION,
-            kind: RequestKind::Get,
-            registry: registry.into(),
-            scope: scope.map(str::to_string),
-            package: Some(package.to_string()),
-            version: None,
-            operation: Some(Operation::Read),
-            command: Some("install".into()),
-            interactive: Some(false),
-            retry: None,
-            http_status: None,
-            refresh_state: None,
-            auth_challenges: None,
-            packages: None,
-        }
-    }
-
-    pub fn refresh(registry: impl Into<String>, refresh_state: impl Into<Secret>) -> Self {
-        Self {
-            v: PROTOCOL_VERSION,
-            kind: RequestKind::Refresh,
+            kind,
             registry: registry.into(),
             scope: None,
             package: None,
@@ -157,28 +146,33 @@ impl Request {
             interactive: None,
             retry: None,
             http_status: None,
-            refresh_state: Some(refresh_state.into()),
             auth_challenges: None,
-            packages: None,
         }
     }
 
-    pub fn get_batch(registry: impl Into<String>, packages: Vec<PackageContext>) -> Self {
+    pub fn get_install(registry: impl Into<String>, scope: Option<&str>, package: &str) -> Self {
         Self {
-            v: PROTOCOL_VERSION,
-            kind: RequestKind::GetBatch,
-            registry: registry.into(),
-            scope: None,
-            package: None,
-            version: None,
+            scope: scope.map(str::to_string),
+            package: Some(package.to_string()),
             operation: Some(Operation::Read),
             command: Some("install".into()),
             interactive: Some(false),
-            retry: None,
-            http_status: None,
-            refresh_state: None,
-            auth_challenges: None,
-            packages: Some(packages),
+            ..Self::bare(RequestKind::Get, registry)
+        }
+    }
+
+    pub fn get_publish(
+        registry: impl Into<String>,
+        scope: Option<&str>,
+        package: &str,
+        version: &str,
+    ) -> Self {
+        Self {
+            version: Some(version.into()),
+            operation: Some(Operation::Publish),
+            command: Some("publish".into()),
+            interactive: Some(true),
+            ..Self::get_install(registry, scope, package)
         }
     }
 
@@ -193,25 +187,6 @@ impl Request {
                 require(self.operation.is_some(), "get requires operation")?;
                 require(self.interactive.is_some(), "get requires interactive")?;
             }
-            RequestKind::GetBatch => {
-                require(
-                    self.operation == Some(Operation::Read),
-                    "get-batch is for read operations only",
-                )?;
-                require(self.interactive.is_some(), "get-batch requires interactive")?;
-                require(
-                    self.packages
-                        .as_ref()
-                        .is_some_and(|packages| !packages.is_empty()),
-                    "get-batch requires packages",
-                )?;
-            }
-            RequestKind::Refresh => {
-                require(
-                    self.refresh_state.is_some(),
-                    "refresh requires refreshState",
-                )?;
-            }
             RequestKind::Login | RequestKind::Logout | RequestKind::Erase => {}
             RequestKind::Unsupported => {
                 return Err(ProtocolError::InvalidMessage(
@@ -219,8 +194,14 @@ impl Request {
                 ));
             }
         }
-        if self.operation == Some(Operation::Publish) {
-            require(self.version.is_some(), "publish requires version")?;
+        if let Some(operation) = &self.operation {
+            require(
+                *operation != Operation::Unsupported,
+                "a client must not send an unknown operation",
+            )?;
+            if operation.requires_version() {
+                require(self.version.is_some(), "publish and stage require version")?;
+            }
         }
         if self.retry == Some(true) {
             require(self.http_status.is_some(), "retry=true requires httpStatus")?;
@@ -271,13 +252,6 @@ pub enum Granularity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TokenResult {
-    pub auth: Auth,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub granularity: Option<Granularity>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderOk {
     pub kind: RequestKind,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -291,81 +265,54 @@ pub struct ProviderOk {
         skip_serializing_if = "Option::is_none"
     )]
     pub operation_independent: Option<bool>,
-    #[serde(rename = "refreshState", skip_serializing_if = "Option::is_none")]
-    pub refresh_state: Option<Secret>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granularity: Option<Granularity>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub results: Option<Vec<TokenResult>>,
 }
 
 impl ProviderOk {
+    /// An `Ok` with no credential, the answer to login, logout and erase.
+    pub fn done(kind: RequestKind) -> Self {
+        Self {
+            kind,
+            auth: None,
+            cache: None,
+            expires_at: None,
+            operation_independent: None,
+            granularity: None,
+        }
+    }
+
     pub fn bearer(token: impl Into<Secret>, granularity: Granularity) -> Self {
         Self {
-            kind: RequestKind::Get,
             auth: Some(Auth::Bearer {
                 token: token.into(),
             }),
             cache: Some(CachePolicy::Session),
-            expires_at: None,
-            operation_independent: None,
-            refresh_state: None,
             granularity: Some(granularity),
-            results: None,
+            ..Self::done(RequestKind::Get)
         }
     }
 
-    pub fn refreshed(token: impl Into<Secret>, refresh_state: impl Into<Secret>) -> Self {
+    /// A short-lived token. When it nears `expires_at` the client sends a
+    /// plain `get` again; refreshing is the provider's own business.
+    pub fn expiring(token: impl Into<Secret>, expires_at: u64) -> Self {
         Self {
-            kind: RequestKind::Refresh,
-            auth: Some(Auth::Bearer {
-                token: token.into(),
-            }),
             cache: Some(CachePolicy::Expires),
-            expires_at: Some(1_893_456_000),
+            expires_at: Some(expires_at),
             operation_independent: Some(true),
-            refresh_state: Some(refresh_state.into()),
-            granularity: Some(Granularity::Scope),
-            results: None,
-        }
-    }
-
-    pub fn batch(results: Vec<TokenResult>) -> Self {
-        Self {
-            kind: RequestKind::GetBatch,
-            auth: None,
-            cache: Some(CachePolicy::Session),
-            expires_at: None,
-            operation_independent: None,
-            refresh_state: None,
-            granularity: None,
-            results: Some(results),
+            ..Self::bearer(token, Granularity::Scope)
         }
     }
 
     pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         require(&self.kind == kind, "Ok.kind must match request kind")?;
-        if matches!(
-            self.kind,
-            RequestKind::Login | RequestKind::Logout | RequestKind::Erase
-        ) {
+        if self.kind != RequestKind::Get {
             return Ok(());
         }
-        if self.kind == RequestKind::GetBatch {
-            let results = self.results.as_ref().ok_or_else(|| {
-                ProtocolError::InvalidMessage("get-batch response requires results".into())
-            })?;
-            for result in results {
-                result.auth.validate()?;
-            }
-        } else {
-            self.auth
-                .as_ref()
-                .ok_or_else(|| {
-                    ProtocolError::InvalidMessage("token response requires auth".into())
-                })?
-                .validate()?;
-        }
+        self.auth
+            .as_ref()
+            .ok_or_else(|| ProtocolError::InvalidMessage("token response requires auth".into()))?
+            .validate()?;
         if self.cache == Some(CachePolicy::Expires) {
             require(
                 self.expires_at.is_some(),
@@ -532,11 +479,32 @@ mod tests {
     }
 
     #[test]
-    fn publish_requires_version() {
-        let mut request =
-            Request::get_install("https://registry.example.test/", Some("@scope"), "pkg");
-        request.operation = Some(Operation::Publish);
+    fn publish_and_stage_require_version() {
+        let mut request = Request::get_publish(
+            "https://registry.example.test/",
+            Some("@scope"),
+            "pkg",
+            "1.0.0",
+        );
+        assert!(request.validate().is_ok());
 
+        request.version = None;
+        for operation in [Operation::Publish, Operation::Stage] {
+            request.operation = Some(operation);
+            assert!(request.validate().is_err());
+        }
+        request.operation = Some(Operation::Unpublish);
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn unknown_operation_parses_as_unsupported_and_is_never_sent() {
+        let request: Request = serde_json::from_str(
+            r#"{"v":1,"kind":"get","registry":"https://registry.example.test/","operation":"yank","interactive":false}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.operation, Some(Operation::Unsupported));
         assert!(request.validate().is_err());
     }
 
@@ -561,8 +529,6 @@ mod tests {
             RequestKind::Login,
             RequestKind::Logout,
             RequestKind::Get,
-            RequestKind::GetBatch,
-            RequestKind::Refresh,
             RequestKind::Erase,
         ]);
 
@@ -571,9 +537,24 @@ mod tests {
 
     #[test]
     fn generated_operation_values_match_serde() {
-        let actual = serialized_values([Operation::Read, Operation::Publish]);
+        let all = [
+            Operation::Read,
+            Operation::Publish,
+            Operation::Stage,
+            Operation::Deprecate,
+            Operation::DistTag,
+            Operation::Unpublish,
+            Operation::Owner,
+            Operation::Access,
+        ];
+        let requiring_version: Vec<String> = all
+            .iter()
+            .filter(|operation| operation.requires_version())
+            .map(|operation| serialized_values([operation.clone()]).remove(0))
+            .collect();
 
-        assert_eq!(actual, generated::OPERATIONS);
+        assert_eq!(serialized_values(all), generated::OPERATIONS);
+        assert_eq!(requiring_version, generated::OPERATIONS_REQUIRING_VERSION);
     }
 
     #[test]
@@ -600,35 +581,30 @@ mod tests {
     }
 
     #[test]
-    fn get_batch_rejects_publish() {
-        let mut request = Request::get_batch(
-            "https://registry.example.test/",
-            vec![PackageContext {
-                scope: None,
-                package: "pkg".into(),
-            }],
-        );
-        assert!(request.validate().is_ok());
+    fn removed_request_kinds_are_unsupported() {
+        for kind in ["get-batch", "refresh"] {
+            let request: Request = serde_json::from_value(serde_json::json!({
+                "v": 1, "kind": kind, "registry": "https://registry.example.test/"
+            }))
+            .unwrap();
 
-        request.operation = Some(Operation::Publish);
-        request.version = Some("1.0.0".into());
-        assert!(request.validate().is_err());
+            assert_eq!(request.kind, RequestKind::Unsupported);
+        }
     }
 
     #[test]
     fn debug_output_redacts_secrets() {
-        let mut ok = ProviderOk::refreshed("bearer-secret", "refresh-secret");
-        ok.results = Some(vec![TokenResult {
-            auth: Auth::Basic {
+        let bearer = ProviderOk::expiring("bearer-secret", 1_893_456_000);
+        let basic = ProviderOk {
+            auth: Some(Auth::Basic {
                 username: "deploy".into(),
                 password: "basic-secret".into(),
-            },
-            granularity: None,
-        }]);
-        let request = Request::refresh("https://registry.example.test/", "refresh-secret");
-        let rendered = format!("{ok:?} {request:?}");
+            }),
+            ..ProviderOk::done(RequestKind::Get)
+        };
+        let rendered = format!("{bearer:?} {basic:?}");
 
-        for secret in ["bearer-secret", "refresh-secret", "basic-secret"] {
+        for secret in ["bearer-secret", "basic-secret"] {
             assert!(
                 !rendered.contains(secret),
                 "{secret} leaked into {rendered}"

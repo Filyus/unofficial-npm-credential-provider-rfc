@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 PROTOCOL_VERSION = 1
-SUPPORTED_REQUEST_KINDS = frozenset(['login', 'logout', 'get', 'get-batch', 'refresh', 'erase'])
-SUPPORTED_OPERATIONS = frozenset(['read', 'publish'])
+SUPPORTED_REQUEST_KINDS = frozenset(['login', 'logout', 'get', 'erase'])
+SUPPORTED_OPERATIONS = frozenset(['read', 'publish', 'stage', 'deprecate', 'dist-tag', 'unpublish', 'owner', 'access'])
+OPERATIONS_REQUIRING_VERSION = frozenset(['publish', 'stage'])
 KNOWN_COMMANDS = frozenset(['install', 'ci', 'publish', 'search', 'view'])
-SUPPORTED_CAPABILITIES = frozenset(['get-batch', 'refresh', 'login', 'logout', 'erase', 'auth-challenges', 'retry-context'])
+SUPPORTED_CAPABILITIES = frozenset(['login', 'logout', 'erase', 'auth-challenges', 'retry-context'])
 SUPPORTED_AUTH_TYPES = frozenset(['bearer', 'basic'])
 SUPPORTED_CACHE = frozenset(['never', 'session', 'expires'])
 SUPPORTED_GRANULARITY = frozenset(['registry', 'scope', 'package'])
@@ -16,3 +17,5 @@ DEFAULT_CACHE_POLICY = 'session'
 DEFAULT_GRANULARITY = 'registry'
 OPERATION_INDEPENDENT_DEFAULT = True
 EXPIRY_MARGIN_SECONDS = 60
+TOKEN_HELPER_CONFIG_SOURCES = frozenset(['user', 'global'])
+TOKEN_HELPER_TIMEOUT_SECONDS = 60

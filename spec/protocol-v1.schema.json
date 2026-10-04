@@ -35,7 +35,7 @@
       "properties": {
         "v": { "const": 1 },
         "kind": {
-          "enum": ["login", "logout", "get", "get-batch", "refresh", "erase"]
+          "enum": ["login", "logout", "get", "erase"]
         },
         "registry": {
           "type": "string",
@@ -54,7 +54,8 @@
           "minLength": 1
         },
         "operation": {
-          "enum": ["read", "publish"]
+          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier.",
+          "enum": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"]
         },
         "command": {
           "description": "Informational npm command name. Open-ended: policy knownCommands lists examples, and providers must accept other values.",
@@ -72,10 +73,6 @@
           "minimum": 100,
           "maximum": 599
         },
-        "refreshState": {
-          "type": "string",
-          "minLength": 1
-        },
         "token": {
           "type": "string",
           "minLength": 1
@@ -87,11 +84,6 @@
         "authChallenges": {
           "type": "array",
           "items": { "type": "string" }
-        },
-        "packages": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/packageContext" },
-          "minItems": 1
         }
       },
       "allOf": [
@@ -106,26 +98,7 @@
         },
         {
           "if": {
-            "properties": { "kind": { "const": "get-batch" } },
-            "required": ["kind"]
-          },
-          "then": {
-            "required": ["operation", "interactive", "packages"],
-            "properties": { "operation": { "const": "read" } }
-          }
-        },
-        {
-          "if": {
-            "properties": { "kind": { "const": "refresh" } },
-            "required": ["kind"]
-          },
-          "then": {
-            "required": ["refreshState"]
-          }
-        },
-        {
-          "if": {
-            "properties": { "operation": { "const": "publish" } },
+            "properties": { "operation": { "enum": ["publish", "stage"] } },
             "required": ["operation"]
           },
           "then": {
@@ -142,21 +115,6 @@
           }
         }
       ],
-      "additionalProperties": true
-    },
-    "packageContext": {
-      "type": "object",
-      "required": ["package"],
-      "properties": {
-        "scope": {
-          "type": ["string", "null"],
-          "pattern": "^@[^/]+$"
-        },
-        "package": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
       "additionalProperties": true
     },
     "providerResponse": {
@@ -184,7 +142,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["login", "logout", "get", "get-batch", "refresh", "erase"]
+          "enum": ["login", "logout", "get", "erase"]
         },
         "auth": { "$ref": "#/$defs/auth" },
         "cache": {
@@ -197,28 +155,11 @@
         "operationIndependent": {
           "type": "boolean"
         },
-        "refreshState": {
-          "type": "string",
-          "minLength": 1
-        },
         "granularity": {
           "enum": ["registry", "scope", "package"]
-        },
-        "results": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/batchResult" }
         }
       },
       "allOf": [
-        {
-          "if": {
-            "properties": { "kind": { "const": "get-batch" } },
-            "required": ["kind"]
-          },
-          "then": {
-            "required": ["results"]
-          }
-        },
         {
           "if": {
             "properties": { "cache": { "const": "expires" } },
@@ -230,7 +171,7 @@
         },
         {
           "if": {
-            "properties": { "kind": { "enum": ["get", "refresh"] } },
+            "properties": { "kind": { "const": "get" } },
             "required": ["kind"]
           },
           "then": {
@@ -238,17 +179,6 @@
           }
         }
       ],
-      "additionalProperties": true
-    },
-    "batchResult": {
-      "type": "object",
-      "required": ["auth"],
-      "properties": {
-        "auth": { "$ref": "#/$defs/auth" },
-        "granularity": {
-          "enum": ["registry", "scope", "package"]
-        }
-      },
       "additionalProperties": true
     },
     "auth": {

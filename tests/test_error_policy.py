@@ -40,24 +40,15 @@ class ErrorPolicyTests(unittest.TestCase):
 
         self.assertEqual(outcome, "legacy-auth")
 
-    def test_refresh_operation_not_supported_retries_get(self) -> None:
-        refresh_request = {
-            "v": 1,
-            "kind": "refresh",
-            "registry": "https://registry.example.test/",
-            "refreshState": "opaque-provider-handle",
-        }
-
-        outcome = self.client().handle_response(
-            refresh_request,
-            {"Err": {"kind": "operation-not-supported"}},
-        )
-
-        self.assertEqual(outcome, "retry-get")
-
-    def test_get_operation_not_supported_fails(self) -> None:
-        with self.assertRaises(ProviderFailure):
-            self.client().handle_response(REQUEST, {"Err": {"kind": "operation-not-supported"}})
+    def test_operation_not_supported_fails_for_every_kind(self) -> None:
+        for request in (
+            REQUEST,
+            {**REQUEST, "operation": "unpublish", "command": "unpublish"},
+            {"v": 1, "kind": "login", "registry": "https://registry.example.test/"},
+        ):
+            with self.subTest(request=request):
+                with self.assertRaises(ProviderFailure):
+                    self.client().handle_response(request, {"Err": {"kind": "operation-not-supported"}})
 
     def test_other_error_fails(self) -> None:
         with self.assertRaises(ProviderFailure):

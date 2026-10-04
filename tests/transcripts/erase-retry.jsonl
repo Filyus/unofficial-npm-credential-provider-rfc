@@ -1,0 +1,8 @@
+{"from":"provider","message":{"v":[1],"capabilities":["erase","auth-challenges","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","command":"install","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"token-1"},"cache":"session","granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://registry.example.test/","scope":"@scope","authChallenges":["Bearer realm=\"https://registry.example.test/\""]}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["Bearer realm=\"https://registry.example.test/\""]}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"token-2"},"cache":"session","granularity":"scope"}}}
+{"from":"client","event":"close"}

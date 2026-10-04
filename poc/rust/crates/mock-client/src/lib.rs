@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
-    ErrorKind, Hello, PackageContext, ProtocolError, ProviderResponse, Request, RequestKind,
-    negotiate, read_json_line, write_json_line,
+    ErrorKind, Hello, ProtocolError, ProviderResponse, Request, RequestKind, negotiate,
+    read_json_line, write_json_line,
 };
 use std::fmt;
 use std::io::{BufReader, Read};
@@ -9,8 +9,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientScenario {
     InstallGet,
-    Refresh,
-    BatchInstall,
+    PublishGet,
     Login,
     Logout,
     Erase,
@@ -97,7 +96,6 @@ impl ProviderSession {
         request.validate()?;
         let response = self.exchange(request)?;
         response.validate_for(&request.kind)?;
-        validate_exchange(request, &response)?;
         Ok(response)
     }
 
@@ -158,7 +156,7 @@ pub fn run_exchange(
     let mut session = ProviderSession::spawn(provider_command)?;
     let request = request_for(scenario);
     let response = session.request(&request)?;
-    let outcome = summarize(&request, &response)?;
+    let outcome = summarize(&response)?;
     let selected_version = session.version;
     session.close()?;
 
@@ -191,76 +189,25 @@ fn request_for(scenario: ClientScenario) -> Request {
     let registry = "https://registry.example.test/";
     match scenario {
         ClientScenario::InstallGet => Request::get_install(registry, Some("@scope"), "package"),
-        ClientScenario::Refresh => Request::refresh(registry, "opaque-refresh-token"),
-        ClientScenario::BatchInstall => Request::get_batch(
-            registry,
-            vec![
-                PackageContext {
-                    scope: Some("@scope".into()),
-                    package: "api-client".into(),
-                },
-                PackageContext {
-                    scope: Some("@scope".into()),
-                    package: "ui".into(),
-                },
-            ],
-        ),
+        ClientScenario::PublishGet => {
+            Request::get_publish(registry, Some("@scope"), "package", "1.2.3")
+        }
         ClientScenario::Login => Request {
             interactive: Some(true),
-            ..bare(RequestKind::Login, registry)
+            ..Request::bare(RequestKind::Login, registry)
         },
-        ClientScenario::Logout => bare(RequestKind::Logout, registry),
+        ClientScenario::Logout => Request::bare(RequestKind::Logout, registry),
         ClientScenario::Erase => Request {
             scope: Some("@scope".into()),
             command: Some("install".into()),
-            ..bare(RequestKind::Erase, registry)
+            ..Request::bare(RequestKind::Erase, registry)
         },
     }
 }
 
-fn bare(kind: RequestKind, registry: &str) -> Request {
-    Request {
-        v: credential_provider_protocol::PROTOCOL_VERSION,
-        kind,
-        registry: registry.into(),
-        scope: None,
-        package: None,
-        version: None,
-        operation: None,
-        command: None,
-        interactive: None,
-        retry: None,
-        http_status: None,
-        refresh_state: None,
-        auth_challenges: None,
-        packages: None,
-    }
-}
-
-fn validate_exchange(request: &Request, response: &ProviderResponse) -> Result<(), ExchangeError> {
-    if request.kind != RequestKind::GetBatch {
-        return Ok(());
-    }
-    let ProviderResponse::Ok(ok) = response else {
-        return Ok(());
-    };
-    let expected = request.packages.as_ref().map_or(0, Vec::len);
-    let actual = ok.results.as_ref().map_or(0, Vec::len);
-    if expected != actual {
-        return Err(ExchangeError::Provider(format!(
-            "batch result count mismatch: expected {expected}, got {actual}"
-        )));
-    }
-    Ok(())
-}
-
-fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, ExchangeError> {
+fn summarize(response: &ProviderResponse) -> Result<String, ExchangeError> {
     match response {
         ProviderResponse::Ok(ok) => {
-            if request.kind == RequestKind::GetBatch {
-                let count = ok.results.as_ref().map_or(0, Vec::len);
-                return Ok(format!("batch:{count}"));
-            }
             if matches!(
                 ok.kind,
                 RequestKind::Login | RequestKind::Logout | RequestKind::Erase
@@ -274,11 +221,9 @@ fn summarize(request: &Request, response: &ProviderResponse) -> Result<String, E
             ErrorKind::NotFound => Err(ExchangeError::Provider(
                 "not-found fails closed without explicit legacy fallback".into(),
             )),
-            ErrorKind::OperationNotSupported => match request.kind {
-                RequestKind::Refresh => Ok("retry-get".into()),
-                RequestKind::GetBatch => Ok("individual-get".into()),
-                _ => Err(ExchangeError::Provider("operation-not-supported".into())),
-            },
+            ErrorKind::OperationNotSupported => {
+                Err(ExchangeError::Provider("operation-not-supported".into()))
+            }
             ErrorKind::Other => Err(ExchangeError::Provider(
                 err.message.clone().unwrap_or_else(|| "other".into()),
             )),
@@ -291,8 +236,6 @@ fn kind_name(kind: &RequestKind) -> &'static str {
         RequestKind::Login => "login",
         RequestKind::Logout => "logout",
         RequestKind::Get => "get",
-        RequestKind::GetBatch => "get-batch",
-        RequestKind::Refresh => "refresh",
         RequestKind::Erase => "erase",
         RequestKind::Unsupported => "unsupported",
     }

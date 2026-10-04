@@ -9,10 +9,11 @@ Source: `spec/policy-v1.json`.
 | Field | Values |
 | --- | --- |
 | Protocol version | `1` |
-| Request kinds | `login`, `logout`, `get`, `get-batch`, `refresh`, `erase` |
-| Operations | `read`, `publish` |
+| Request kinds | `login`, `logout`, `get`, `erase` |
+| Operations | `read`, `publish`, `stage`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access` |
+| Operations that require `version` | `publish`, `stage` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
-| Capabilities | `get-batch`, `refresh`, `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
+| Capabilities | `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |
@@ -48,8 +49,6 @@ Source: `spec/policy-v1.json`.
 | `not-found` | `configuredProvider` | `fail` |
 | `not-found` | `providerNotConfigured` | `legacy-auth` |
 | `not-found` | `legacyFallbackEnabled` | `legacy-auth` |
-| `operation-not-supported` | `refresh` | `retry-get` |
-| `operation-not-supported` | `get-batch` | `individual-get` |
 | `operation-not-supported` | `default` | `fail` |
 | `other` | `default` | `fail` |
 
@@ -74,5 +73,25 @@ Source: `spec/policy-v1.json`.
 | Setting | Value |
 | --- | --- |
 | `lineSize` | `implementation-defined` |
-| `batchSize` | `implementation-defined` |
 | `oversizeBehavior` | `fail` |
+
+## Forward Compatibility
+
+| Setting | Value |
+| --- | --- |
+| `unknownRequestKind` | `operation-not-supported` |
+| `unknownOperation` | `operation-not-supported` |
+| `unknownFields` | `ignore` |
+| `unknownCapabilities` | `ignore` |
+
+## Token Helper (Phase 1)
+
+| Setting | Value |
+| --- | --- |
+| `allowedConfigSources` | `user`, `global` |
+| `absolutePathOnly` | `true` |
+| `arguments` | `false` |
+| `timeoutSeconds` | `60` |
+| `runsPerRegistryPerProcess` | `1` |
+| `emptyOutput` | `fail` |
+| `nonZeroExit` | `fail` |

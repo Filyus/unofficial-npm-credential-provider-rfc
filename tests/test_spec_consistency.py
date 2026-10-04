@@ -59,22 +59,21 @@ class SpecConsistencyTests(unittest.TestCase):
         self.assertNotIn("outdated", self.policy["wire"]["knownCommands"])
         protocol_model.validate_request(request)
 
-    def test_get_batch_operation_not_supported_matches_policy(self) -> None:
-        client = CredentialClientModel()
-        client.receive_hello({"v": [1]})
-        batch = {
-            "v": 1,
-            "kind": "get-batch",
-            "registry": "https://registry.example.test/",
-            "operation": "read",
-            "interactive": False,
-            "packages": [{"scope": "@scope", "package": "pkg"}],
-        }
+    def test_operations_requiring_version_match_schema(self) -> None:
+        rules = self.schema["$defs"]["request"]["allOf"]
+        version_rule = next(rule for rule in rules if rule["then"].get("required") == ["version"])
 
         self.assertEqual(
-            client.handle_response(batch, {"Err": {"kind": "operation-not-supported"}}),
-            self.policy["errors"]["operation-not-supported"]["get-batch"],
+            set(version_rule["if"]["properties"]["operation"]["enum"]),
+            set(self.policy["wire"]["operationsRequiringVersion"]),
         )
+        self.assertEqual(
+            set(self.policy["wire"]["operationsRequiringVersion"]),
+            protocol_model.OPERATIONS_REQUIRING_VERSION,
+        )
+
+    def test_operation_not_supported_has_no_fallback_left(self) -> None:
+        self.assertEqual(self.policy["errors"]["operation-not-supported"], {"default": "fail"})
 
     def test_capabilities_match_policy_and_python_model(self) -> None:
         hello_properties = self.schema["$defs"]["hello"]["properties"]

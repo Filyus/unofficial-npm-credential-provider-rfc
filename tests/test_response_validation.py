@@ -84,57 +84,19 @@ class ResponseValidationTests(unittest.TestCase):
 
         self.assertEqual(outcome, "ok")
 
-    def test_get_batch_requires_matching_result_count(self) -> None:
-        request = {
-            **REQUEST,
-            "kind": "get-batch",
-            "packages": [
-                {"scope": "@scope", "package": "api-client"},
-                {"scope": "@scope", "package": "ui"},
-            ],
-        }
-
+    def test_ok_for_a_removed_kind_is_rejected(self) -> None:
         with self.assertRaises(ProtocolViolation):
             self.client.handle_response(
-                request,
-                {
-                    "Ok": {
-                        "kind": "get-batch",
-                        "cache": "session",
-                        "results": [{"auth": {"type": "bearer", "token": "only-one"}}],
-                    }
-                },
+                {**REQUEST, "kind": "refresh"},
+                {"Ok": {"kind": "refresh", "auth": {"type": "bearer", "token": "token"}}},
             )
 
-    def test_get_batch_caches_each_result(self) -> None:
-        request = {
-            **REQUEST,
-            "kind": "get-batch",
-            "packages": [
-                {"scope": "@scope", "package": "api-client"},
-                {"scope": "@scope", "package": "ui"},
-            ],
-        }
-
-        self.client.handle_response(
-            request,
-            {
-                "Ok": {
-                    "kind": "get-batch",
-                    "cache": "session",
-                    "results": [
-                        {
-                            "auth": {"type": "bearer", "token": "api"},
-                            "granularity": "package",
-                        },
-                        {
-                            "auth": {"type": "bearer", "token": "ui"},
-                            "granularity": "package",
-                        },
-                    ],
-                }
-            },
-        )
+    def test_package_granularity_is_keyed_per_package(self) -> None:
+        for package in ("api-client", "ui"):
+            self.client.handle_response(
+                {**REQUEST, "scope": "@scope", "package": package},
+                {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": package}, "granularity": "package"}},
+            )
 
         self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client"), self.client.cache)
         self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui"), self.client.cache)

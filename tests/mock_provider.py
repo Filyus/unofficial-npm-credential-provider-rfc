@@ -25,9 +25,7 @@ def main() -> int:
             "get-success",
             "not-found",
             "version-mismatch",
-            "refresh-success",
-            "batch-success",
-            "batch-count-mismatch",
+            "expiring-token",
             "login-success",
             "logout-success",
             "erase-success",
@@ -81,52 +79,16 @@ def main() -> int:
                     }
                 }
             )
-        elif args.scenario == "batch-success" and kind == "get-batch":
-            packages = request.get("packages", [])
-            write(
-                {
-                    "Ok": {
-                        "kind": "get-batch",
-                        "results": [
-                            {
-                                "auth": {
-                                    "type": "bearer",
-                                    "token": f"token-for-{package['package']}",
-                                },
-                                "granularity": "package",
-                            }
-                            for package in packages
-                        ],
-                        "cache": "session",
-                    }
-                }
-            )
-        elif args.scenario == "batch-count-mismatch" and kind == "get-batch":
-            write(
-                {
-                    "Ok": {
-                        "kind": "get-batch",
-                        "results": [
-                            {
-                                "auth": {"type": "bearer", "token": "only-one"},
-                                "granularity": "package",
-                            }
-                        ],
-                        "cache": "session",
-                    }
-                }
-            )
         elif args.scenario in {"login-success", "logout-success", "erase-success"}:
             write({"Ok": {"kind": kind}})
-        elif args.scenario == "refresh-success" and kind == "refresh":
+        elif args.scenario == "expiring-token":
             write(
                 {
                     "Ok": {
-                        "kind": "refresh",
-                        "auth": {"type": "bearer", "token": "refreshed-token"},
+                        "kind": "get",
+                        "auth": {"type": "bearer", "token": "short-lived-token"},
                         "cache": "expires",
                         "expiresAt": 1893456000,
-                        "refreshState": "opaque-provider-handle",
                         "granularity": "scope",
                     }
                 }

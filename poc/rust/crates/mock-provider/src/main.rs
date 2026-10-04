@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
-    ErrorKind, Granularity, Hello, ProviderErr, ProviderOk, ProviderResponse, Request, RequestKind,
-    TokenResult, read_json_line, write_json_line,
+    ErrorKind, Granularity, Hello, Operation, ProviderErr, ProviderOk, ProviderResponse, Request,
+    RequestKind, read_json_line, write_json_line,
 };
 use std::io::{self, BufReader};
 
@@ -29,9 +29,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut served = 0_u32;
     while let Some(request) = read_json_line::<Request>(&mut reader)? {
         served += 1;
-        // A kind this provider does not know comes from a newer client; the
-        // answer is a structured refusal, never a crash or a guess.
-        if request.kind == RequestKind::Unsupported {
+        // A kind or operation this provider does not know comes from a newer
+        // client; the answer is a structured refusal, never a crash or a guess.
+        // An unknown operation in particular must not be served as a read.
+        if request.kind == RequestKind::Unsupported
+            || request.operation == Some(Operation::Unsupported)
+        {
             write_json_line(
                 &mut io::stdout(),
                 &ProviderResponse::Err(ProviderErr {
@@ -77,53 +80,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 caused_by: Some(vec!["test scenario".into()]),
             }),
             "expires-missing-expiration" => ProviderResponse::Ok(ProviderOk {
-                kind: RequestKind::Get,
-                auth: Some(credential_provider_protocol::Auth::Bearer {
-                    token: "test-token".into(),
-                }),
-                cache: Some(credential_provider_protocol::CachePolicy::Expires),
                 expires_at: None,
-                operation_independent: None,
-                refresh_state: None,
-                granularity: Some(Granularity::Scope),
-                results: None,
+                ..ProviderOk::expiring("test-token", 0)
             }),
-            "refresh-success" => ProviderResponse::Ok(ProviderOk::refreshed(
-                "refreshed-token",
-                request
-                    .refresh_state
-                    .clone()
-                    .unwrap_or_else(|| "opaque-provider-handle".into()),
-            )),
-            "batch-success" => {
-                let packages = request.packages.clone().unwrap_or_default();
-                let results = packages
-                    .into_iter()
-                    .map(|package| TokenResult {
-                        auth: credential_provider_protocol::Auth::Bearer {
-                            token: format!("token-for-{}", package.package).into(),
-                        },
-                        granularity: Some(Granularity::Package),
-                    })
-                    .collect();
-                ProviderResponse::Ok(ProviderOk::batch(results))
+            "expiring-token" => {
+                ProviderResponse::Ok(ProviderOk::expiring("short-lived-token", 1_893_456_000))
             }
-            "batch-count-mismatch" => ProviderResponse::Ok(ProviderOk::batch(vec![TokenResult {
-                auth: credential_provider_protocol::Auth::Bearer {
-                    token: "only-one".into(),
-                },
-                granularity: Some(Granularity::Package),
-            }])),
-            "request-kind-success" => ProviderResponse::Ok(ProviderOk {
-                kind: request.kind.clone(),
-                auth: None,
-                cache: None,
-                expires_at: None,
-                operation_independent: None,
-                refresh_state: None,
-                granularity: None,
-                results: None,
-            }),
+            "request-kind-success" => ProviderResponse::Ok(ProviderOk::done(request.kind.clone())),
             "session-counter" => ProviderResponse::Ok(ProviderOk::bearer(
                 format!("token-{served}"),
                 Granularity::Package,

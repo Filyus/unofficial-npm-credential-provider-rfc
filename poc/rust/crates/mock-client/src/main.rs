@@ -16,8 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--scenario" => {
                 scenario = match args.next().as_deref() {
                     Some("install-get") => ClientScenario::InstallGet,
-                    Some("refresh") => ClientScenario::Refresh,
-                    Some("batch-install") => ClientScenario::BatchInstall,
+                    Some("publish-get") => ClientScenario::PublishGet,
                     Some("login") => ClientScenario::Login,
                     Some("logout") => ClientScenario::Logout,
                     Some("erase") => ClientScenario::Erase,

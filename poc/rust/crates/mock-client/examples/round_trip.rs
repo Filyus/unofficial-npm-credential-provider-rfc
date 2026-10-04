@@ -1,13 +1,14 @@
-//! What a credential lookup costs on the wire, to weigh `get-batch` against
-//! plain `get` in a session and against one process per lookup.
+//! What a credential lookup costs on the wire: `get` in one provider session
+//! against a fresh provider process per lookup.
 //!
 //!     cargo build --release --manifest-path poc/rust/Cargo.toml -p mock-provider -p mock-client --examples
 //!     poc/rust/target/release/examples/round_trip <path-to-release-mock-provider> [lookups] [rounds]
 //!
-//! Each round runs the three conditions in a rotated order and reports the
-//! cost per lookup; the summary is the median with the min..max spread.
+//! Each round runs the conditions in a rotated order and reports the cost per
+//! lookup; the summary is the median with the min..max spread. The version at
+//! commit ab3ad81 also timed a `get-batch`, the measurement behind dropping it.
 
-use credential_provider_protocol::{PackageContext, Request};
+use credential_provider_protocol::Request;
 use mock_client::ProviderSession;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -24,13 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spawns = (lookups / 10).max(10);
 
     let mut session_gets = Vec::new();
-    let mut one_batch = Vec::new();
     let mut spawn_per_lookup = Vec::new();
     for round in 0..rounds {
-        for condition in (0..3).map(|offset| (round + offset) % 3) {
+        for condition in (0..2).map(|offset| (round + offset) % 2) {
             match condition {
                 0 => session_gets.push(per_lookup(session_get(&provider, lookups)?, lookups)),
-                1 => one_batch.push(per_lookup(batch(&provider, lookups)?, lookups)),
                 _ => spawn_per_lookup.push(per_lookup(spawn_each(&provider, spawns)?, spawns)),
             }
         }
@@ -38,7 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("lookups={lookups} rounds={rounds} spawn-iterations={spawns}");
     report("get in one session", &mut session_gets);
-    report("one get-batch", &mut one_batch);
     report("process per lookup", &mut spawn_per_lookup);
     Ok(())
 }
@@ -49,37 +47,17 @@ fn command(provider: &str, scenario: &str) -> Command {
     command
 }
 
-fn packages(count: usize) -> Vec<PackageContext> {
-    (0..count)
-        .map(|index| PackageContext {
-            scope: Some("@scope".into()),
-            package: format!("pkg-{index}"),
-        })
-        .collect()
-}
-
 /// Spawn and hello are outside the timed span: this is the steady-state cost
 /// of one more lookup in a session that already exists.
 fn session_get(provider: &str, lookups: usize) -> Result<Duration, Box<dyn std::error::Error>> {
     let mut session = ProviderSession::spawn(command(provider, "get-success"))?;
-    let requests: Vec<Request> = packages(lookups)
-        .into_iter()
-        .map(|package| Request::get_install(REGISTRY, package.scope.as_deref(), &package.package))
+    let requests: Vec<Request> = (0..lookups)
+        .map(|index| Request::get_install(REGISTRY, Some("@scope"), &format!("pkg-{index}")))
         .collect();
     let start = Instant::now();
     for request in &requests {
         session.request(request)?;
     }
-    let elapsed = start.elapsed();
-    session.close()?;
-    Ok(elapsed)
-}
-
-fn batch(provider: &str, lookups: usize) -> Result<Duration, Box<dyn std::error::Error>> {
-    let mut session = ProviderSession::spawn(command(provider, "batch-success"))?;
-    let request = Request::get_batch(REGISTRY, packages(lookups));
-    let start = Instant::now();
-    session.request(&request)?;
     let elapsed = start.elapsed();
     session.close()?;
     Ok(elapsed)
