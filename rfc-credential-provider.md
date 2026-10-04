@@ -308,11 +308,13 @@ The provider attempts server-side revocation as a best effort, always removes it
 | `read` | `install`, `ci`, `update`, `view`, `search`, `outdated`, … | — |
 | `publish` | `publish`, and promoting a staged version (`npm stage approve`) | required |
 | `stage` | `npm stage publish` | required |
-| `deprecate` | `deprecate` | optional |
+| `deprecate` | `deprecate`, `undeprecate` | optional |
 | `dist-tag` | `dist-tag add`, `dist-tag rm` | optional |
 | `unpublish` | `unpublish` | optional (absent: the whole package) |
 | `owner` | `owner add`, `owner rm` | — |
-| `access` | `access`, `team`, `org` | — |
+| `access` | `access`, `team`, `org`, and `trust` (trusted-publisher relationships) | — |
+
+Read-only subcommands of these (`stage list`, `trust list`, `owner ls`, …) use `read`.
 
 How some registries split these:
 
@@ -478,6 +480,7 @@ Registries disagree on the tiers, as the table under [Operations](#4-operations)
 - **Where it plugs in.** In `npm-registry-fetch`, `regFetch()` resolves auth synchronously (`getAuth()` in `lib/auth.js`) before the asynchronous fetch starts. A helper or provider call is asynchronous, so helper- and provider-backed auth has to be resolved inside the async fetch path, which `regFetch()` already returns as a promise. pnpm's TypeScript CLI runs `tokenHelper` with `spawnSync`, which blocks the event loop while the helper runs and rules out a long-lived session.
 - **Shape.** As suggested in the #850 review from NuGet's experience, npm can define one internal credential-source interface with implementations for the existing config lookup (`_authToken`, `_auth`, `username`/`_password`), `tokenHelper`, the provider protocol, and optionally a built-in source for npm-owned registries that spawns no process.
 - **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`.
+- **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket.
 - **Config.** `@npmcli/config` gains `tokenHelper` and `credentialProvider` as per-registry keys, accepted only from user and global config and excluded from `npm_config_*` environment variables.
 - **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so npm and third-party providers can be tested against the same cases.
 
@@ -534,7 +537,7 @@ No phase changes behavior for anyone who has not configured a helper or provider
 ## Unresolved Questions
 
 1. Should npm accept arguments in `tokenHelper`, which pnpm forbids, or stay strictly compatible?
-2. The exact operation for every `npm stage` subcommand and for `npm token`.
+2. The operation for `npm stage reject`, and whether account-level commands (`npm token`, `npm profile`) belong to the protocol at all, given that npmjs.com already requires an interactive 2FA challenge for them.
 3. Whether npm should ship a built-in provider for npmjs.com that reuses web login sessions.
 4. The format of enterprise provider pinning (`{ name, version, integrity }` or path plus checksum).
 5. Whether discovery suggestions are worth their typosquatting surface at all.
