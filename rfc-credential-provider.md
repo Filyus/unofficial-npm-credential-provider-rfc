@@ -1,14 +1,14 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 4
-> Date: 2026-05-17
+> Revision: 5
+> Date: 2026-10-04
 
 > A draft protocol proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion, addressing per-package authentication granularity, bidirectional protocol, provider discovery, and provider execution safety.
 
 ## Motivation
 
-The npm ecosystem relies on plaintext tokens in `.npmrc` or environment variables for registry authentication. This design has not changed since 2010. [RFC #850](https://github.com/pwoosam/npm-rfcs/blob/users/pwoosam/credential-provider-plugin/accepted/0000-credential-provider-plugin.md) proposes a credential provider protocol to address this. This draft explores a more explicit protocol and trust model for that direction:
+npm registry authentication still ends in a bearer secret stored in `.npmrc` (where `npm login` writes it) or in an environment variable, and every lifecycle script that runs during an install can read it. [RFC #850](https://github.com/pwoosam/npm-rfcs/blob/users/pwoosam/credential-provider-plugin/accepted/0000-credential-provider-plugin.md) proposes a credential provider protocol to address this. This draft explores a more explicit protocol and trust model for that direction:
 
 1. **No per-package granularity.** Auth is still per-registry URL. Modern registries (GitLab, GitHub) offer fine-grained tokens scoped to specific projects/packages, but the client cannot leverage this — one registry URL means one token.
 
@@ -37,6 +37,7 @@ This RFC draft proposes a protocol shape that addresses these gaps while remaini
 - Requiring OS keychain integration (providers may implement it internally)
 - Persisting tokens to disk (client holds tokens in-memory only)
 - Replacing `.npmrc` — this is an opt-in addition
+- Protecting credentials from code that already runs as the same user. Such code can invoke the provider exactly as npm does, just as any process can run `git credential fill`. What this design changes is what that code finds: no standing secret on disk or in the environment, short-lived tokens, and write credentials gated by the provider (see [Threat model](#threat-model)).
 
 ## Detailed Design
 
@@ -66,7 +67,9 @@ Provider commands are resolved deterministically from trusted sources only:
 
 The current working directory and project-local `node_modules/.bin` are never searched. Arbitrary `PATH` lookup is not used as the trust anchor for project installs. If a provider name is ambiguous across trusted sources, npm fails closed and asks the user to configure a more specific provider path.
 
-Arguments are allowed only in user-level or global configuration.
+Arguments are allowed only in user-level or global configuration. The configured value is split into argv on whitespace; a double-quoted segment is one argument, so a path such as `"C:\Program Files\gitlab\provider.exe"` survives intact. No other quoting, escaping, variable expansion or globbing is applied.
+
+The most specific per-registry `credentialProvider` list that matches the request URL replaces the default list; lists are never merged. Between config files the usual npm precedence applies, so a user-level list replaces a global one for the same key.
 
 The client must spawn the resolved provider executable directly with an argv vector and must not invoke it through a shell. npm should pass a sentinel argument such as `--npm-credential-provider` before configured provider arguments so providers can distinguish protocol mode from any standalone CLI mode.
 
@@ -235,7 +238,11 @@ Provider writes diagnostic info to stderr (for `--loglevel verbose`). Providers 
 
 #### Session Lifecycle
 
+The client spawns a provider lazily, the first time a request needs a credential for a registry that provider is configured for. A command that is served entirely from cache, or that never touches a provider-backed registry, executes no provider at all.
+
 The client keeps the provider process alive for the duration of the npm command. Multiple requests can be sent within one session (e.g., tokens for different scopes during a single `npm install`).
+
+Requests within a session are strictly sequential: the client sends a request only after reading the response to the previous one, and messages carry no request id. npm fetches in parallel, so the client serializes provider requests and coalesces concurrent cache misses for the same cache key into one request.
 
 The client **closes stdin** to signal end of session. The provider should exit cleanly.
 
@@ -258,7 +265,7 @@ If a provider exceeds the timeout, the client kills the process. For `get`, npm 
 
 When `interactive` is `false`, providers must not open browsers, prompt for MFA, wait for device-code approval, or ask the user to approve a new trust decision. They may only use credentials and trust decisions that already exist.
 
-When `interactive` is `true`, providers may use browser flows, OS-native prompts, or stderr status text. They still must not use stdin for interactive input because stdin belongs to the protocol stream.
+When `interactive` is `true`, providers may use browser flows, OS-native prompts, or stderr status text. They still must not use stdin for interactive input because stdin belongs to the protocol stream; a provider that needs typed input opens the controlling terminal directly (`/dev/tty`, or `CONIN$` on Windows). While an interactive request is outstanding, npm pauses its own progress output, as it already does for OTP prompts.
 
 In CI, provider execution should be deterministic: the provider must already be configured through user/global config, a machine image, or enterprise policy, and it must resolve from a trusted source. If no usable credential is available, npm should fail with a clear error rather than prompting or falling back silently.
 
@@ -276,7 +283,7 @@ Optional fields the client may include:
 
 | Field | Type | Description |
 |---|---|---|
-| `token` | string | If the user provides a token directly (e.g. `npm login --token glpat-xxx`), it is passed here. Provider should store it. |
+| `token` | string | If the user provides a token directly, it is passed here and the provider should store it. npm reads such a token from a hidden prompt or from its own stdin, never from a command-line argument, which would leave it in shell history and process listings. |
 | `loginUrl` | string | URL the user can visit to obtain a token (if known from registry metadata). |
 
 The provider performs the auth flow (e.g. opens browser for OAuth, waits for callback) and stores the resulting credentials in its own secure storage (OS keychain, encrypted file, etc.).
@@ -298,7 +305,7 @@ If the provider does not support interactive login:
 | **OAuth 2.0 / OIDC** | Opens browser → authorization code → exchange for token → store in keychain |
 | **Device Code** | Displays URL + code in stderr → polls for approval → store token |
 | **SSO / SAML** | Opens browser → SSO redirect → callback → store token |
-| **MFA / 2FA** | Prompts via stderr (if `interactive: true`) → validates → store token |
+| **MFA / 2FA** | Prompts on stderr and reads the code from the controlling terminal (if `interactive: true`) → validates → store token |
 | **Static token** | Receives `token` field → stores in keychain |
 
 #### `logout` — Remove Stored Credentials
@@ -362,7 +369,7 @@ If provider returns `{"Err":{"kind":"operation-not-supported"}}`, the client fal
 
 #### `erase` — Token Rejected
 
-If the registry returns 401/403, the client notifies the provider:
+If the registry rejects a provider-supplied credential with a 401, the client notifies the provider:
 
 ```json
 {"v":1,"kind":"erase","registry":"https://gitlab.example.com/api/v4/projects/123/packages/npm/","scope":"@scope","authChallenges":["Bearer realm=\"https://gitlab.example.com\""]}
@@ -377,6 +384,10 @@ After `erase`, the client may retry `get` with explicit retry context:
 ```
 
 This separates cache invalidation from credential acquisition. Providers can use `httpStatus` and `authChallenges` to distinguish expired credentials from missing permission, SSO enforcement, or registry-specific challenge flows.
+
+Not every 401 rejects the credential. npm already turns a 401 whose `WWW-Authenticate` names `otp` into its one-time-password prompt (`EOTP`), and one naming `ipaddress` into `EAUTHIP`. Those challenges keep their existing handling and never trigger `erase`: erasing there would discard a valid credential on every 2FA publish. A 403 means the credential was accepted but lacks permission, so it does not trigger `erase` either; the client may still retry `get` once with `retry: true` and `httpStatus: 403`, in case the provider can supply a more privileged credential.
+
+Each registry request gets at most one provider retry. If the retried credential is rejected again, npm reports the failure instead of looping.
 
 ### 4. Caching
 
@@ -453,6 +464,9 @@ Generative AI and other automation lower the cost of producing plausible malicio
 | Secret leakage through logs | Providers could accidentally print tokens, passwords, refresh handles, or auth headers. | Stdout is protocol-only; stderr/logging must redact bearer-equivalent secrets. |
 | Provider mutates npm config | A provider could persist credentials or provider config into `.npmrc` during install. | Protocol requests must not mutate project/user/global `.npmrc`; any config change must be an explicit user action outside the protocol. |
 | Oversized messages or batches | A malicious or buggy peer could cause memory or CPU pressure. | Implementations enforce maximum JSON line and batch sizes, and reject oversize input fail-closed. |
+| Code already running as the user | A malicious install script can spawn the configured provider itself and ask for a credential, as any process can run `git credential fill`. | Not preventable at the protocol level. Providers should issue read credentials short-lived and narrowly scoped, and require user presence (an OS-native prompt, only when `interactive` is `true`) before issuing write-capable credentials. |
+
+The last row is the honest limit of this design, and also where it improves most on today. A script that finds a publish token in `.npmrc` or `NPM_TOKEN` can exfiltrate it and publish later, from anywhere, with no prompt; that is how the self-propagating npm worms of 2025 spread. Against a provider that gates write credentials on user presence, the same script gets nothing it can take away and use later.
 
 Provider integrity pinning is intentionally optional for the baseline protocol because it adds operational complexity, but the resolution model should leave room for it. Enterprise and CI deployments should be able to require a resolved provider identity such as `{ name, version, integrity }` or an absolute path plus checksum.
 
@@ -460,10 +474,6 @@ Provider integrity pinning is intentionally optional for the baseline protocol b
 
 ```
 npm install @scope/package
-  |
-  |-- Spawn provider as child process
-  |     |-- Provider sends hello: {"v":[1],"capabilities":[...]}
-  |     |-- Client selects version
   |
   |-- Need token for registry X, scope Y, package Z
   |     |
@@ -473,6 +483,10 @@ npm install @scope/package
   |     |     |-- Hit + cache:"expires" + near expiry + has refreshState -> kind: "refresh"
   |     |     |-- Miss -> kind: "get"
   |     |
+  |     |-- No provider process for X yet -> spawn it (lazily, on first miss)
+  |     |     |-- Provider sends hello: {"v":[1],"capabilities":[...]}
+  |     |     |-- Client selects version
+  |     |
   |     |-- Send JSON request to provider stdin (single line)
   |     |-- Read JSON response from provider stdout (single line)
   |     |     |-- "Ok" -> cache token, use for HTTP request
@@ -481,7 +495,8 @@ npm install @scope/package
   |     |     |-- "Err: other" -> show error to user
   |     |
   |     |-- Use token for HTTP request
-  |     |     |-- 401/403 -> kind: "erase", then retry with kind: "get", retry: true, httpStatus
+  |     |     |-- 401 (not an OTP/IP challenge) -> kind: "erase", then one retry: kind "get", retry: true, httpStatus
+  |     |     |-- 403 -> no erase; at most one retry: kind "get", retry: true, httpStatus: 403
   |
   |-- Need token for another scope/package (same session)
   |     |-- Reuse same provider process, send another request
@@ -547,6 +562,12 @@ No custom CLI commands needed. Standard `npm login` delegates to the provider's 
 | **Session model** | One process per request | Provider stays alive, multiple requests per session |
 | **Discovery** | None (explicit config only) | Convention-based + explicit config |
 | **Complexity** | Lower | Higher (more protocol surface) |
+
+## Implementation Notes
+
+- **Where it plugs in.** In `npm-registry-fetch`, `regFetch()` resolves auth synchronously (`getAuth()` in `lib/auth.js`) before the asynchronous fetch starts. A provider exchange is asynchronous, so provider-backed auth has to be resolved inside the async fetch path, which `regFetch()` already returns as a promise. pnpm's `tokenHelper` sidesteps this with `spawnSync`, which blocks the event loop on every lookup and rules out a long-lived session.
+- **Shape.** As suggested in the #850 review from NuGet's experience, npm can define one internal credential-source interface with three implementations: the existing config lookup (`_authToken`, `_auth`, `username`/`_password`), the external provider protocol described here, and optionally a built-in source for npm-owned registries that spawns no process.
+- **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so an npm implementation and third-party providers can be tested against the same cases.
 
 ## Backward Compatibility
 
