@@ -21,12 +21,18 @@ env:
 
 jobs:
   prototype:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }}, node ${{ matrix.node }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
+        # the lowest version of each line npm 12 accepts, and the newest
+        node: [22.22.2, 24.15.0, 26.x]
     runs-on: ${{ matrix.os }}
+    env:
+      # on the newest line a deprecation in the prototype's own code fails the
+      # run; set only on the steps that run that code alone
+      DEPRECATIONS: ${{ matrix.node == '26.x' && '--throw-deprecation' || '' }}
     defaults:
       run:
         shell: bash
@@ -41,7 +47,8 @@ jobs:
           path: rfc
       - uses: actions/setup-node@v4
         with:
-          node-version: 24.x
+          node-version: ${{ matrix.node }}
+          check-latest: ${{ endsWith(matrix.node, '.x') }}
 
       - name: Apply the npm-registry-fetch patch
         run: |
@@ -58,6 +65,10 @@ jobs:
         run: |
           npm test --ignore-scripts
           npm run eslint --ignore-scripts
+      - name: token-helper tests with deprecations as errors
+        if: env.DEPRECATIONS != ''
+        working-directory: npm-registry-fetch
+        run: node $DEPRECATIONS test/token-helper.js
 
       - name: Apply the npm-cli patch
         run: |
@@ -84,4 +95,6 @@ jobs:
       - name: End to end against a local registry
         run: node rfc/poc/npm-e2e/run.js npm-cli npm-registry-fetch
       - name: Platform probes
-        run: node rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+        run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+      - name: Every claim's evidence still exists
+        run: node rfc/poc/claims/check.js npm-cli npm-registry-fetch

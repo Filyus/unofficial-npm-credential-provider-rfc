@@ -111,6 +111,11 @@ const main = async () => {
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
       res.setHeader('content-type', 'application/json')
+      // a registry that rejects the credential and quotes it back
+      if (req.url.startsWith('/echo')) {
+        res.statusCode = 401
+        return res.end(JSON.stringify({ error: `rejected: ${req.headers.authorization}` }))
+      }
       res.end(JSON.stringify(req.method === 'PUT' ? { ok: true } : {
         name: 'demo',
         'dist-tags': { latest: '1.0.0' },
@@ -160,6 +165,7 @@ const main = async () => {
     return {
       name,
       failed,
+      output: stdout + stderr,
       stdout: stdout.trim(),
       requests: seen.map(s => `${s.method} ${s.authorization || '-'}`),
       notices: stderr.split(/\r?\n/).filter(l =>
@@ -284,13 +290,66 @@ const main = async () => {
     expect(prefix, 'the repository file supplies no credential', auths(prefix).join() === '-')
     expect(prefix, 'the helper is reported as ignored', prefix.notices.some(l => l.includes('is inside the project')))
 
+    // The helper's token and its encodings, searched for in everything npm
+    // left behind: what it printed, its debug log and timing file, and its
+    // HTTP cache. A registry that quotes the rejected credential back in a
+    // 401 body is compared with a stored _authToken, so that what npm does
+    // with any credential is not counted against the helper.
+    const encodings = token => [token, Buffer.from(token).toString('base64'), encodeURIComponent(`Bearer ${token}`)]
+    const leaks = (result, token) => {
+      const home = path.join(root, result.name, 'home')
+      const found = new Set()
+      const search = (where, text) => {
+        for (const form of encodings(token)) {
+          if (text.includes(form)) {
+            found.add(where)
+          }
+        }
+      }
+      search('output', result.output)
+      const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
+        const file = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(file)
+        } else if (entry.name !== 'user.npmrc') {
+          search(path.relative(home, file).split(path.sep).slice(0, 2).join('/'), fs.readFileSync(file, 'latin1'))
+        }
+      })
+      walk(home)
+      return [...found]
+    }
+    const silly = ['--loglevel=silly', '--timing']
+    const canaries = []
+    for (const [args, what] of [
+      [['view', 'demo', 'version', ...silly], 'view'],
+      [['publish', ...silly], 'publish'],
+      [['whoami', ...silly], 'whoami'],
+    ]) {
+      canaries.push(await run(`canary-${what}`, { args, user: helperLine }))
+    }
+    for (const canary of canaries) {
+      const found = leaks(canary, 'helper-token')
+      expect(canary, 'the helper token reached the registry', canary.requests.some(r => r.endsWith('Bearer helper-token')))
+      expect(canary, `and nowhere else: output, logs, timing, cache${found.length ? ` (found in ${found.join(', ')})` : ''}`,
+        found.length === 0)
+    }
+    const echoHelper = await run('echo-401-helper', { args: ['view', 'echo-pkg', ...silly], user: helperLine })
+    const echoToken = await run('echo-401-token', {
+      args: ['view', 'echo-pkg', ...silly], user: `${nerf}:_authToken=helper-token\n`,
+    })
+    const helperLeaks = leaks(echoHelper, 'helper-token')
+    const tokenLeaks = leaks(echoToken, 'helper-token')
+    expect(echoHelper, `a 401 that quotes the credential leaks no more than a stored token does ` +
+      `(helper: ${helperLeaks.join(', ') || 'nowhere'}; _authToken: ${tokenLeaks.join(', ') || 'nowhere'})`,
+    helperLeaks.every(where => tokenLeaks.includes(where)))
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, login]
-    console.log(JSON.stringify(results, null, 2))
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, login]
+    console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)
     }

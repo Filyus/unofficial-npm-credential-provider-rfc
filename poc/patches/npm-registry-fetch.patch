@@ -1,4 +1,4 @@
-From ca6c28e86eca7879f2a0f35c29ab6fef1dc1d090 Mon Sep 17 00:00:00 2001
+From e331f38a476aabeac1a8ed0db66816a730440c5c Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -28,8 +28,8 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  lib/auth.js          |   13 +-
  lib/index.js         |   59 ++-
  lib/token-helper.js  |  378 +++++++++++++++
- test/token-helper.js | 1048 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1548 insertions(+), 8 deletions(-)
+ test/token-helper.js | 1104 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1604 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -623,10 +623,10 @@ index 0000000..e22fb4a
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..3b93e7f
+index 0000000..b81b36a
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1048 @@
+@@ -0,0 +1,1104 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1052,6 +1052,62 @@ index 0000000..3b93e7f
 +  for (const out of ['npm_8Hq2sK9xLmZ4\x1b[0m', 'npm_8Hq2sK9xLmZ4\0', 'npm_8Hq2sK9xLmZ4\nexpires soon',
 +    'npm_8Hq2sK9xLmZ4é', 'npm_8Hq2sK9xLmZ4�', '“npm_8Hq2sK9xLmZ4”', 'npm_8Hq2sK9xLmZ4​']) {
 +    t.equal(scrub('+ printf %s npm_8Hq2sK9xLmZ4', out), '+ printf %s ***', JSON.stringify(out))
++  }
++})
++
++// A seeded generator, so that a failing case can be replayed by its number.
++const seeded = (seed) => () => {
++  seed = (seed + 0x6D2B79F5) | 0
++  let x = Math.imul(seed ^ (seed >>> 15), 1 | seed)
++  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x
++  return ((x ^ (x >>> 14)) >>> 0) / 4294967296
++}
++
++// What run() logs is mask(line) for each line of scrub(stderr, stdout). The
++// promise: a token of 8 or more characters that the helper printed, whether
++// its output was used or refused, appears in no logged line, however stderr
++// repeats it and whatever surrounds it. (A shorter token is hidden only where
++// the helper's output was used and stderr repeats it exactly.)
++t.test('a printed token never survives into a logged line', async t => {
++  const next = seeded(0x5eed)
++  const pick = (list) => list[Math.floor(next() * list.length)]
++  const tokenChars = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~+/=']
++  const noise = [...tokenChars, ' ', '"', ':', '=', ',', '{', '}', '\t', '\u00e9', '\u200b', '\x1b[0m', '\r\n', '\n']
++  const text = (chars, length) => Array.from({ length }, () => pick(chars)).join('')
++  const printed = [
++    tok => tok, tok => `${tok}\n`, tok => ` \ufeff${tok}\r\n`, tok => `Bearer ${tok}`, tok => `Basic ${tok}`,
++    // refused: not a valid header value
++    tok => `${tok}\u00e9`, tok => `${tok}\0`, tok => `${tok}\x1b[0m`, tok => `${tok}\nexpires soon`,
++    tok => `\u201c${tok}\u201d`, tok => `${tok}\ufffd`,
++  ]
++  const echoed = [
++    tok => tok, tok => `Authorization: Bearer ${tok}`, tok => `{"token":"${tok}"}`, tok => `+ printf %s ${tok}`,
++    tok => `token=${tok}`, tok => `got ${tok}.`, tok => `${tok}${tok}`,
++  ]
++  let cases = 0
++  for (; cases < 3000; cases++) {
++    const token = text(tokenChars, 8 + Math.floor(next() * 40))
++    const stdout = pick(printed)(token)
++    const around = () => text(noise, Math.floor(next() * 30))
++    const stderr = around() + pick(echoed)(token) + around()
++    const logged = scrub(stderr, stdout).split(/\r?\n/).map(mask)
++    if (logged.some(line => line.includes(token))) {
++      t.fail(`case ${cases} leaks: ${JSON.stringify({ stdout, stderr, logged })}`)
++      break
++    }
++  }
++  t.equal(cases, 3000, 'no case leaks')
++})
++
++// mask() runs on every stderr line, up to a megabyte; its patterns must stay
++// linear on input built to make a backtracking pattern slow
++t.test('mask stays fast on a megabyte of adversarial input', async t => {
++  for (const line of ['token='.repeat(170000), 'Bearer '.repeat(150000), `"password": "${'a'.repeat(1e6)}`,
++    `${'authorization'.repeat(80000)}:`, 'a'.repeat(1e6)]) {
++    const start = process.hrtime.bigint()
++    mask(line)
++    const ms = Number(process.hrtime.bigint() - start) / 1e6
++    t.ok(ms < 2000, `${line.slice(0, 20)}\u2026: ${ms.toFixed(0)} ms`)
 +  }
 +})
 +
