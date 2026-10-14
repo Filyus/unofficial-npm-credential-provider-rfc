@@ -73,6 +73,39 @@
       }
     },
     {
+      "name": "request-erase-with-get-context",
+      "message": {
+        "v": 1,
+        "kind": "erase",
+        "registry": "https://registry.example.test/",
+        "scope": "@scope",
+        "package": "pkg",
+        "operation": "read",
+        "granularity": "scope",
+        "authChallenges": [
+          "Bearer realm=\"https://registry.example.test/\""
+        ]
+      }
+    },
+    {
+      "name": "request-unknown-kind",
+      "message": {
+        "v": 1,
+        "kind": "store",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-unknown-operation",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "yank",
+        "interactive": false
+      }
+    },
+    {
       "name": "request-get-retry-after-401",
       "message": {
         "v": 1,
@@ -211,10 +244,18 @@
       }
     },
     {
-      "name": "request-unknown-kind",
+      "name": "request-kind-not-an-identifier",
       "message": {
         "v": 1,
-        "kind": "store",
+        "kind": "Store",
+        "registry": "https://registry.example.test/"
+      }
+    },
+    {
+      "name": "request-kind-empty",
+      "message": {
+        "v": 1,
+        "kind": "",
         "registry": "https://registry.example.test/"
       }
     },
@@ -260,22 +301,22 @@
       }
     },
     {
-      "name": "request-removed-kind-refresh",
-      "message": {
-        "v": 1,
-        "kind": "refresh",
-        "registry": "https://registry.example.test/",
-        "refreshState": "handle"
-      }
-    },
-    {
-      "name": "request-unknown-operation",
+      "name": "request-operation-not-an-identifier",
       "message": {
         "v": 1,
         "kind": "get",
         "registry": "https://registry.example.test/",
-        "operation": "write",
+        "operation": "Write",
         "interactive": false
+      }
+    },
+    {
+      "name": "request-erase-granularity-unknown",
+      "message": {
+        "v": 1,
+        "kind": "erase",
+        "registry": "https://registry.example.test/",
+        "granularity": "host"
       }
     },
     {

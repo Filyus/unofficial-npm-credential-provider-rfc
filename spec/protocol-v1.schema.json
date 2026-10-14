@@ -35,7 +35,10 @@
       "properties": {
         "v": { "const": 1 },
         "kind": {
-          "enum": ["login", "logout", "get", "erase"]
+          "description": "Open-ended so new kinds can be added within v1. A provider answers a kind it does not know with operation-not-supported and keeps serving. Known: login, logout, get, erase.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "examples": ["login", "logout", "get", "erase"]
         },
         "registry": {
           "type": "string",
@@ -54,8 +57,14 @@
           "minLength": 1
         },
         "operation": {
-          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier.",
-          "enum": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"]
+          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, deprecate, dist-tag, unpublish, owner, access.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "examples": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"]
+        },
+        "granularity": {
+          "description": "erase only: the granularity of the Ok response that carried the rejected credential, so the provider can tell which of its credentials was rejected.",
+          "enum": ["registry", "scope", "package"]
         },
         "command": {
           "description": "Informational npm command name. Open-ended: policy knownCommands lists examples, and providers must accept other values.",

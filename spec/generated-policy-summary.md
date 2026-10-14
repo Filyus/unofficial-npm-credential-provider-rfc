@@ -79,6 +79,7 @@ Source: `spec/policy-v1.json`.
 
 | Setting | Value |
 | --- | --- |
+| `identifierPattern` | `^[a-z][a-z0-9-]*$` |
 | `unknownRequestKind` | `operation-not-supported` |
 | `unknownOperation` | `operation-not-supported` |
 | `unknownFields` | `ignore` |
@@ -95,3 +96,14 @@ Source: `spec/policy-v1.json`.
 | `runsPerRegistryPerProcess` | `1` |
 | `emptyOutput` | `fail` |
 | `nonZeroExit` | `fail` |
+
+## Provider Timeouts (seconds)
+
+| Request | Timeout |
+| --- | --- |
+| `hello` | `10` |
+| `get` | `30` |
+| `getInteractive` | `300` |
+| `erase` | `10` |
+| `login` | `300` |
+| `logout` | `30` |

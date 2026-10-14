@@ -13,6 +13,7 @@
     "errorKinds": ["url-not-supported", "not-found", "operation-not-supported", "other"]
   },
   "forwardCompatibility": {
+    "identifierPattern": "^[a-z][a-z0-9-]*$",
     "unknownRequestKind": "operation-not-supported",
     "unknownOperation": "operation-not-supported",
     "unknownFields": "ignore",
@@ -54,6 +55,16 @@
     "runsPerRegistryPerProcess": 1,
     "emptyOutput": "fail",
     "nonZeroExit": "fail"
+  },
+  "credentialProvider": {
+    "timeoutSeconds": {
+      "hello": 10,
+      "get": 30,
+      "getInteractive": 300,
+      "erase": 10,
+      "login": 300,
+      "logout": 30
+    }
   },
   "cache": {
     "defaultPolicy": "session",

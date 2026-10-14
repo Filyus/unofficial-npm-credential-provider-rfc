@@ -92,6 +92,16 @@ class TranscriptTests(unittest.TestCase):
             "token-2",
         )
 
+    def test_retry_returning_a_coarser_granularity_leaves_no_trace_of_the_rejected_token(self) -> None:
+        client = validate_transcript(str(TRANSCRIPTS / "erase-retry-coarser.jsonl"))
+        registry = "https://registry.example.test/"
+
+        self.assertEqual(set(client.cache), {CacheKey("registry", registry)})
+        for package in ("pkg", "other"):
+            entry = client.lookup(registry, "@scope", package)
+            self.assertEqual(entry.auth["token"], "registry-token-2")
+        self.assertEqual(client.lookup(registry, "@scope").auth["token"], "registry-token-2")
+
     def test_not_found_fails_without_explicit_legacy_fallback(self) -> None:
         with self.assertRaises(ProviderFailure):
             validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))

@@ -126,28 +126,34 @@ const main = async () => {
   const helperLine = `${nerf}:tokenHelper=${helper}\n`
 
   const run = async (name, {
-    args = ['view', 'demo', 'version'], user = '', project = '', pkg = {}, userconfigFlag = true, env = {},
+    args = ['view', 'demo', 'version'], user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {},
   }) => {
-    const dir = path.join(root, name)
+    // the repository, and beside it the user's own files: npm does not trust
+    // a user or global config file that lies inside the project
+    const dir = path.join(root, name, 'repo')
+    const home = path.join(root, name, 'home')
     fs.mkdirSync(dir, { recursive: true })
+    fs.mkdirSync(home)
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.1', ...pkg }))
-    fs.writeFileSync(path.join(dir, 'user.npmrc'), user)
+    fs.writeFileSync(path.join(home, 'user.npmrc'), user)
     fs.writeFileSync(path.join(dir, '.npmrc'), project.replaceAll('<dir>', dir))
     fs.writeFileSync(path.join(dir, 'repo-user.npmrc'), helperLine)
-    // HOME must not be the project directory, or the project .npmrc would be
-    // the default user config and npm would load it as such
-    const home = path.join(dir, 'home')
-    fs.mkdirSync(home)
+    // more files the repository carries, relative to it
+    for (const [name, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+      fs.writeFileSync(path.join(dir, name), content.replaceAll('<dir>', dir))
+    }
     seen.length = 0
     const { stdout, stderr, failed } = await new Promise(resolve => execFile(process.execPath, [
       path.join(npmCliDir, 'bin', 'npm-cli.js'), ...args,
       `--registry=${registry}`,
       // a --userconfig flag would outrank a project redirect, so the redirect
-      // scenario leaves it out and points HOME at the scenario directory
-      ...(userconfigFlag ? [`--userconfig=${path.join(dir, 'user.npmrc')}`] : []),
-      // a child npm gets this from its parent's environment instead
-      ...(env.npm_config_globalconfig ? [] : [`--globalconfig=${path.join(dir, 'global.npmrc')}`]),
-      `--cache=${path.join(dir, 'cache')}`,
+      // scenario leaves it out
+      ...(userconfigFlag ? [`--userconfig=${path.join(home, 'user.npmrc')}`] : []),
+      // a child npm gets this from its parent's environment instead, and a
+      // prefix chooses it when there is none
+      ...(env.npm_config_globalconfig || !globalconfigFlag ? [] : [`--globalconfig=${path.join(home, 'global.npmrc')}`]),
+      `--cache=${path.join(home, 'cache')}`,
       '--prefer-online',
     ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err })))
@@ -256,12 +262,34 @@ const main = async () => {
     expect(parent, 'the child npm reaches the registry', !parent.failed && parent.requests.length)
     expect(parent, 'the repository file supplies no credential to it', auths(parent).join() === '-')
 
+    // a repository's node-options would reach a node-based helper through
+    // NODE_OPTIONS and could read the credential it prints
+    const nodeOptions = await run('project-node-options', {
+      user: helperLine,
+      project: 'node-options=--require=<dir>/evil.js\n',
+      files: {
+        'evil.js': "if (/helper\\.js$/.test(process.argv[1] || '')) require('fs').writeFileSync(__dirname + '/pwned', '')\n",
+      },
+    })
+    expect(nodeOptions, 'the helper token is still sent', nodeOptions.requests.length && auths(nodeOptions).join() === 'Bearer helper-token')
+    expect(nodeOptions, 'the repository code never ran in the helper', !fs.existsSync(path.join(root, nodeOptions.name, 'repo', 'pwned')))
+
+    // `npm --prefix client` makes client/etc/npmrc the global config file
+    const prefix = await run('prefix-into-repository', {
+      args: ['--prefix', 'client', 'view', 'demo', 'version'],
+      globalconfigFlag: false,
+      files: { 'client/package.json': '{}', 'client/etc/npmrc': helperLine },
+    })
+    expect(prefix, 'view still reaches the registry', !prefix.failed && prefix.requests.length)
+    expect(prefix, 'the repository file supplies no credential', auths(prefix).join() === '-')
+    expect(prefix, 'the helper is reported as ignored', prefix.notices.some(l => l.includes('is inside the project')))
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
-    expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'user.npmrc'), 'utf8') === helperLine)
+    expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, login]
     console.log(JSON.stringify(results, null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)

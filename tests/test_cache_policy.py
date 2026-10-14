@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tests.generated_policy import EXPIRY_MARGIN_SECONDS
-from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation
+from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation, RequestContext
 
 
 REGISTRY = "https://registry.example.test/"
@@ -188,6 +188,82 @@ class CacheLookupTests(unittest.TestCase):
 
         self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="stage"), "stage-only")
         self.assertIsNone(self.token_for(scope="@scope", package="pkg", operation="publish"))
+
+
+class RejectedCredentialTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = CredentialClientModel()
+        self.client.receive_hello({"v": [1], "capabilities": ["erase"]})
+
+    def context(self, **changes: object) -> RequestContext:
+        return RequestContext(registry=REGISTRY, scope="@scope", package="pkg", **changes)
+
+    def test_every_entry_that_served_the_credential_is_evicted_at_every_level(self) -> None:
+        self.client.handle_response(request(), ok("package", token="rejected"))
+        self.client.handle_response(request(package="other"), ok("scope", token="rejected"))
+        self.client.handle_response(request(scope=None, package=None), ok("registry", token="rejected"))
+        self.client.handle_response(
+            request("publish"), ok("scope", token="rejected", operationIndependent=False)
+        )
+        self.client.handle_response(request(scope="@else"), ok("scope", token="unrelated"))
+
+        self.client.reject_credential(self.context())
+
+        self.assertEqual([entry.auth["token"] for entry in self.client.cache.values()], ["unrelated"])
+
+    def test_erase_request_carries_the_context_of_the_get(self) -> None:
+        self.client.handle_response(request(), ok("scope", token="rejected"))
+
+        erase = self.client.reject_credential(
+            self.context(operation="read"), auth_challenges=['Bearer realm="r"']
+        )
+
+        self.assertEqual(
+            erase,
+            {
+                "v": 1,
+                "kind": "erase",
+                "registry": REGISTRY,
+                "scope": "@scope",
+                "package": "pkg",
+                "operation": "read",
+                "granularity": "scope",
+                "authChallenges": ['Bearer realm="r"'],
+            },
+        )
+
+    def test_unscoped_registry_level_erase_omits_scope_and_package(self) -> None:
+        self.client.handle_response(request(scope=None, package=None), ok("registry", token="rejected"))
+
+        erase = self.client.reject_credential(RequestContext(registry=REGISTRY))
+
+        self.assertNotIn("scope", erase)
+        self.assertNotIn("package", erase)
+        self.assertEqual(erase["granularity"], "registry")
+
+    def test_retry_returning_a_coarser_token_is_what_later_lookups_find(self) -> None:
+        self.client.handle_response(request(), ok("scope", token="scope-rejected"))
+        self.client.reject_credential(self.context())
+        self.client.handle_response(request(), ok("registry", token="registry-new"))
+
+        self.assertEqual(self.client.lookup(REGISTRY, "@scope", "pkg").auth["token"], "registry-new")
+        self.assertEqual(self.client.lookup(REGISTRY, "@scope").auth["token"], "registry-new")
+
+    def test_without_the_erase_capability_the_entries_go_but_no_request_is_built(self) -> None:
+        client = CredentialClientModel()
+        client.receive_hello({"v": [1]})
+        client.handle_response(request(), ok("scope", token="rejected"))
+
+        self.assertIsNone(client.reject_credential(self.context()))
+        self.assertEqual(client.cache, {})
+
+    def test_a_credential_that_was_never_cached_still_yields_an_erase(self) -> None:
+        self.client.handle_response(request(), ok("scope", cache="never", token="rejected"))
+
+        erase = self.client.reject_credential(self.context())
+
+        self.assertEqual(erase["kind"], "erase")
+        self.assertNotIn("granularity", erase)
 
 
 if __name__ == "__main__":

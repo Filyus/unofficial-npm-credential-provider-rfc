@@ -12,6 +12,7 @@ from tests.generated_policy import (
     DEFAULT_GRANULARITY,
     ERROR_KINDS,
     EXPIRY_MARGIN_SECONDS,
+    IDENTIFIER_PATTERN,
     OPERATION_INDEPENDENT_DEFAULT,
     OPERATIONS_REQUIRING_VERSION,
     PROTOCOL_VERSION,
@@ -21,6 +22,7 @@ from tests.generated_policy import (
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
     SUPPORTED_REQUEST_KINDS,
+    TIMEOUT_SECONDS,
     TOKEN_HELPER_CONFIG_SOURCES,
     TRUSTED_LOCATION_KINDS,
 )
@@ -153,6 +155,62 @@ class CredentialClientModel:
         self._store_token(request, auth, cache, expires_at, granularity, operation_independent)
         return "ok"
 
+    def reject_credential(
+        self,
+        context: RequestContext,
+        auth_challenges: list[str] | None = None,
+        now: int = 0,
+    ) -> dict[str, Any] | None:
+        """A 401 that leads to `erase`: first drop from this cache every entry
+        that served the rejected credential, at every granularity level, so a
+        later lookup cannot hand it out again; then build the `erase` request
+        with the context of the `get` that produced it (package, scope,
+        operation and the granularity of the response). Returns None when the
+        provider did not advertise `erase`: the eviction still happens, there is
+        just nobody to tell. The retry `get` follows the `erase`."""
+        self._require_state(ClientState.READY)
+        served = self._evict_served(context, now)
+        if "erase" not in self.capabilities:
+            return None
+        request: dict[str, Any] = {
+            "v": self.version,
+            "kind": "erase",
+            "registry": context.registry,
+            "operation": context.operation,
+        }
+        if context.scope is not None:
+            request["scope"] = context.scope
+        if context.package is not None:
+            request["package"] = context.package
+        if served is not None:
+            request["granularity"] = served.granularity
+        if auth_challenges:
+            request["authChallenges"] = list(auth_challenges)
+        validate_request(request)
+        return request
+
+    def evict_rejected(self, erase_request: dict[str, Any]) -> None:
+        """Transcript replay of what the client did before it sent this `erase`:
+        the erase carries the context of the `get` that produced the rejected
+        credential, so the same lookup finds the entry that served it."""
+        context = RequestContext(
+            registry=erase_request["registry"],
+            scope=erase_request.get("scope"),
+            package=erase_request.get("package"),
+            operation=erase_request.get("operation", "read"),
+        )
+        self._evict_served(context)
+
+    def _evict_served(self, context: RequestContext, now: int = 0) -> CacheEntry | None:
+        """Removes every entry holding the credential that this context's lookup
+        serves, whatever its granularity or operation binding, and returns the
+        entry that served it."""
+        served = self.lookup(context.registry, context.scope, context.package, context.operation, now)
+        if served is not None:
+            for key in [key for key, entry in self.cache.items() if entry.auth == served.auth]:
+                del self.cache[key]
+        return served
+
     def lookup(
         self,
         registry: str,
@@ -248,6 +306,36 @@ def cache_key(entry: CacheEntry) -> CacheKey:
     )
 
 
+def request_timeout_seconds(request: dict[str, Any]) -> int:
+    """The budget the client gives the provider for this request: a `get` that
+    may prompt the user (`interactive: true`) gets the `login` budget, any other
+    `get` the short one. A kind with no budget of its own is treated as a `get`,
+    the bound a newer kind gets until the policy names one."""
+    kind = request.get("kind")
+    if kind == "get" and request.get("interactive") is True:
+        return TIMEOUT_SECONDS["getInteractive"]
+    return TIMEOUT_SECONDS.get(kind, TIMEOUT_SECONDS["get"]) if isinstance(kind, str) else TIMEOUT_SECONDS["get"]
+
+
+def provider_reply_to_unsupported(
+    request: dict[str, Any],
+    supported_kinds: frozenset[str] = SUPPORTED_REQUEST_KINDS,
+    supported_operations: frozenset[str] = SUPPORTED_OPERATIONS,
+) -> dict[str, Any] | None:
+    """Provider side of forward compatibility: a well-formed request whose kind
+    or operation this provider does not know is answered with
+    `operation-not-supported`, never served as `read` and never a protocol
+    violation; the provider keeps serving. Returns None when both are known."""
+    validate_request(request)
+    kind = request["kind"]
+    if kind not in supported_kinds:
+        return {"Err": {"kind": "operation-not-supported", "message": f"unknown request kind: {kind}"}}
+    operation = request.get("operation")
+    if operation is not None and operation not in supported_operations:
+        return {"Err": {"kind": "operation-not-supported", "message": f"unknown operation: {operation}"}}
+    return None
+
+
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -256,12 +344,19 @@ def _is_enum(value: Any, allowed: frozenset[str]) -> bool:
     return isinstance(value, str) and value in allowed
 
 
+def _is_identifier(value: Any) -> bool:
+    # `$` in ECMA-262 does not match before a trailing newline, so fullmatch
+    return isinstance(value, str) and _IDENTIFIER.fullmatch(value) is not None
+
+
 def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and value != ""
 
 
 # the schema's `scope` pattern, anchored the way ECMA-262 `$` is (no trailing newline)
 _SCOPE = re.compile(r"@[^/]+")
+# the schema's `kind` and `operation` pattern: new values may appear within v1
+_IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
 
 
 def validate_hello(message: Any) -> tuple[list[int], list[str]]:
@@ -292,8 +387,8 @@ def validate_request(message: dict[str, Any]) -> None:
         raise ProtocolViolation("request must be an object")
     if not _is_int(message.get("v")) or message.get("v") != PROTOCOL_VERSION:
         raise ProtocolViolation("request must use negotiated protocol version")
-    if not _is_enum(message.get("kind"), SUPPORTED_REQUEST_KINDS):
-        raise ProtocolViolation(f"unsupported request kind: {message.get('kind')!r}")
+    if not _is_identifier(message.get("kind")):
+        raise ProtocolViolation(f"request kind must match {IDENTIFIER_PATTERN}: {message.get('kind')!r}")
     if not isinstance(message.get("registry"), str):
         raise ProtocolViolation("request requires registry string")
     if "scope" in message:
@@ -309,11 +404,13 @@ def validate_request(message: dict[str, Any]) -> None:
         raise ProtocolViolation("interactive must be boolean")
     kind = message["kind"]
     operation = message.get("operation")
-    if "operation" in message and not _is_enum(operation, SUPPORTED_OPERATIONS):
-        raise ProtocolViolation("operation must be a supported operation")
+    if "operation" in message and not _is_identifier(operation):
+        raise ProtocolViolation(f"operation must match {IDENTIFIER_PATTERN}")
+    if "granularity" in message and not _is_enum(message["granularity"], SUPPORTED_GRANULARITY):
+        raise ProtocolViolation("granularity must be registry, scope or package")
     if kind == "get":
         if "operation" not in message:
-            raise ProtocolViolation("get requests require a supported operation")
+            raise ProtocolViolation("get requests require an operation")
         if "interactive" not in message:
             raise ProtocolViolation("get requests require interactive boolean")
     if operation in OPERATIONS_REQUIRING_VERSION and "version" not in message:
@@ -401,6 +498,8 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
                 continue
             message = event.get("message")
             validate_request(message)
+            if message["kind"] == "erase":
+                client.evict_rejected(message)
             last_request = message
         elif actor == "provider":
             if last_request is None:

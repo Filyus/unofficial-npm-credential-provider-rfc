@@ -117,6 +117,11 @@ pub struct Request {
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
+    /// `erase` only: the granularity of the response that carried the rejected
+    /// credential. With `scope`, `package` and `operation` it repeats the
+    /// context of the `get` that produced that credential.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granularity: Option<Granularity>,
     /// Informational, so open-ended: `generated::KNOWN_COMMANDS` lists the
     /// values the draft names, and any other npm command may appear.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +153,7 @@ impl Request {
             package: None,
             version: None,
             operation: None,
+            granularity: None,
             command: None,
             interactive: None,
             retry: None,
@@ -522,6 +528,37 @@ mod tests {
 
         assert_eq!(request.operation, Some(Operation::Unsupported));
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn erase_carries_the_context_of_the_get_it_rejects() {
+        let line = r#"{"v":1,"kind":"erase","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","granularity":"scope","authChallenges":["Bearer realm=\"r\""]}"#;
+        let request: Request = serde_json::from_str(line).unwrap();
+
+        assert_eq!(request.kind, RequestKind::Erase);
+        assert_eq!(request.scope.as_deref(), Some("@scope"));
+        assert_eq!(request.package.as_deref(), Some("pkg"));
+        assert_eq!(request.operation, Some(Operation::Read));
+        assert_eq!(request.granularity, Some(Granularity::Scope));
+        request.validate().unwrap();
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::from_str::<serde_json::Value>(line).unwrap()
+        );
+        assert!(
+            !serde_json::to_string(&Request::bare(RequestKind::Erase, "https://r.test/"))
+                .unwrap()
+                .contains("granularity")
+        );
+    }
+
+    #[test]
+    fn interactive_get_budget_is_the_login_budget() {
+        assert_eq!(
+            generated::GET_INTERACTIVE_TIMEOUT_SECONDS,
+            generated::LOGIN_TIMEOUT_SECONDS
+        );
+        assert!(generated::GET_INTERACTIVE_TIMEOUT_SECONDS > generated::GET_TIMEOUT_SECONDS);
     }
 
     #[test]

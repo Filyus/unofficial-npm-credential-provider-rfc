@@ -106,9 +106,12 @@ const main = async () => {
       bad.push(`EVIL helper trusted: ${where}`)
     }
     // and the rule must not cost the user their own helper: with nothing
-    // chosen by the project, a global file chosen elsewhere is trusted
+    // chosen by the project, a global file chosen elsewhere is trusted --
+    // except <prefix>/etc/npmrc under a cli prefix, which outside a global
+    // run is the project directory itself (`npm --prefix client`)
     const projectChoseNothing = !has(uc, PROJECT) && !has(gc, PROJECT) && !has(pf, PROJECT)
-    if (projectChoseNothing && (gc || pf) && inEffect !== 'GOOD') {
+    const globalFileInCliPrefix = !gc && has(pf, CLI)
+    if (projectChoseNothing && (gc || pf) && !globalFileInCliPrefix && inEffect !== 'GOOD') {
       bad.push(`GOOD helper lost: ${where}`)
     }
   }

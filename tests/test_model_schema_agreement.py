@@ -94,7 +94,9 @@ def rejected_cases() -> list[tuple[str, object]]:
     # request fields, on every kind
     for kind in KINDS:
         base = {**GET, "kind": kind}
-        cases.append((f"request-{kind}-operation-unknown", {**base, "operation": "write"}))
+        for operation in ("Write", "", "dist_tag", "1read"):
+            cases.append((f"request-{kind}-operation-{operation!r}", {**base, "operation": operation}))
+        cases.append((f"request-{kind}-granularity-unknown", {**base, "granularity": "host"}))
         cases.append((f"request-{kind}-operation-not-string", {**base, "operation": ["read"]}))
         cases.append((f"request-{kind}-package-empty", {**base, "package": ""}))
         cases.append((f"request-{kind}-version-empty", {**base, "version": ""}))
@@ -105,6 +107,8 @@ def rejected_cases() -> list[tuple[str, object]]:
         cases.append((f"request-{kind}-login-url-not-string", {**base, "loginUrl": 1}))
         for scope in ("@", "scope", "@a/b", "@scope\n/x", 1):
             cases.append((f"request-{kind}-scope-{scope!r}", {**base, "scope": scope}))
+    for kind in ("", "Get", "1get", "get_batch", 1):
+        cases.append((f"request-kind-{kind!r}", {**GET, "kind": kind}))
     cases.append(("request-version-bool", {**GET, "v": True}))
     cases.append(("request-publish-version-empty", {**GET, "operation": "publish", "version": ""}))
     # Ok, on every kind (the cache/expiresAt rules carry no kind condition)
@@ -136,6 +140,13 @@ def accepted_cases() -> list[tuple[str, object]]:
         ("hello-v-many", {"v": [1, 2, 7]}),
         ("request-login-token-and-login-url", {
             "v": 1, "kind": "login", "registry": REGISTRY, "token": "t", "loginUrl": "https://x.test/login",
+        }),
+        ("request-unknown-kind", {**GET, "kind": "store"}),
+        ("request-unknown-kind-with-dash-and-digit", {**GET, "kind": "get-batch2"}),
+        ("request-unknown-operation", {**GET, "operation": "yank"}),
+        ("request-erase-with-get-context", {
+            "v": 1, "kind": "erase", "registry": REGISTRY, "scope": "@scope", "package": "pkg",
+            "operation": "read", "granularity": "package",
         }),
         ("request-scope-null", {**GET, "scope": None}),
         ("request-scope-ok", {**GET, "scope": "@scope"}),

@@ -74,6 +74,8 @@ def render_python(policy: dict) -> str:
             f"EXPIRY_MARGIN_SECONDS = {cache['expiryMarginSeconds']!r}",
             f"TOKEN_HELPER_CONFIG_SOURCES = frozenset({policy['tokenHelper']['allowedConfigSources']!r})",
             f"TOKEN_HELPER_TIMEOUT_SECONDS = {policy['tokenHelper']['timeoutSeconds']!r}",
+            f"IDENTIFIER_PATTERN = {policy['forwardCompatibility']['identifierPattern']!r}",
+            f"TIMEOUT_SECONDS = {policy['credentialProvider']['timeoutSeconds']!r}",
             "",
         ]
     )
@@ -104,9 +106,24 @@ def render_rust(policy: dict) -> str:
             f"pub const DEFAULT_GRANULARITY: &str = {json.dumps(cache['defaultGranularity'])};",
             f"pub const OPERATION_INDEPENDENT_DEFAULT: bool = {str(cache['operationIndependentDefault']).lower()};",
             f"pub const EXPIRY_MARGIN_SECONDS: u64 = {cache['expiryMarginSeconds']};",
+            *rust_timeouts(policy),
             "",
         ]
     )
+
+
+def rust_timeouts(policy: dict) -> list[str]:
+    names = {
+        "hello": "HELLO",
+        "get": "GET",
+        "getInteractive": "GET_INTERACTIVE",
+        "erase": "ERASE",
+        "login": "LOGIN",
+        "logout": "LOGOUT",
+    }
+    timeouts = policy["credentialProvider"]["timeoutSeconds"]
+    assert set(timeouts) == set(names), "update rust_timeouts for the new timeout"
+    return [f"pub const {names[key]}_TIMEOUT_SECONDS: u64 = {timeouts[key]};" for key in names]
 
 
 def render_policy_summary(policy: dict) -> str:
@@ -217,6 +234,10 @@ def render_policy_summary(policy: dict) -> str:
             rendered = markdown_values(value) if isinstance(value, list) else f"`{json_value(value)}`"
             lines.append(f"| `{setting}` | {rendered} |")
 
+    lines.extend(["", "## Provider Timeouts (seconds)", "", "| Request | Timeout |", "| --- | --- |"])
+    for request, seconds in policy["credentialProvider"]["timeoutSeconds"].items():
+        lines.append(f"| `{request}` | `{seconds}` |")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -267,6 +288,33 @@ def render_vectors(policy: dict) -> str:
                 "registry": registry,
                 "operation": "read",
                 "command": "outdated",
+                "interactive": False,
+            },
+        },
+        {
+            "name": "request-erase-with-get-context",
+            "message": {
+                "v": version,
+                "kind": "erase",
+                "registry": registry,
+                "scope": "@scope",
+                "package": "pkg",
+                "operation": "read",
+                "granularity": "scope",
+                "authChallenges": ['Bearer realm="https://registry.example.test/"'],
+            },
+        },
+        {
+            "name": "request-unknown-kind",
+            "message": {"v": version, "kind": "store", "registry": registry},
+        },
+        {
+            "name": "request-unknown-operation",
+            "message": {
+                "v": version,
+                "kind": "get",
+                "registry": registry,
+                "operation": "yank",
                 "interactive": False,
             },
         },
@@ -365,8 +413,12 @@ def render_vectors(policy: dict) -> str:
             "message": {"v": [version], "capabilities": "erase"},
         },
         {
-            "name": "request-unknown-kind",
-            "message": {"v": version, "kind": "store", "registry": registry},
+            "name": "request-kind-not-an-identifier",
+            "message": {"v": version, "kind": "Store", "registry": registry},
+        },
+        {
+            "name": "request-kind-empty",
+            "message": {"v": version, "kind": "", "registry": registry},
         },
         {
             "name": "request-get-missing-operation",
@@ -410,18 +462,18 @@ def render_vectors(policy: dict) -> str:
             },
         },
         {
-            "name": "request-removed-kind-refresh",
-            "message": {"v": version, "kind": "refresh", "registry": registry, "refreshState": "handle"},
-        },
-        {
-            "name": "request-unknown-operation",
+            "name": "request-operation-not-an-identifier",
             "message": {
                 "v": version,
                 "kind": "get",
                 "registry": registry,
-                "operation": "write",
+                "operation": "Write",
                 "interactive": False,
             },
+        },
+        {
+            "name": "request-erase-granularity-unknown",
+            "message": {"v": version, "kind": "erase", "registry": registry, "granularity": "host"},
         },
         {
             "name": "request-stage-missing-version",

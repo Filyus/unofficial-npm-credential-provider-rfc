@@ -40,9 +40,15 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate_request({**BASE_GET, "v": 2})
 
-    def test_unknown_kind_is_rejected(self) -> None:
-        with self.assertRaises(ProtocolViolation):
-            validate_request({**BASE_GET, "kind": "store"})
+    def test_unknown_kind_is_well_formed_and_left_to_the_provider(self) -> None:
+        validate_request({**BASE_GET, "kind": "store"})
+        validate_request({**BASE_GET, "kind": "get-batch"})
+
+    def test_kind_must_be_a_lowercase_identifier(self) -> None:
+        for kind in ("", "Get", "1get", "get_batch", "get\n", " get", 1, None):
+            with self.subTest(kind=kind):
+                with self.assertRaises(ProtocolViolation):
+                    validate_request({**BASE_GET, "kind": kind})
 
     def test_registry_is_required(self) -> None:
         with self.assertRaises(ProtocolViolation):
@@ -71,20 +77,38 @@ class RequestValidationTests(unittest.TestCase):
             with self.assertRaises(ProtocolViolation):
                 validate_request({**BASE_GET, "command": command})
 
-    def test_removed_request_kinds_are_rejected(self) -> None:
-        for kind in ("get-batch", "refresh"):
+    def test_erase_carries_the_context_of_the_get_it_rejects(self) -> None:
+        validate_request(
+            {
+                "v": 1,
+                "kind": "erase",
+                "registry": "https://registry.example.test/",
+                "scope": "@scope",
+                "package": "pkg",
+                "operation": "read",
+                "granularity": "scope",
+            }
+        )
+
+    def test_granularity_must_be_a_known_level(self) -> None:
+        for granularity in ("host", "", 1):
             with self.assertRaises(ProtocolViolation):
-                validate_request({**BASE_GET, "kind": kind})
+                validate_request({**BASE_GET, "granularity": granularity})
 
     def test_every_npm_write_action_is_an_operation(self) -> None:
         for operation in ("deprecate", "dist-tag", "unpublish", "owner", "access"):
             with self.subTest(operation=operation):
                 validate_request({**BASE_GET, "operation": operation})
 
-    def test_coarse_or_unknown_operation_is_rejected(self) -> None:
+    def test_unknown_operation_is_well_formed_and_left_to_the_provider(self) -> None:
         for operation in ("write", "admin", "yank"):
-            with self.assertRaises(ProtocolViolation):
-                validate_request({**BASE_GET, "operation": operation})
+            validate_request({**BASE_GET, "operation": operation})
+
+    def test_operation_must_be_a_lowercase_identifier(self) -> None:
+        for operation in ("", "Read", "dist_tag", "read\n", 1):
+            with self.subTest(operation=operation):
+                with self.assertRaises(ProtocolViolation):
+                    validate_request({**BASE_GET, "operation": operation})
 
     def test_publish_and_stage_require_version(self) -> None:
         for operation in ("publish", "stage"):

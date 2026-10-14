@@ -30,17 +30,36 @@ class SpecConsistencyTests(unittest.TestCase):
     def test_policy_version_matches_python_model(self) -> None:
         self.assertEqual(self.policy["protocolVersion"], protocol_model.PROTOCOL_VERSION)
 
-    def test_request_kind_enum_matches_policy_and_python_model(self) -> None:
-        schema_kinds = set(self.schema["$defs"]["request"]["properties"]["kind"]["enum"])
+    def test_request_kind_is_open_and_its_known_values_match_policy_and_python_model(self) -> None:
+        schema_kind = self.schema["$defs"]["request"]["properties"]["kind"]
 
-        self.assertEqual(schema_kinds, set(self.policy["wire"]["requestKinds"]))
-        self.assertEqual(schema_kinds, protocol_model.SUPPORTED_REQUEST_KINDS)
+        self.assertNotIn("enum", schema_kind)
+        self.assertEqual(schema_kind["pattern"], self.policy["forwardCompatibility"]["identifierPattern"])
+        self.assertEqual(set(schema_kind["examples"]), set(self.policy["wire"]["requestKinds"]))
+        self.assertEqual(set(schema_kind["examples"]), protocol_model.SUPPORTED_REQUEST_KINDS)
 
-    def test_operation_enum_matches_policy_and_python_model(self) -> None:
-        schema_operations = set(self.schema["$defs"]["request"]["properties"]["operation"]["enum"])
+    def test_operation_is_open_and_its_known_values_match_policy_and_python_model(self) -> None:
+        schema_operation = self.schema["$defs"]["request"]["properties"]["operation"]
 
-        self.assertEqual(schema_operations, set(self.policy["wire"]["operations"]))
-        self.assertEqual(schema_operations, protocol_model.SUPPORTED_OPERATIONS)
+        self.assertNotIn("enum", schema_operation)
+        self.assertEqual(schema_operation["pattern"], self.policy["forwardCompatibility"]["identifierPattern"])
+        self.assertEqual(set(schema_operation["examples"]), set(self.policy["wire"]["operations"]))
+        self.assertEqual(set(schema_operation["examples"]), protocol_model.SUPPORTED_OPERATIONS)
+
+    def test_request_granularity_matches_response_granularity(self) -> None:
+        defs = self.schema["$defs"]
+
+        self.assertEqual(
+            defs["request"]["properties"]["granularity"]["enum"],
+            defs["providerOk"]["properties"]["granularity"]["enum"],
+        )
+
+    def test_timeouts_match_python_model_and_interactive_get_gets_the_login_budget(self) -> None:
+        timeouts = self.policy["credentialProvider"]["timeoutSeconds"]
+
+        self.assertEqual(timeouts, protocol_model.TIMEOUT_SECONDS)
+        self.assertEqual(timeouts["getInteractive"], timeouts["login"])
+        self.assertGreater(timeouts["getInteractive"], timeouts["get"])
 
     def test_command_is_open_ended_in_schema_and_python_model(self) -> None:
         schema_command = self.schema["$defs"]["request"]["properties"]["command"]
