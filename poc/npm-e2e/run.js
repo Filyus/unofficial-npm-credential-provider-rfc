@@ -112,7 +112,9 @@ const main = async () => {
   const helper = writeHelper(root)
   const helperLine = `${nerf}:tokenHelper=${helper}\n`
 
-  const run = async (name, { args = ['view', 'demo', 'version'], user = '', project = '', pkg = {}, userconfigFlag = true }) => {
+  const run = async (name, {
+    args = ['view', 'demo', 'version'], user = '', project = '', pkg = {}, userconfigFlag = true, env = {},
+  }) => {
     const dir = path.join(root, name)
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.1', ...pkg }))
@@ -130,10 +132,11 @@ const main = async () => {
       // a --userconfig flag would outrank a project redirect, so the redirect
       // scenario leaves it out and points HOME at the scenario directory
       ...(userconfigFlag ? [`--userconfig=${path.join(dir, 'user.npmrc')}`] : []),
-      `--globalconfig=${path.join(dir, 'global.npmrc')}`,
+      // a child npm gets this from its parent's environment instead
+      ...(env.npm_config_globalconfig ? [] : [`--globalconfig=${path.join(dir, 'global.npmrc')}`]),
       `--cache=${path.join(dir, 'cache')}`,
       '--prefer-online',
-    ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home } }, (err, out, errOut) =>
+    ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err })))
     return {
       name,
@@ -203,12 +206,22 @@ const main = async () => {
     expect(publishConfig, 'no request carries the helper token', !publishConfig.requests.some(r => r.endsWith('helper-token')))
     expect(publishConfig, 'the key is reported as ignored', publishConfig.notices.some(l => l.includes('Ignoring publishConfig')))
 
+    // what a child npm started by a script in another repository sees: the
+    // parent's globalconfig in the environment, the repository's in .npmrc
+    const child = await run('child-project-globalconfig', {
+      project: 'globalconfig=<dir>/repo-user.npmrc\n',
+      env: { npm_config_globalconfig: path.join(root, 'parent-global.npmrc') },
+    })
+    expect(child, 'view still reaches the registry', !child.failed && child.requests.length)
+    expect(child, 'the repository file supplies no credential', auths(child).join() === '-')
+    expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('selected by project config')))
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, login]
     console.log(JSON.stringify(results, null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)

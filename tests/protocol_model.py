@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import os
-from typing import Any, NamedTuple
+import re
+from typing import Any, Callable, NamedTuple
 
 from tests.generated_policy import (
     ALLOWED_CONFIG_SOURCES,
@@ -371,25 +372,53 @@ class TokenHelperFailure(RuntimeError):
     """A Phase 1 `tokenHelper` could not produce a header; npm fails the request."""
 
 
-def check_token_helper_config(value: str, config_source: str) -> None:
-    """Phase 1 accepts pnpm's `tokenHelper` exactly as pnpm does: from user or
-    global config only, as an absolute path with no arguments."""
+# JavaScript's String.prototype.trim and `\s`: not Python's, which also counts
+# \x1c-\x1f and \x85 as whitespace and does not count U+FEFF
+JS_WHITESPACE = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_ARGUMENTS_REFUSED = "tokenHelper must be an absolute path with no arguments (arguments are not supported)"
+_ABSOLUTE_PATH = re.compile(r"^(?:[/\\]|[A-Za-z]:[/\\])")
+_HEADER_FORBIDDEN = re.compile(r"[^\t\x20-\x7e]")
+_SCHEME = re.compile(r"^[A-Za-z]+ ")
+
+
+def check_token_helper_config(
+    value: str,
+    config_source: str,
+    exists: Callable[[str], bool] = os.path.exists,
+    is_file: Callable[[str], bool] = os.path.isfile,
+) -> None:
+    """Phase 1 accepts pnpm's `tokenHelper` the way the prototype does: from user
+    or global config only, as an absolute path (POSIX or Windows form) with no
+    arguments. A path with whitespace in it is a path when it exists as given;
+    when it does not, it is refused as arguments if some prefix before a
+    whitespace character is an existing file, else as not found. `exists` and
+    `is_file` stand in for the filesystem."""
     if config_source not in TOKEN_HELPER_CONFIG_SOURCES:
         raise ResolutionFailure("tokenHelper may only come from user or global config")
-    if not (os.path.isabs(value) or value.startswith("/")) or any(char.isspace() for char in value):
-        raise ResolutionFailure("tokenHelper must be an absolute path with no arguments")
+    if not _ABSOLUTE_PATH.match(value):
+        raise ResolutionFailure(_ARGUMENTS_REFUSED)
+    if not any(char in JS_WHITESPACE for char in value) or exists(value):
+        return
+    for index, char in enumerate(value):
+        if char in JS_WHITESPACE and is_file(value[:index]):
+            raise ResolutionFailure(_ARGUMENTS_REFUSED)
+    raise ResolutionFailure("tokenHelper was not found")
 
 
 def token_helper_header(exit_code: int, stdout: str) -> str:
-    """Maps a `tokenHelper` run to an `Authorization` header value the way pnpm
-    does: a raw token gets `Bearer `, output that already starts with a scheme
-    (`Bearer x`, `Basic x`) is used as is."""
+    """Maps a `tokenHelper` run to an `Authorization` header value the way the
+    prototype does: output is trimmed (JavaScript semantics, so a leading BOM
+    goes too), a raw token gets `Bearer `, output that already starts with a
+    scheme (`Bearer x`, `Basic x`) is used as is. Refusal messages never
+    contain the output, which is the credential."""
     if exit_code != 0:
         raise TokenHelperFailure("tokenHelper exited with a non-zero status")
-    token = stdout.rstrip()
+    token = stdout.strip(JS_WHITESPACE)
     if not token:
         raise TokenHelperFailure("tokenHelper printed an empty token")
-    scheme, _, rest = token.partition(" ")
-    if rest and scheme.isascii() and scheme.isalpha():
-        return token
-    return f"Bearer {token}"
+    if _HEADER_FORBIDDEN.search(token):
+        raise TokenHelperFailure(
+            "tokenHelper printed something that is not a valid header value "
+            "(more than one line, a control character or a non-ASCII character)"
+        )
+    return token if _SCHEME.match(token) else f"Bearer {token}"
