@@ -127,6 +127,12 @@ pub struct Request {
     pub retry: Option<bool>,
     #[serde(rename = "httpStatus", skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
+    /// `login` only: a token the user already holds, kept out of `Debug`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<Secret>,
+    /// `login` only: the URL the provider may open or print for the user.
+    #[serde(rename = "loginUrl", skip_serializing_if = "Option::is_none")]
+    pub login_url: Option<String>,
     #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
     pub auth_challenges: Option<Vec<String>>,
 }
@@ -146,6 +152,8 @@ impl Request {
             interactive: None,
             retry: None,
             http_status: None,
+            token: None,
+            login_url: None,
             auth_challenges: None,
         }
     }
@@ -202,6 +210,9 @@ impl Request {
             if operation.requires_version() {
                 require(self.version.is_some(), "publish and stage require version")?;
             }
+        }
+        if let Some(token) = &self.token {
+            require(!token.expose().is_empty(), "token must not be empty")?;
         }
         if self.retry == Some(true) {
             require(self.http_status.is_some(), "retry=true requires httpStatus")?;
@@ -306,18 +317,23 @@ impl ProviderOk {
 
     pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         require(&self.kind == kind, "Ok.kind must match request kind")?;
-        if self.kind != RequestKind::Get {
-            return Ok(());
-        }
-        self.auth
-            .as_ref()
-            .ok_or_else(|| ProtocolError::InvalidMessage("token response requires auth".into()))?
-            .validate()?;
+        // the schema's cache=expires rule carries no kind condition
         if self.cache == Some(CachePolicy::Expires) {
             require(
                 self.expires_at.is_some(),
                 "cache=expires requires expiresAt",
             )?;
+        }
+        // required for get only, but checked wherever it is present, as the
+        // schema's `auth` property applies to every kind
+        match &self.auth {
+            Some(auth) => auth.validate()?,
+            None if self.kind == RequestKind::Get => {
+                return Err(ProtocolError::InvalidMessage(
+                    "token response requires auth".into(),
+                ));
+            }
+            None => {}
         }
         Ok(())
     }
@@ -629,6 +645,58 @@ mod tests {
         let mut reader = io::Cursor::new(oversized);
         let error = read_json_line::<serde_json::Value>(&mut reader).unwrap_err();
         assert!(matches!(error, ProtocolError::LineTooLong { .. }));
+    }
+
+    #[test]
+    fn login_request_with_token_and_login_url_round_trips_and_hides_the_token() {
+        let line = r#"{"v":1,"kind":"login","registry":"https://registry.example.test/","interactive":true,"token":"login-secret","loginUrl":"https://registry.example.test/login"}"#;
+        let request: Request = serde_json::from_str(line).unwrap();
+
+        assert_eq!(request.token.as_ref().unwrap().expose(), "login-secret");
+        assert_eq!(
+            request.login_url.as_deref(),
+            Some("https://registry.example.test/login")
+        );
+        request.validate().unwrap();
+        assert!(!format!("{request:?}").contains("login-secret"));
+        let again: serde_json::Value = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            again,
+            serde_json::from_str::<serde_json::Value>(line).unwrap()
+        );
+        assert_eq!(serde_json::from_value::<Request>(again).unwrap(), request);
+
+        let mut empty = request;
+        empty.token = Some("".into());
+        assert!(empty.validate().is_err());
+    }
+
+    #[test]
+    fn cache_expires_requires_expires_at_for_every_kind() {
+        for kind in [
+            RequestKind::Login,
+            RequestKind::Logout,
+            RequestKind::Get,
+            RequestKind::Erase,
+        ] {
+            let mut ok = if kind == RequestKind::Get {
+                ProviderOk::bearer("t", Granularity::Registry)
+            } else {
+                ProviderOk::done(kind.clone())
+            };
+            ok.cache = Some(CachePolicy::Expires);
+            assert!(ok.validate_for(&kind).is_err(), "{kind:?} accepted");
+            ok.expires_at = Some(0);
+            ok.validate_for(&kind).unwrap();
+        }
+    }
+
+    #[test]
+    fn auth_present_on_any_kind_is_validated() {
+        let mut ok = ProviderOk::done(RequestKind::Erase);
+        ok.auth = ProviderOk::bearer("", Granularity::Registry).auth;
+
+        assert!(ok.validate_for(&RequestKind::Erase).is_err());
     }
 
     #[test]

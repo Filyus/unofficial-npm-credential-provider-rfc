@@ -98,14 +98,11 @@ class CredentialClientModel:
 
     def receive_hello(self, message: dict[str, Any]) -> int:
         self._require_state(ClientState.SPAWNED)
-        versions = message.get("v")
-        if not isinstance(versions, list) or not all(isinstance(v, int) for v in versions):
+        try:
+            versions, capabilities = validate_hello(message)
+        except ProtocolViolation:
             self.state = ClientState.FAILED
-            raise ProtocolViolation("provider hello must contain v: number[]")
-        capabilities = message.get("capabilities", [])
-        if not isinstance(capabilities, list) or not all(isinstance(capability, str) for capability in capabilities):
-            self.state = ClientState.FAILED
-            raise ProtocolViolation("provider hello capabilities must be string[]")
+            raise
         if PROTOCOL_VERSION not in versions:
             self.state = ClientState.FAILED
             if self.config.configured and not self.config.legacy_fallback:
@@ -146,13 +143,14 @@ class CredentialClientModel:
         if not isinstance(ok, dict):
             raise ProtocolViolation("Ok response must be an object")
         kind = ok.get("kind")
+        if not isinstance(kind, str) or kind not in SUPPORTED_REQUEST_KINDS:
+            raise ProtocolViolation(f"unsupported Ok kind: {kind!r}")
         if kind != request.get("kind"):
             raise ProtocolViolation("Ok.kind must match request kind")
-        if kind in {"login", "logout", "erase"}:
-            return kind
+        auth, cache, expires_at, granularity, operation_independent = validate_ok(ok)
         if kind != "get":
-            raise ProtocolViolation(f"unsupported Ok kind: {kind!r}")
-        self._handle_token_response(request, ok)
+            return kind
+        self._store_token(request, auth, cache, expires_at, granularity, operation_independent)
         return "ok"
 
     def lookup(
@@ -195,31 +193,31 @@ class CredentialClientModel:
         if not isinstance(err, dict):
             raise ProtocolViolation("Err response must be an object")
         kind = err.get("kind")
-        if kind not in ERROR_KINDS:
+        if not isinstance(kind, str) or kind not in ERROR_KINDS:
             raise ProtocolViolation(f"unsupported error kind: {kind!r}")
+        message = err.get("message")
+        if message is not None and not isinstance(message, str):
+            raise ProtocolViolation("Err.message must be a string")
+        caused_by = err.get("causedBy")
+        if caused_by is not None and (
+            not isinstance(caused_by, list) or not all(isinstance(item, str) for item in caused_by)
+        ):
+            raise ProtocolViolation("Err.causedBy must be string[]")
         if kind == "url-not-supported":
             return "try-next-provider"
         if kind == "not-found" and (not self.config.configured or self.config.legacy_fallback):
             return "legacy-auth"
         raise ProviderFailure(kind)
 
-    def _handle_token_response(self, request: dict[str, Any], ok: dict[str, Any]) -> None:
-        auth = ok.get("auth")
-        validate_auth(auth)
-        cache = ok.get("cache", DEFAULT_CACHE_POLICY)
-        if cache not in SUPPORTED_CACHE:
-            raise ProtocolViolation(f"unsupported cache policy: {cache!r}")
-        expires_at = ok.get("expiresAt")
-        if expires_at is not None and (not isinstance(expires_at, int) or isinstance(expires_at, bool)):
-            raise ProtocolViolation("expiresAt must be an integer Unix timestamp")
-        if cache == "expires" and expires_at is None:
-            raise ProtocolViolation("cache=expires requires expiresAt")
-        granularity = ok.get("granularity", DEFAULT_GRANULARITY)
-        if granularity not in SUPPORTED_GRANULARITY:
-            raise ProtocolViolation(f"unsupported granularity: {granularity!r}")
-        operation_independent = ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT)
-        if not isinstance(operation_independent, bool):
-            raise ProtocolViolation("operationIndependent must be boolean")
+    def _store_token(
+        self,
+        request: dict[str, Any],
+        auth: dict[str, Any],
+        cache: str,
+        expires_at: int | None,
+        granularity: str,
+        operation_independent: bool,
+    ) -> None:
         if cache == "never":
             return
         entry = CacheEntry(
@@ -250,34 +248,81 @@ def cache_key(entry: CacheEntry) -> CacheKey:
     )
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_enum(value: Any, allowed: frozenset[str]) -> bool:
+    return isinstance(value, str) and value in allowed
+
+
+def _is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and value != ""
+
+
+# the schema's `scope` pattern, anchored the way ECMA-262 `$` is (no trailing newline)
+_SCOPE = re.compile(r"@[^/]+")
+
+
+def validate_hello(message: Any) -> tuple[list[int], list[str]]:
+    """Schema `hello`: v is a non-empty array of unique integers >= 1;
+    capabilities, when present, is an array of unique non-empty strings."""
+    if not isinstance(message, dict):
+        raise ProtocolViolation("provider hello must be an object")
+    versions = message.get("v")
+    if (
+        not isinstance(versions, list)
+        or not versions
+        or not all(_is_int(v) and v >= 1 for v in versions)
+        or len(set(versions)) != len(versions)
+    ):
+        raise ProtocolViolation("provider hello must contain v: unique integers >= 1, at least one")
+    capabilities = message.get("capabilities", [])
+    if (
+        not isinstance(capabilities, list)
+        or not all(_is_nonempty_string(capability) for capability in capabilities)
+        or len(set(capabilities)) != len(capabilities)
+    ):
+        raise ProtocolViolation("provider hello capabilities must be unique non-empty strings")
+    return versions, capabilities
+
+
 def validate_request(message: dict[str, Any]) -> None:
     if not isinstance(message, dict):
         raise ProtocolViolation("request must be an object")
-    if message.get("v") != PROTOCOL_VERSION:
+    if not _is_int(message.get("v")) or message.get("v") != PROTOCOL_VERSION:
         raise ProtocolViolation("request must use negotiated protocol version")
-    if message.get("kind") not in SUPPORTED_REQUEST_KINDS:
+    if not _is_enum(message.get("kind"), SUPPORTED_REQUEST_KINDS):
         raise ProtocolViolation(f"unsupported request kind: {message.get('kind')!r}")
     if not isinstance(message.get("registry"), str):
         raise ProtocolViolation("request requires registry string")
-    command = message.get("command")
-    if command is not None and (not isinstance(command, str) or not command):
-        raise ProtocolViolation("command must be a non-empty string")
+    if "scope" in message:
+        scope = message["scope"]
+        if scope is not None and (not isinstance(scope, str) or not _SCOPE.fullmatch(scope)):
+            raise ProtocolViolation("scope must be null or match ^@[^/]+$")
+    for name in ("package", "version", "command", "token"):
+        if name in message and not _is_nonempty_string(message[name]):
+            raise ProtocolViolation(f"{name} must be a non-empty string")
+    if "loginUrl" in message and not isinstance(message["loginUrl"], str):
+        raise ProtocolViolation("loginUrl must be a string")
+    if "interactive" in message and not isinstance(message["interactive"], bool):
+        raise ProtocolViolation("interactive must be boolean")
     kind = message["kind"]
     operation = message.get("operation")
+    if "operation" in message and not _is_enum(operation, SUPPORTED_OPERATIONS):
+        raise ProtocolViolation("operation must be a supported operation")
     if kind == "get":
-        if operation not in SUPPORTED_OPERATIONS:
+        if "operation" not in message:
             raise ProtocolViolation("get requests require a supported operation")
-        if not isinstance(message.get("interactive"), bool):
+        if "interactive" not in message:
             raise ProtocolViolation("get requests require interactive boolean")
-    if operation in OPERATIONS_REQUIRING_VERSION and not isinstance(message.get("version"), str):
+    if operation in OPERATIONS_REQUIRING_VERSION and "version" not in message:
         raise ProtocolViolation(f"{operation} requires version")
     retry = message.get("retry")
     if retry is not None and not isinstance(retry, bool):
         raise ProtocolViolation("retry must be boolean")
     http_status = message.get("httpStatus")
-    if http_status is not None and (
-        not isinstance(http_status, int) or isinstance(http_status, bool) or not 100 <= http_status <= 599
-    ):
+    if http_status is not None and (not _is_int(http_status) or not 100 <= http_status <= 599):
         raise ProtocolViolation("httpStatus must be an HTTP status code")
     if retry is True and http_status is None:
         raise ProtocolViolation("retry=true requires httpStatus")
@@ -292,13 +337,38 @@ def validate_auth(auth: Any) -> None:
     if not isinstance(auth, dict):
         raise ProtocolViolation("Ok.auth is required")
     auth_type = auth.get("type")
-    if auth_type not in SUPPORTED_AUTH_TYPES:
+    if not _is_enum(auth_type, SUPPORTED_AUTH_TYPES):
         raise ProtocolViolation(f"unsupported auth type: {auth_type!r}")
-    if auth_type == "bearer" and not isinstance(auth.get("token"), str):
-        raise ProtocolViolation("bearer auth requires token")
+    if auth_type == "bearer" and not _is_nonempty_string(auth.get("token")):
+        raise ProtocolViolation("bearer auth requires a non-empty token")
     if auth_type == "basic":
-        if not isinstance(auth.get("username"), str) or not isinstance(auth.get("password"), str):
-            raise ProtocolViolation("basic auth requires username and password")
+        if not _is_nonempty_string(auth.get("username")) or not _is_nonempty_string(auth.get("password")):
+            raise ProtocolViolation("basic auth requires a non-empty username and password")
+
+
+def validate_ok(ok: dict[str, Any]) -> tuple[Any, str, int | None, str, bool]:
+    """Schema `providerOk`, for every kind: returns (auth, cache, expires_at,
+    granularity, operation_independent) with defaults applied. `auth` is
+    required for get and validated whenever present."""
+    kind = ok.get("kind")
+    auth = ok.get("auth")
+    if kind == "get" or "auth" in ok:
+        validate_auth(auth)
+    cache = ok.get("cache", DEFAULT_CACHE_POLICY)
+    if not _is_enum(cache, SUPPORTED_CACHE):
+        raise ProtocolViolation(f"unsupported cache policy: {cache!r}")
+    expires_at = ok.get("expiresAt")
+    if "expiresAt" in ok and (not _is_int(expires_at) or expires_at < 0):
+        raise ProtocolViolation("expiresAt must be an integer Unix timestamp >= 0")
+    if cache == "expires" and "expiresAt" not in ok:
+        raise ProtocolViolation("cache=expires requires expiresAt")
+    granularity = ok.get("granularity", DEFAULT_GRANULARITY)
+    if not _is_enum(granularity, SUPPORTED_GRANULARITY):
+        raise ProtocolViolation(f"unsupported granularity: {granularity!r}")
+    operation_independent = ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT)
+    if not isinstance(operation_independent, bool):
+        raise ProtocolViolation("operationIndependent must be boolean")
+    return auth, cache, expires_at, granularity, operation_independent
 
 
 def load_transcript(path: str) -> list[dict[str, Any]]:

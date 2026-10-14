@@ -24,8 +24,18 @@ if (!npmCliDir || !fetchDir) {
 
 const OVERLAY = ['auth.js', 'index.js', 'token-helper.js']
 const bundled = path.join(npmCliDir, 'node_modules', 'npm-registry-fetch', 'lib')
+// two runs against one checkout would each back up the other's overlay, and
+// the one restoring last would leave it in place
+const lock = path.join(bundled, '..', '.token-helper-e2e.lock')
 
 const overlay = () => {
+  try {
+    fs.mkdirSync(lock)
+  } catch (er) {
+    throw er.code === 'EEXIST'
+      ? new Error(`another run is using ${npmCliDir} (remove ${lock} if none is)`)
+      : er
+  }
   const backup = new Map()
   const restore = () => {
     const failures = []
@@ -42,6 +52,7 @@ const overlay = () => {
       }
     }
     backup.clear()
+    fs.rmSync(lock, { recursive: true, force: true })
     if (failures.length) {
       console.error(`could not restore:\n${failures.join('\n')}\nrun: git -C ${npmCliDir} checkout -- node_modules/npm-registry-fetch/lib`)
       // a run that leaves the checkout modified has not passed
@@ -73,6 +84,8 @@ const writeHelper = (root) => {
   fs.writeFileSync(script, [
     "process.stderr.write('helper says hello\\n')",
     "process.stderr.write('debug: Authorization: Bearer leaked-in-stderr\\n')",
+    // the helper's own token, in a form only scrub() can recognise
+    "process.stderr.write('fetched helper-token from the keychain\\n')",
     "process.stdout.write('helper-token\\n')",
   ].join('\n'))
   if (process.platform === 'win32') {
@@ -158,24 +171,36 @@ const main = async () => {
   // Windows only Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) reach a handler,
   // a forced termination cannot be intercepted at all
   let restore = null
-  const onSignal = sig => {
+  const cleanUp = () => {
     if (restore) {
       restore()
       restore = null
     }
-    process.exit(128 + (os.constants.signals[sig] || 1))
+    server.close()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  const onSignal = sig => {
+    // process.exit() skips the finally below
+    try {
+      cleanUp()
+    } finally {
+      process.exit(128 + (os.constants.signals[sig] || 1))
+    }
   }
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
     process.once(sig, onSignal)
   }
-  restore = overlay()
 
   try {
+    restore = overlay()
+
     const user = await run('user-config', { user: helperLine })
     expect(user, 'view succeeds', !user.failed && user.stdout === '1.0.0')
     expect(user, 'every request carries the helper token', user.requests.length && auths(user).join() === 'Bearer helper-token')
     expect(user, 'helper stderr reaches the user', user.notices.some(l => l.includes('helper says hello')))
     expect(user, 'a credential in stderr is masked', !user.notices.some(l => l.includes('leaked-in-stderr')))
+    expect(user, 'the helper token echoed on stderr is hidden', user.notices.some(l => l.includes('fetched *** from')) &&
+      !user.notices.some(l => l.includes('helper-token')))
 
     const project = await run('project-config', { project: helperLine })
     expect(project, 'view still reaches the registry', !project.failed && project.requests.length)
@@ -216,12 +241,27 @@ const main = async () => {
     expect(child, 'the repository file supplies no credential', auths(child).join() === '-')
     expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('selected by project config')))
 
+    // the same through a real parent: npm runs a script that starts npm in a
+    // directory with no .npmrc, which can only know that the userconfig it
+    // inherits was chosen by the parent's project from the marker npm exports
+    const elsewhere = path.join(root, 'elsewhere')
+    fs.mkdirSync(elsewhere)
+    const npmCli = path.join(npmCliDir, 'bin', 'npm-cli.js')
+    const parent = await run('parent-runs-child', {
+      args: ['run', 'child'],
+      project: 'userconfig=<dir>/repo-user.npmrc\n',
+      userconfigFlag: false,
+      pkg: { scripts: { child: `cd "${elsewhere}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
+    })
+    expect(parent, 'the child npm reaches the registry', !parent.failed && parent.requests.length)
+    expect(parent, 'the repository file supplies no credential to it', auths(parent).join() === '-')
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, login]
     console.log(JSON.stringify(results, null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)
@@ -230,12 +270,7 @@ const main = async () => {
     console.log(ok ? 'PASS' : 'FAIL')
     process.exitCode = ok && process.exitCode !== 1 ? 0 : 1
   } finally {
-    if (restore) {
-      restore()
-      restore = null
-    }
-    server.close()
-    fs.rmSync(root, { recursive: true, force: true })
+    cleanUp()
   }
 }
 
