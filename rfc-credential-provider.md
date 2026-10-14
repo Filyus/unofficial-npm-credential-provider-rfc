@@ -62,19 +62,20 @@ Out of scope:
 
 ### Phase 1: `tokenHelper`
 
-`tokenHelper` behaves as it does in pnpm, so an existing helper and an existing `~/.npmrc` work unchanged:
+`tokenHelper` reads a helper's output exactly as pnpm does, so one helper serves both package managers. The configuration is pnpm's per-registry form:
 
 ```ini
 # ~/.npmrc or global npmrc only
-tokenHelper=/usr/local/bin/default-registry-token
 //npm.corp.example.com/:tokenHelper=/usr/local/bin/corp-registry-token
 ```
 
-- **Where it may be set.** User-level or global npm config only. In a project or workspace `.npmrc` the key is ignored with a warning, and it is never read from `npm_config_*` environment variables.
-- **What it may name.** An absolute path, with no arguments. On Windows a `.cmd` or `.bat` helper is run through `cmd.exe`, as pnpm does; anything else is executed directly, never through a shell.
-- **When it runs.** Lazily, the first time a request needs a credential for that registry, and at most once per registry per npm process. A command that never touches the registry never runs the helper.
+- **Where it may be set.** User-level or global npm config only, and only when the setting that selected that file (`userconfig`, `globalconfig`, or the `prefix` the default global file derives from) did not itself come from a project `.npmrc`: npm loads project config before the user and global files, so a repository could otherwise point npm at a file of its own and have it treated as the user's. In a project or workspace `.npmrc`, in `publishConfig`, on the command line and in `npm_config_*` environment variables the key is ignored with a warning.
+- **Only the per-registry form.** pnpm also accepts an unscoped `tokenHelper=` for the default registry. npm does not: a project `.npmrc` may set `registry=`, so "the default registry" is partly chosen by the repository, and the helper's credential would follow it to another host. This is the reason npm 9 stopped accepting an unscoped `_authToken`. A pnpm configuration that uses the unscoped form keeps working in pnpm and is reported as unknown config by npm.
+- **What it may name.** An absolute path, with no arguments. On Windows a `.cmd` or `.bat` helper is run through `cmd.exe`, as pnpm does, and a path containing `"` or `%` is refused there because `cmd.exe` would reinterpret it; anything else is executed directly, never through a shell.
+- **When it runs.** Lazily, the first time a request to that registry is about to be sent, and at most once per registry per npm process, whatever the outcome. An `--offline` command never runs it.
 - **What it prints.** The token on stdout. npm trims trailing whitespace and sends `Authorization: Bearer <token>`. If the output already starts with an auth scheme (ASCII letters followed by a space, such as `Bearer …` or `Basic …`), npm uses it as the header value as is.
-- **When it fails.** A non-zero exit, empty output, or running longer than 60 seconds fails the request with an error naming the helper. npm does not fall back to another credential for that registry. stderr is shown to the user as warnings.
+- **When it fails.** A non-zero exit, empty output, more than 1 MiB of output, a spawn error, or running longer than 60 seconds fails the request with `ETOKENHELPER` naming the helper; at the deadline npm stops waiting and kills the helper and its children. npm does not fall back to another credential for that registry. stderr is shown to the user as warnings, with anything that looks like an `Authorization` value masked.
+- **Precedence.** A helper wins over a token stored for the same registry, except while an OIDC trusted-publishing token is in use, which wins over both. Commands that check for a login before sending anything (`publish`, `whoami`) count a configured helper as a credential; `logout` explains that the helper setting has to be removed, since there is no stored token to revoke.
 
 Vendor CLIs already print what a helper needs; since a helper takes no arguments, each becomes a two-line script:
 
@@ -94,7 +95,7 @@ Phase 1 has no context, no cache control and no way to learn that a token was re
 
 #### 1. Configuration
 
-Credential provider execution must be controlled by the user or an administrator, not by project contents. The npm client only accepts `credentialProvider` configuration from user-level or global npm config. Project and workspace `.npmrc` files may configure registries as they do today, but they must not enable or override credential provider execution.
+Credential provider execution must be controlled by the user or an administrator, not by project contents. The npm client only accepts `credentialProvider` configuration from user-level or global npm config. Project and workspace `.npmrc` files may configure registries as they do today, but they must not enable or override credential provider execution, and they must not be able to choose which file counts as user or global config: a user or global file selected by a project-supplied `userconfig`, `globalconfig` or `prefix` cannot configure a provider, exactly as for `tokenHelper` in Phase 1.
 
 ```ini
 # ~/.npmrc or global npmrc
@@ -380,12 +381,13 @@ This feature must not become a project-controlled install hook. Install scripts 
 
 Trust boundaries:
 
-1. **Project and workspace `.npmrc`**: may not set `tokenHelper` or `credentialProvider`. npm ignores either key there and warns. Registry URLs and scopes are configured there as today.
-2. **User `~/.npmrc` and global config**: may name a helper by absolute path, or a provider by absolute path or by a name resolved from trusted global locations.
-3. **Resolution**: the current directory and project `node_modules` are never searched; local packages cannot shadow global providers; ambiguous names fail closed.
-4. **Provider output**: validated by the client. Unknown fields are ignored. Stdout is protocol JSON only; stderr must not contain secrets.
-5. **Storage**: npm keeps credentials in memory only. Providers own their storage (OS keychain, encrypted file) and must not write credentials or provider configuration into any `.npmrc` as a side effect of a request.
-6. **Input**: npm sends only the protocol fields; no environment variables or file paths. Stdin is not an interactive channel.
+1. **Project and workspace `.npmrc`, and `publishConfig` in `package.json`**: may not set `tokenHelper` or `credentialProvider`. npm ignores either key there and warns. Registry URLs and scopes are configured there as today.
+2. **Choosing the user or global file**: project config is loaded before the user and global files and may set `userconfig`, `globalconfig` or `prefix`. A file selected that way is still loaded, but it may not configure a helper or provider; only a file selected by the command line, the environment, npm's builtin config, the defaults, or a trusted user file can.
+3. **User `~/.npmrc` and global config**: may name a helper by absolute path, or a provider by absolute path or by a name resolved from trusted global locations.
+4. **Resolution**: the current directory and project `node_modules` are never searched; local packages cannot shadow global providers; ambiguous names fail closed.
+5. **Provider output**: validated by the client. Unknown fields are ignored. Stdout is protocol JSON only; stderr must not contain secrets.
+6. **Storage**: npm keeps credentials in memory only. Providers own their storage (OS keychain, encrypted file) and must not write credentials or provider configuration into any `.npmrc` as a side effect of a request.
+7. **Input**: npm sends only the protocol fields; no environment variables or file paths. Stdin is not an interactive channel.
 
 ##### Threat model
 
@@ -394,6 +396,8 @@ The npm ecosystem is actively reducing install-time code execution, and automati
 | Threat | Risk | Mitigation |
 |---|---|---|
 | Malicious project `.npmrc` | A repository tries to make `npm install` run an attacker-chosen program. | Project and workspace `.npmrc` cannot set `tokenHelper` or `credentialProvider`. |
+| Project relocates user or global config | A project `.npmrc` sets `userconfig=./x.npmrc` (or `globalconfig`, or `prefix`) so that a repository file is loaded as the user's own config. | Trust follows where the selecting setting came from, not which layer loaded the file; a file chosen by project config cannot configure a helper or provider. |
+| `publishConfig` in `package.json` | A pull request adds a helper under `publishConfig`, and a CI publish job runs it and sends its output instead of the real publish token. | `publishConfig` cannot set `tokenHelper` or `credentialProvider`. |
 | Project-local binary shadowing | A dependency places a provider-like binary in `node_modules/.bin`. | Project `node_modules` and the current directory are never searched. |
 | PATH poisoning | Shell startup files, `.env` tooling, or CI setup redirect a provider name. | Resolution uses trusted npm-controlled locations or explicit absolute paths, not arbitrary `PATH`; neither key is read from environment variables. |
 | Typosquatting | The `npm-credential-provider-*` convention attracts lookalike packages. | Discovery is suggest-only, global-only, and never installs or executes. |
@@ -499,7 +503,7 @@ Registries disagree on the tiers, as the table under [Operations](#4-operations)
 - **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`.
 - **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket.
 - **Config.** `@npmcli/config` gains `tokenHelper` and `credentialProvider` as per-registry keys, accepted only from user and global config and excluded from `npm_config_*` environment variables.
-- **Phase 1 prototype.** About 120 lines in `npm-registry-fetch` (a `tokenHelper` module that also forwards the helper's stderr as warnings, a branch in `getAuth()`, one awaited step in `regFetch()`) and 9 in `@npmcli/config` (the key joins the nerf-dart list; values from project config, the environment or the command line are dropped with a warning), each with tests at the repositories' 100% coverage. Run end to end with npm 12.2.0 against a local registry ([`poc/npm-e2e/run.js`](poc/npm-e2e/run.js)): a helper in user config, in a directory whose name has a space, sends `Bearer <token>` and its stderr reaches the user, the same key in a project `.npmrc` is ignored with a warning, and a helper wins over a stale `_authToken`.
+- **Phase 1 prototype.** About 250 lines in `npm-registry-fetch` (a `tokenHelper` module with its own deadline and a process-tree kill, one cached result per registry and process, stderr forwarded with credentials masked; a branch in `getAuth()`; and a step in `regFetch()` that waits for the helper while still watching the request body and abort signal, and is skipped for `--offline`) and about 140 in npm/cli (config trust by where the selecting setting came from, `publishConfig` filtering, `publish`/`whoami`/`logout` and OIDC handling, docs), each with tests at the repositories' 100% coverage. An audit by 24 independent reviewers with three adversarial verifiers per finding found the original version's main flaw: a project `.npmrc` could set `userconfig` to a repository file and have its helper treated as the user's. End to end with npm 12.2.0 against a local registry ([`poc/npm-e2e/run.js`](poc/npm-e2e/run.js)), 16 checks pass: a helper in user config, in a directory whose name has a space, authenticates `view` and `publish` and its stderr reaches the user with the credential masked; the key in a project `.npmrc`, in a user file chosen by project `userconfig`, or in `publishConfig` is ignored with a warning and no credential is sent from it; and a helper wins over a stale `_authToken`.
 - **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so npm and third-party providers can be tested against the same cases.
 
 ### Configuration
@@ -538,8 +542,9 @@ No phase changes behavior for anyone who has not configured a helper or provider
 
 ### Phase 1: `tokenHelper` (next minor release)
 
-- Accept `tokenHelper` and `//<registry>/:tokenHelper` from user and global config, with pnpm's semantics.
-- Warn about and ignore the key in project and workspace config.
+- Accept `//<registry>/:tokenHelper` from user and global config files that project config did not select, reading the helper's output as pnpm does.
+- Warn about and ignore the key in project and workspace config, `publishConfig`, the environment and the command line.
+- Let `publish` and `whoami` count a helper as a login, make `logout` explain it, and let OIDC trusted publishing win over a helper.
 
 ### Phase 2: `credentialProvider` (a later minor release)
 
@@ -554,7 +559,7 @@ No phase changes behavior for anyone who has not configured a helper or provider
 
 ## Unresolved Questions
 
-1. Should npm accept arguments in `tokenHelper`, which pnpm forbids, or stay strictly compatible?
+1. Should npm accept arguments in `tokenHelper`, which pnpm forbids, or stay strictly compatible? And should a later release offer a migration for pnpm's unscoped form, for example `npm config fix` rewriting it to the default registry's nerf-dart key after asking?
 2. The operation for `npm stage reject`, and whether account-level commands (`npm token`, `npm profile`) belong to the protocol at all, given that npmjs.com already requires an interactive 2FA challenge for them.
 3. Whether npm should ship a built-in provider for npmjs.com that reuses web login sessions.
 4. The format of enterprise provider pinning (`{ name, version, integrity }` or path plus checksum).
