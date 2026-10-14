@@ -1,0 +1,1680 @@
+From ca6c28e86eca7879f2a0f35c29ab6fef1dc1d090 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 15 Oct 2026 02:35:57 +0500
+Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
+
+A per-registry `tokenHelper` names an absolute path to an executable that
+prints a credential. It runs lazily, at most once per registry per process
+(a failure is cached too), with an empty stdin, and never for an offline
+request. Its output is trimmed, a leading byte order mark included; a raw
+token is sent as Bearer, and output that starts with an auth scheme is used
+as the header value, as in pnpm. It takes precedence over other credentials
+for the same registry key.
+
+The helper has 60 seconds: at the deadline the request fails and the helper
+gets SIGTERM, then SIGKILL; on Windows the whole process tree is ended with
+taskkill, since the real helper behind a .cmd is a grandchild of cmd.exe.
+More than 1 MiB of output also ends it. Every failure, including a spawn
+that throws, rejects with ETOKENHELPER and a cause of only { code, signal }.
+stderr is logged as warnings with the helper's own credential and anything
+that looks like one masked. A body failure or an abort while the helper
+runs rejects the request without waiting for it. On Windows a .cmd/.bat
+helper runs in its own directory and a path containing `"` or `%` is
+refused.
+
+Prototype for the credential provider RFC discussed in npm/rfcs#850.
+---
+ README.md            |   58 +++
+ lib/auth.js          |   13 +-
+ lib/index.js         |   59 ++-
+ lib/token-helper.js  |  378 +++++++++++++++
+ test/token-helper.js | 1048 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1548 insertions(+), 8 deletions(-)
+ create mode 100644 lib/token-helper.js
+ create mode 100644 test/token-helper.js
+
+diff --git a/README.md b/README.md
+index f474cdc..b80b48b 100644
+--- a/README.md
++++ b/README.md
+@@ -589,6 +589,64 @@ Can be scoped to a registry by using a "nerf dart" for that registry. That is:
+ }
+ ```
+ 
++##### <a name="opts-tokenhelper"></a> `opts['//<registry>/:tokenHelper']`
++
++* Type: String (absolute path)
++* Default: null
++
++An executable that prints a registry credential to stdout, mapped to a header
++as pnpm's `tokenHelper` does. Unlike pnpm, which splits the value on
++whitespace into a command and arguments, the value is one absolute path,
++which may contain spaces. It runs at most once per registry per process, the first
++time a request needs it, with no arguments and an empty stdin. The outcome is
++cached whether it succeeded or failed: after a failure, later requests for
++that registry fail with the same error without running the helper again. A raw
++token is sent as `Authorization: Bearer <token>`; output that already starts
++with an auth scheme (`Bearer …`, `Basic …`) is used as the header value.
++Surrounding whitespace and a leading byte order mark are removed first. When
++set, it takes precedence over other credentials for the same registry key.
++
++The helper has 60 seconds. The request then fails at once, and the helper is
++sent SIGTERM and, if it is still running 2 seconds later, SIGKILL (on Windows
++the whole process tree is ended; elsewhere only the helper process itself, so
++a helper script should `exec` the command that does the work). Every other failure also rejects with code
++`ETOKENHELPER`: a non-zero exit, a signal, more than 1 MiB of output (which
++also ends the helper, as the deadline does), empty output, output that is not
++a valid header value (more than one line, a control or non-ASCII character;
++the message does not quote it), a path that is not absolute or has arguments, or an executable that
++cannot be started (a script whose `#!` interpreter is missing, or whose `#!`
++line ends in a carriage return, is reported as such). The error's `cause` carries only an exit code and signal,
++never the helper's output. Lines the helper writes to stderr are logged as
++`token-helper` warnings, with the helper's own credential and anything that
++looks like a credential (`Bearer …`, `Basic …`, `token=…`, `"password": "…"`)
++masked. A request whose `opts.signal` aborts, or whose body fails, while the
++helper runs is rejected without waiting for it; the helper itself keeps
++running, and its result is still cached for the requests that follow. Requests with `opts.offline`
++make no network request and do not run the helper.
++
++The helper starts in its own directory, not in the current one, and gets the
++process environment without the variables npm sets from its config
++(`NODE_OPTIONS`, `npm_config_*`, `EDITOR`, `NODE_ENV`, `COLOR`, `INIT_CWD`,
++`NODE`, `npm_execpath`, `npm_node_execpath`, `npm_command`): npm passes a
++project's config on to the processes it starts, and a node-based helper would
++otherwise load whatever a repository's `node-options` names. A helper that
++exits while a background process it started still holds its stdout is read
++for 250 ms more; the background process is not stopped. On Windows a helper
++in a directory whose path is longer than 258 characters is refused, as
++Windows cannot start a program there.
++
++On Windows, `.cmd` and `.bat` helpers are run through `cmd.exe`, in their own
++directory; a path that contains `"` or `%` is refused.
++
++Callers must only pass this option from trusted (user or global) config:
++the helper is executed.
++
++```
++{
++  '//npm.corp.example.com/:tokenHelper': '/usr/local/bin/corp-registry-token'
++}
++```
++
+ ##### <a name="opts-userAgent"></a> `opts.userAgent`
+ 
+ * Type: String
+diff --git a/lib/auth.js b/lib/auth.js
+index 9270025..8249398 100644
+--- a/lib/auth.js
++++ b/lib/auth.js
+@@ -32,6 +32,11 @@ const regFromURI = (uri, opts) => {
+ // so we can look up where the config came from to delete it (i.e. user vs
+ // project)
+ const hasAuth = (regKey, opts) => {
++  // a configured helper wins over any token stored next to it, so a stale
++  // _authToken cannot shadow the helper the user set up to replace it
++  if (opts[`${regKey}:tokenHelper`]) {
++    return 'tokenHelper'
++  }
+   if (opts[`${regKey}:_authToken`]) {
+     return '_authToken'
+   }
+@@ -120,12 +125,14 @@ const getAuth = (uri, opts = {}) => {
+     [`${regKey}:_auth`]: auth,
+     [`${regKey}:certfile`]: certfile,
+     [`${regKey}:keyfile`]: keyfile,
++    [`${regKey}:tokenHelper`]: tokenHelper,
+   } = opts
+ 
+   return new Auth({
+     scopeAuthKey: null,
+     regKey,
+     authKey,
++    tokenHelper,
+     token,
+     auth,
+     username,
+@@ -146,6 +153,7 @@ class Auth {
+     keyfile,
+     regKey,
+     authKey,
++    tokenHelper,
+   }) {
+     // same as regKey but only present for scoped auth. Should have been named scopeRegKey
+     this.scopeAuthKey = scopeAuthKey
+@@ -157,7 +165,10 @@ class Auth {
+     this.isBasicAuth = false
+     this.cert = null
+     this.key = null
+-    if (token) {
++    if (tokenHelper) {
++      // resolved when the request is made; see lib/token-helper.js
++      this.tokenHelper = tokenHelper
++    } else if (token) {
+       this.token = token
+     } else if (auth) {
+       this.auth = auth
+diff --git a/lib/index.js b/lib/index.js
+index 91d450f..6f3c3d2 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -3,6 +3,7 @@
+ const { HttpErrorAuthOTP } = require('./errors.js')
+ const checkResponse = require('./check-response.js')
+ const getAuth = require('./auth.js')
++const getTokenHelperHeader = require('./token-helper.js')
+ const fetch = require('make-fetch-happen')
+ const JSONStream = require('./json-stream')
+ const npa = require('npm-package-arg')
+@@ -71,12 +72,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+ 
+   if (opts.gzip) {
+     headers['content-encoding'] = 'gzip'
+-    if (bodyIsStream) {
+-      const gz = new zlib.Gzip()
+-      body.on('error', /* istanbul ignore next: unlikely and hard to test */
+-        err => gz.emit('error', err))
+-      body = body.pipe(gz)
+-    } else if (!bodyIsPromise) {
++    // a stream is piped into gzip only when the request is about to be sent
++    if (!bodyIsStream && !bodyIsPromise) {
+       body = new zlib.Gzip().end(body).concat()
+     }
+   }
+@@ -164,7 +161,55 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+     }
+   }
+ 
+-  return Promise.resolve(body).then(doFetch)
++  const send = () => {
++    if (opts.gzip && bodyIsStream) {
++      const gz = new zlib.Gzip()
++      body.on('error', /* istanbul ignore next: unlikely and hard to test */
++        err => gz.emit('error', err))
++      body = body.pipe(gz)
++    }
++    return Promise.resolve(body).then(doFetch)
++  }
++
++  // an offline request makes no network request, so there is nothing to
++  // authenticate and the helper is not run
++  if (auth.tokenHelper && !opts.offline) {
++    return getHelperHeader(auth, body, opts.signal).then(authorization => {
++      headers.authorization = authorization
++      return send()
++    })
++  }
++  return send()
++}
++
++// The helper can take a while (a login prompt, a network call) and the request
++// is not sent until it is done. Whatever the caller handed over in the
++// meantime has to be watched, or its failure goes unhandled: a body promise
++// that rejects is an unhandled rejection, and a stream that errors with no
++// listener (the gzip pipeline is built after the wait for this reason) throws.
++// The abort signal ends the wait, not the helper: its result is cached and
++// other requests may be waiting for the same run.
++function getHelperHeader (auth, body, signal) {
++  let onAbort
++  const failed = new Promise((resolve, reject) => {
++    if (Minipass.isStream(body)) {
++      body.on('error', reject)
++    } else if (body && typeof body.then === 'function') {
++      Promise.resolve(body).catch(reject)
++    }
++    if (signal) {
++      onAbort = () => reject(signal.reason)
++      if (signal.aborted) {
++        onAbort()
++      } else {
++        signal.addEventListener('abort', onAbort, { once: true })
++      }
++    }
++  })
++  // an aborted request does not need the helper to run
++  const header = signal?.aborted ? failed : getTokenHelperHeader(auth.tokenHelper, auth.regKey)
++  // the signal may be shared by many requests and outlive this one
++  return Promise.race([header, failed]).finally(() => signal?.removeEventListener('abort', onAbort))
+ }
+ 
+ module.exports.getAuth = getAuth
+diff --git a/lib/token-helper.js b/lib/token-helper.js
+new file mode 100644
+index 0000000..e22fb4a
+--- /dev/null
++++ b/lib/token-helper.js
+@@ -0,0 +1,378 @@
++'use strict'
++
++const { execFile } = require('child_process')
++const fs = require('fs')
++const path = require('path')
++const { log } = require('proc-log')
++
++// A token helper is an executable that prints a registry credential to stdout.
++// The semantics match pnpm's `tokenHelper`, so one helper serves both clients:
++// a raw token is sent as a Bearer token, and output that already starts with
++// an auth scheme (`Bearer ...`, `Basic ...`) is used as the header value.
++// Restricting the setting to user and global config is the config layer's
++// job; this module only refuses anything that is not an absolute path.
++
++const TIMEOUT = 60 * 1000
++// how long a helper that ignores SIGTERM gets before it is killed outright
++const GRACE = 2 * 1000
++const MAX_BUFFER = 1024 * 1024
++// how long stdout and stderr may still deliver after the helper has exited:
++// a background process it started can hold them open indefinitely
++const DRAIN = 250
++// the longest working directory Windows starts a program in
++const MAX_WIN_CWD = 258
++
++// At most one run per helper and registry for the life of the process, and a
++// failed run counts: it is cached like a success, so a broken helper is not
++// started again for every request of an install.
++const cache = new Map()
++
++class TokenHelperError extends Error {
++  // `cause` is limited to a code and a signal by the callers: the errors
++  // execFile produces carry the helper's stdout, stderr and command line, and
++  // stdout is the credential
++  constructor (helper, message, cause) {
++    super(`Token helper ${JSON.stringify(helper)} ${message}`, { cause })
++    this.code = 'ETOKENHELPER'
++    this.helper = helper
++  }
++}
++
++// What the helper printed, without the whitespace around it. trim() also
++// removes a leading U+FEFF, which Windows PowerShell 5.1 puts in front of
++// UTF-8 output; a leading space would otherwise turn into `Bearer  tok`.
++const clean = (stdout) => stdout.trim()
++
++const toHeader = (helper, stdout) => {
++  const token = clean(stdout)
++  if (!token) {
++    throw new TokenHelperError(helper, 'printed an empty token')
++  }
++  // a second line, a control character or anything outside ASCII would make
++  // Headers throw an error that quotes the whole value, credential included,
++  // and npm prints and logs that error; refused here without quoting it
++  if (/[^\t\x20-\x7e]/.test(token)) {
++    throw new TokenHelperError(helper, 'printed something that is not a valid header value ' +
++      '(more than one line, a control character or a non-ASCII character)')
++  }
++  return /^[A-Za-z]+ /.test(token) ? token : `Bearer ${token}`
++}
++
++// Why execFile failed, in words for the user. `err.message` is used only for
++// failures to start, where it is "spawn <path> ENOENT" and never contains
++// output; for a non-zero exit it is "Command failed: <path>\n<stderr>".
++const reason = (err) => {
++  if (err.signal) {
++    return `was killed by ${err.signal}`
++  }
++  if (typeof err.code === 'number') {
++    return `exited with status ${err.code}`
++  }
++  return `could not be run: ${err.message}`
++}
++
++// A script whose #! interpreter is missing fails to start with ENOENT, the
++// same as a helper that is not there: CRLF line endings make it look for
++// `/bin/sh\r`, and `#!/usr/local/bin/node` misses a Homebrew node in
++// /opt/homebrew. Only the #! line is read, never anything the helper printed.
++const interpreter = (helper) => {
++  let line
++  let fd
++  try {
++    fd = fs.openSync(helper, 'r')
++    const head = Buffer.alloc(256)
++    line = head.subarray(0, fs.readSync(fd, head, 0, 256, 0)).toString().split('\n')[0]
++  } catch {
++    return null
++  } finally {
++    if (fd !== undefined) {
++      fs.closeSync(fd)
++    }
++  }
++  if (!line.startsWith('#!')) {
++    return null
++  }
++  return `could not be run: its interpreter ${JSON.stringify(line.slice(2).trim())} was not found` +
++    (line.endsWith('\r') ? ' (the #! line ends in a carriage return: the file has Windows line endings)' : '')
++}
++
++const failure = (helper, err) => new TokenHelperError(helper,
++  (err.code === 'ENOENT' && interpreter(helper)) || reason(err), {
++    code: err.code,
++    signal: err.signal,
++  })
++
++// stderr is the helper's channel to the user, but a helper that fails or runs
++// with `set -x` is likely to echo the credential it handles. Two layers mask it.
++//
++// scrub() removes the helper's own token wherever it appears, in any form
++// (raw, in JSON, on the line after `Authorization:`): it is the one value that
++// is known exactly. It runs on the whole of stderr, before the lines are split,
++// and also covers the part after a scheme, so `Bearer tok` hides `tok` too.
++// Output that is refused (a second line, an ANSI reset, a NUL, an accented or
++// invalid byte next to the token) never appears whole in stderr, so each
++// longer run of printable ASCII in it is hidden as well.
++const scrub = (text, stdout) => {
++  const token = clean(stdout)
++  // eslint-disable-next-line no-control-regex
++  const runs = token.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ' ').split(/[^\x21-\x7e]+/).filter(r => r.length >= 8)
++  for (const secret of [token, token.replace(/^[A-Za-z]+\s+/, ''), ...runs]) {
++    if (secret) {
++      text = text.split(secret).join('***')
++    }
++  }
++  return text
++}
++
++// mask() hides credentials the helper did not print but may be echoing, such
++// as the one it fetched from somewhere else: `key: value` and `key=value` pairs
++// for the usual key names, wherever the key is part of a longer name (JSON
++// `"authorizationToken":"..."`, `NPM_TOKEN=...`), and `Bearer|Basic|Token
++// <value>`. A value that starts a `Bearer <value>` is left to the second
++// pattern, which does not take a lone `=` or `:` for the value.
++const mask = (line) => line
++  .replace(/(authorization|token|password|secret)(["']?\s*[:=]\s*["']?)(?!(?:Bearer|Basic|Token)\s)[^\s"',}]+/gi, '$1$2***')
++  // schemes as headers write them; matching `token` in any case would hide
++  // ordinary words, as in "the token was refreshed"
++  .replace(/\b(Bearer|bearer|BEARER|Basic|basic|BASIC|Token|TOKEN)\s+(?![:=])\S+/g, '$1 ***')
++
++// .cmd and .bat files cannot be executed without a shell on Windows; this is
++// the one case pnpm runs through one, and the path is absolute and comes from
++// trusted config only. Everything else is executed directly.
++// `/s` makes cmd.exe strip one pair of outer quotes from the command line, so
++// the quoted path is wrapped in a second pair, as Node itself does for
++// `shell: true`; a single pair breaks every path that contains a space.
++// cmd.exe expands %VAR% even inside quotes and a `"` ends the quoting, so a
++// path with either cannot be passed safely and is refused (neither occurs in
++// a path someone created on purpose).
++//
++// Every helper starts in its own directory, never in npm's, which is usually
++// the repository: on Windows a command started by bare name (`node` in a
++// cmd-shim, or anything the helper runs) is looked up in the current
++// directory first, so a repository's node.cmd would run in the helper's
++// place. (npm's directory may also be a UNC path, which cmd.exe refuses.)
++const command = (helper, platform, comSpec = process.env.ComSpec) => {
++  const cwd = (platform === 'win32' ? path.win32 : path.posix).dirname(helper)
++  if (platform === 'win32' && cwd.length > MAX_WIN_CWD) {
++    throw new TokenHelperError(helper,
++      `is in a directory whose path is longer than the ${MAX_WIN_CWD} characters Windows starts a program in`)
++  }
++  if (platform === 'win32' && /\.(cmd|bat)$/i.test(helper)) {
++    if (/["%]/.test(helper)) {
++      throw new TokenHelperError(helper, 'cannot be run through cmd.exe because its path contains " or %')
++    }
++    return {
++      file: comSpec || 'cmd.exe',
++      args: ['/d', '/s', '/c', `""${helper}""`],
++      verbatim: true,
++      cwd,
++    }
++  }
++  return { file: helper, args: [], verbatim: false, cwd }
++}
++
++// npm passes a project's config on to what it starts: as npm_config_*
++// variables, `node-options` as NODE_OPTIONS, which a node-based helper obeys,
++// `editor` as EDITOR, which a helper or a tool it calls may run, and
++// `omit=dev` as NODE_ENV. A repository's .npmrc could then load code into the
++// helper and read the credential it prints, without any script running. The
++// helper is the user's program, not one of the project's, so it gets the
++// environment without anything npm itself sets.
++const NPM_SET =
++  /^(npm_config_.*|node_options|editor|node_env|color|init_cwd|node|npm_execpath|npm_node_execpath|npm_command)$/i
++const helperEnv = (env) =>
++  Object.fromEntries(Object.entries(env).filter(([name]) => !NPM_SET.test(name)))
++
++// Stops a helper that outlived its deadline, or that printed too much. SIGTERM
++// first, so a helper that cleans up can; SIGKILL if it ignores that. Windows
++// has no signals, and the real helper behind a .cmd wrapper is a grandchild of
++// cmd.exe, which terminating cmd.exe alone would leave running, so the whole
++// tree goes while the helper runs; a background process it started and left
++// behind when it exited belongs to no tree any more and is not reached.
++// Elsewhere only the helper process itself is signalled, as in
++// pnpm: reaching its children would mean starting it in a session of its own,
++// which would cost it the terminal a helper may prompt on and the Ctrl-C aimed
++// at npm. A helper script should therefore `exec` the command that does the
++// work.
++const killTree = (child, platform, spawn = execFile, grace = GRACE) => {
++  if (child.exitCode !== null || child.signalCode !== null) {
++    return
++  }
++  if (platform === 'win32') {
++    const taskkill = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe')
++    try {
++      spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {})
++    } catch {
++      child.kill()
++    }
++    return
++  }
++  child.kill('SIGTERM')
++  const timer = setTimeout(() => child.kill('SIGKILL'), grace)
++  child.once('exit', () => clearTimeout(timer))
++}
++
++// The deadline is our own timer, not execFile's `timeout`: that sends one
++// SIGTERM and then waits for the process to close, so a helper that ignores
++// it would leave this promise pending (and cached) forever, and one that
++// prints a token and exits 0 after the deadline would succeed. The promise
++// settles at the deadline whatever the process does, and a result that
++// arrives later is ignored.
++//
++// The output limit is counted here too rather than left to execFile's
++// `maxBuffer`: execFile ends the helper with child.kill(), which on Windows
++// reaches cmd.exe only and leaves the helper behind a .cmd wrapper running,
++// and once cmd.exe is gone taskkill can no longer find the tree. So execFile
++// gets no limit, and an overflow ends the whole tree, stops reading, and
++// settles the promise at that moment.
++const run = (helper, timeout, spawn = execFile, platform = process.platform) =>
++  new Promise((resolve, reject) => {
++    // a path command() refuses throws here, which rejects the promise
++    const { file, args, verbatim, cwd } = command(helper, platform)
++    let child
++    let overflowed = false
++    try {
++      child = spawn(file, args, {
++        cwd,
++        env: helperEnv(process.env),
++        windowsHide: true,
++        windowsVerbatimArguments: verbatim,
++        // bytes, counted as the helper wrote them and decoded once at the end
++        encoding: 'buffer',
++        maxBuffer: Infinity,
++      }, (err, out, errOut) => {
++        clearTimeout(timer)
++        clearTimeout(drain)
++        const [stdout, stderr] = [out, errOut].map(b => b.toString('utf8'))
++        // a flood of up to a megabyte is not shown, line by line, after the
++        // error that reported it, and the token it might echo is not known
++        if (overflowed) {
++          return
++        }
++        // shown the way pnpm shows it; stdout carries the credential and is
++        // never logged. The helper's own token is hidden first, as it can be
++        // anywhere in what a failing helper printed
++        for (const line of scrub(stderr, stdout).split(/\r?\n/)) {
++          if (line.trim()) {
++            log.warn('token-helper', mask(line))
++          }
++        }
++        if (err) {
++          return reject(failure(helper, err))
++        }
++        try {
++          resolve(toHeader(helper, stdout))
++        } catch (er) {
++          reject(er)
++        }
++      })
++    } catch (err) {
++      // synchronous throws: EINVAL, ENOTDIR, ENAMETOOLONG, a NUL byte in the path
++      return reject(failure(helper, err))
++    }
++    // the pipes can fail on their own (ENOTCONN when the process could not be
++    // created); the callback reports that, and nothing may throw past it
++    for (const stream of [child.stdin, child.stdout, child.stderr]) {
++      stream?.on('error', ignore)
++    }
++    // a helper that exited while a background process it started still holds
++    // its stdout would otherwise keep the run open until the deadline, and the
++    // token it printed would be thrown away
++    let drain
++    child.once?.('exit', () => {
++      drain = setTimeout(() => {
++        child.stdout?.destroy()
++        child.stderr?.destroy()
++      }, DRAIN)
++    })
++    for (const name of ['stdout', 'stderr']) {
++      let length = 0
++      child[name]?.on('data', (chunk) => {
++        length += Buffer.byteLength(chunk)
++        if (length > MAX_BUFFER) {
++          overflowed = true
++          clearTimeout(timer)
++          reject(new TokenHelperError(helper, `printed more than ${MAX_BUFFER} bytes to ${name}`, {
++            code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
++          }))
++          killTree(child, platform)
++          child.stdout?.destroy()
++          child.stderr?.destroy()
++        }
++      })
++    }
++    const timer = setTimeout(() => {
++      reject(new TokenHelperError(helper, `timed out after ${timeout} ms`))
++      killTree(child, platform)
++    }, timeout)
++    // the helper gets no input; a closed stdin keeps one that reads it from
++    // waiting until the timeout. There is none when the process could not be
++    // created at all (EMFILE).
++    child.stdin?.end()
++  })
++
++const ignore = () => {}
++
++const isFile = (name) => {
++  try {
++    return fs.statSync(name).isFile()
++  } catch {
++    return false
++  }
++}
++
++// `aws codeartifact get-authorization-token` is not a path, and neither is
++// `/usr/bin/aws codeartifact ...`; a real path with a space in it is. A path
++// with whitespace in it that does not exist is told apart by what comes before
++// a space: when that is a file (also after a directory with a space in its
++// name) the rest is arguments, otherwise the helper is simply not there.
++const refusal = (helper) => {
++  if (typeof helper !== 'string' || !path.isAbsolute(helper)) {
++    return 'must be an absolute path with no arguments (arguments are not supported)'
++  }
++  if (!/\s/.test(helper)) {
++    return null
++  }
++  // only a path that is not there is told apart; one that cannot be read
++  // (EACCES, or EPERM under macOS privacy protection) is left to spawn, which
++  // reports the real reason
++  try {
++    fs.statSync(helper)
++    return null
++  } catch (er) {
++    if (er.code !== 'ENOENT' && er.code !== 'ENOTDIR') {
++      return null
++    }
++  }
++  for (const space of helper.matchAll(/\s/g)) {
++    if (isFile(helper.slice(0, space.index))) {
++      return 'must be an absolute path with no arguments (arguments are not supported)'
++    }
++  }
++  return 'was not found'
++}
++
++const getTokenHelperHeader = (helper, regKey, timeout = TIMEOUT) => {
++  const refused = refusal(helper)
++  if (refused) {
++    return Promise.reject(new TokenHelperError(helper, refused))
++  }
++  const key = `${regKey}\0${helper}`
++  if (!cache.has(key)) {
++    cache.set(key, run(helper, timeout))
++  }
++  return cache.get(key)
++}
++
++module.exports = getTokenHelperHeader
++module.exports.toHeader = toHeader
++module.exports.command = command
++module.exports.reason = reason
++module.exports.mask = mask
++module.exports.scrub = scrub
++module.exports.helperEnv = helperEnv
++module.exports.killTree = killTree
++module.exports.run = run
++module.exports.TokenHelperError = TokenHelperError
++module.exports.clearCache = () => cache.clear()
++module.exports.TIMEOUT = TIMEOUT
+diff --git a/test/token-helper.js b/test/token-helper.js
+new file mode 100644
+index 0000000..3b93e7f
+--- /dev/null
++++ b/test/token-helper.js
+@@ -0,0 +1,1048 @@
++'use strict'
++
++const EventEmitter = require('events')
++const fs = require('fs')
++const path = require('path')
++const util = require('util')
++const { Minipass } = require('minipass')
++const t = require('tap')
++const tnock = require('./util/tnock.js')
++
++const fetch = require('..')
++const getAuth = require('../lib/auth.js')
++const getTokenHelperHeader = require('../lib/token-helper.js')
++const { command, toHeader, reason, mask, scrub, killTree, run, helperEnv } = getTokenHelperHeader
++
++const REGISTRY = 'https://helper.registry/npm/'
++const REG_KEY = '//helper.registry/npm/'
++const OPTS = {
++  timeout: 0,
++  retry: { retries: 0 },
++  registry: REGISTRY,
++  memoize: false,
++}
++const WIN = process.platform === 'win32'
++
++t.beforeEach(() => getTokenHelperHeader.clearCache())
++
++// Real helper processes and deadlines of a second or two: about 12 s on an
++// idle machine and up to three times that under load, past tap's default
++// 30 s for a file. The runner adopts a timeout the file sets for itself.
++t.setTimeout(120 * 1000)
++
++const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
++
++const until = async (condition, ms = 15000) => {
++  const end = Date.now() + ms
++  while (!condition()) {
++    if (Date.now() > end) {
++      throw new Error('gave up waiting')
++    }
++    await sleep(25)
++  }
++}
++
++// A helper's process is started in the directory that holds it, and the test
++// directory cannot be removed while one is still running there. A helper that
++// writes its pid first lets the test wait for it.
++const recordPid = (pidFile) =>
++  `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))`
++
++const alive = (pid) => {
++  try {
++    process.kill(pid, 0)
++    return true
++  } catch (er) {
++    return er.code === 'EPERM'
++  }
++}
++
++// One directory per test, created on first use and shared by everything the
++// test writes (testdir would wipe it on a second call). Its name has a space,
++// as the directories of helpers under `C:\Program Files` or a user profile do.
++const dirs = new WeakMap()
++const file = (t, name) => {
++  if (!dirs.has(t)) {
++    dirs.set(t, path.join(t.testdir({ 'token helpers': {} }), 'token helpers'))
++  }
++  return path.join(dirs.get(t), name)
++}
++
++// Writes a helper that runs `body` as a Node.js script, as an executable the
++// platform can start without arguments: a .cmd wrapper on Windows, a shell
++// script elsewhere (a shebang line could not name a Node.js path with a space
++// in it).
++// A second helper with the same name in one test would silently overwrite the
++// first, so the name is refused instead.
++const names = new WeakMap()
++const makeHelper = (t, body, name = 'helper') => {
++  if (!names.has(t)) {
++    names.set(t, new Set())
++  }
++  if (names.get(t).has(name)) {
++    throw new Error(`a helper named ${name} was already made in this test`)
++  }
++  names.get(t).add(name)
++  const script = file(t, `${name}.js`)
++  fs.writeFileSync(script, body)
++  if (WIN) {
++    const helper = file(t, `${name}.cmd`)
++    fs.writeFileSync(helper, `@"${process.execPath}" "${script}"\r\n`)
++    return helper
++  }
++  const helper = file(t, name)
++  fs.writeFileSync(helper, `#!/bin/sh\nexec "${process.execPath}" "${script}"\n`)
++  fs.chmodSync(helper, 0o755)
++  return helper
++}
++
++const print = (output) => `process.stdout.write(${JSON.stringify(output)})`
++const warn = (output) => `process.stderr.write(${JSON.stringify(output)})`
++
++// A stand-in for the object execFile returns, for the tests that inject spawn
++// and the process API. Signals sent to it directly are recorded.
++const fakeChild = (pid) => Object.assign(new EventEmitter(), {
++  pid,
++  exitCode: null,
++  signalCode: null,
++  signals: [],
++  kill (signal) {
++    this.signals.push(signal)
++  },
++})
++
++const countRuns = (t, name = 'runs') => {
++  const runs = file(t, name)
++  return {
++    // statement for a helper script
++    record: `require('fs').appendFileSync(${JSON.stringify(runs)}, 'x')`,
++    count: () => fs.existsSync(runs) ? fs.readFileSync(runs, 'utf8').length : 0,
++  }
++}
++
++// A helper that waits until the test lets it finish, so a test can act while a
++// request is waiting for it. It also opens by itself after a few seconds, so a
++// broken implementation fails the assertions instead of hanging.
++const gated = (t, body) => {
++  const gate = file(t, 'gate')
++  const helper = makeHelper(t, `
++    const poll = () => require('fs').existsSync(${JSON.stringify(gate)}) ? go() : setTimeout(poll, 20)
++    const go = () => { ${body} }
++    poll()
++  `)
++  const open = () => fs.writeFileSync(gate, '')
++  const failsafe = setTimeout(open, 3000)
++  t.teardown(() => clearTimeout(failsafe))
++  return {
++    helper,
++    // lets the helper finish and waits until its process is gone
++    finish: async () => {
++      clearTimeout(failsafe)
++      open()
++      await getTokenHelperHeader(helper, REG_KEY).catch(() => {})
++    },
++  }
++}
++
++// On Windows a directory cannot be renamed (or removed) while anything runs
++// in it, and a .cmd helper and what it starts run in their own directory
++const movable = (dir) => {
++  try {
++    fs.renameSync(dir, `${dir}.moved`)
++    fs.renameSync(`${dir}.moved`, dir)
++    return true
++  } catch {
++    return false
++  }
++}
++
++const untilGone = async (pidFile) => {
++  const dir = path.dirname(pidFile)
++  const recorded = () => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8') !== ''
++  // a helper that starts slowly, under load, can be ended at a short deadline
++  // before it records its pid; it is gone once nothing runs in its directory
++  await until(() => recorded() || movable(dir))
++  if (recorded()) {
++    const pid = Number(fs.readFileSync(pidFile, 'utf8'))
++    await until(() => !alive(pid))
++  }
++  // the cmd.exe in front of it can outlive it by a moment
++  await until(() => movable(dir))
++}
++
++const logsOf = (t) => {
++  const logs = []
++  const onLog = (...args) => logs.push(args)
++  process.on('log', onLog)
++  t.teardown(() => process.off('log', onLog))
++  return logs
++}
++
++const unhandledOf = (t) => {
++  const unhandled = []
++  const onUnhandled = (er) => unhandled.push(er)
++  process.on('unhandledRejection', onUnhandled)
++  t.teardown(() => process.off('unhandledRejection', onUnhandled))
++  return unhandled
++}
++
++t.test('getAuth reports the helper and lets it win over a stored token', async t => {
++  const auth = getAuth(REGISTRY, {
++    registry: REGISTRY,
++    [`${REG_KEY}:tokenHelper`]: '/usr/local/bin/helper',
++    [`${REG_KEY}:_authToken`]: 'stale',
++  })
++
++  t.equal(auth.authKey, 'tokenHelper')
++  t.equal(auth.regKey, REG_KEY)
++  t.equal(auth.tokenHelper, '/usr/local/bin/helper')
++  t.equal(auth.token, null, 'the stored token is not used')
++})
++
++t.test('a raw token is sent as a Bearer token', async t => {
++  const helper = makeHelper(t, print('s3cret\n'))
++  tnock(t, 'https://helper.registry')
++    .matchHeader('authorization', 'Bearer s3cret')
++    .get('/npm/pkg')
++    .reply(200, { ok: true })
++
++  const res = await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper })
++  t.same(res, { ok: true })
++})
++
++t.test('output with an auth scheme is used as the header value', async t => {
++  const helper = makeHelper(t, print('Basic dXNlcjpwYXNz\r\n'))
++  tnock(t, 'https://helper.registry')
++    .matchHeader('authorization', 'Basic dXNlcjpwYXNz')
++    .get('/npm/pkg')
++    .reply(200, { ok: true })
++
++  await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper })
++})
++
++t.test('a request with a JSON body and an abort signal gets the header', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  tnock(t, 'https://helper.registry')
++    .matchHeader('authorization', 'Bearer s3cret')
++    .put('/npm/pkg', { a: 1 })
++    .reply(200, { ok: true })
++  const { signal } = new AbortController()
++
++  const res = await fetch.json('/pkg', {
++    ...OPTS, method: 'PUT', body: { a: 1 }, signal, [`${REG_KEY}:tokenHelper`]: helper,
++  })
++  t.same(res, { ok: true })
++  t.equal(require('events').getEventListeners(signal, 'abort').length, 0, 'no listener left on the signal')
++})
++
++t.test('a gzipped stream body is sent after the helper is done', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  tnock(t, 'https://helper.registry')
++    .matchHeader('authorization', 'Bearer s3cret')
++    .matchHeader('content-encoding', 'gzip')
++    .put('/npm/pkg')
++    .reply(200, { ok: true })
++  const body = new Minipass()
++  setImmediate(() => body.end('{"a":1}'))
++
++  const res = await fetch.json('/pkg', {
++    ...OPTS, method: 'PUT', body, gzip: true, [`${REG_KEY}:tokenHelper`]: helper,
++  })
++  t.same(res, { ok: true })
++})
++
++t.test('the helper runs once per registry per process', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `
++    ${runs.record}
++    ${print('once')}
++  `)
++  tnock(t, 'https://helper.registry')
++    .matchHeader('authorization', 'Bearer once')
++    .get('/npm/a').reply(200, {})
++    .get('/npm/b').reply(200, {})
++
++  const opts = { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }
++  await Promise.all([fetch.json('/a', opts), fetch.json('/b', opts)])
++  t.equal(runs.count(), 1)
++})
++
++t.test('a request after the first one has finished does not run it again', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `
++    ${runs.record}
++    ${print('once')}
++  `)
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer once')
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer once')
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer once')
++  t.equal(runs.count(), 1)
++})
++
++t.test('a different registry key runs the helper separately', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `
++    ${runs.record}
++    ${print('once')}
++  `)
++
++  await getTokenHelperHeader(helper, '//one.registry/')
++  await getTokenHelperHeader(helper, '//two.registry/')
++  await getTokenHelperHeader(helper, '//one.registry/')
++  t.equal(runs.count(), 2)
++})
++
++t.test('a different helper for the same registry key runs separately', async t => {
++  const one = makeHelper(t, print('one'), 'one')
++  const two = makeHelper(t, print('two'), 'two')
++
++  t.equal(await getTokenHelperHeader(one, REG_KEY), 'Bearer one')
++  t.equal(await getTokenHelperHeader(two, REG_KEY), 'Bearer two')
++})
++
++t.test('a failed run is cached too', async t => {
++  const runs = countRuns(t)
++  const flag = file(t, 'ready')
++  const helper = makeHelper(t, `
++    ${runs.record}
++    if (!require('fs').existsSync(${JSON.stringify(flag)})) process.exit(3)
++    ${print('later')}
++  `)
++
++  const first = await getTokenHelperHeader(helper, REG_KEY).catch(er => er)
++  t.match(first, { code: 'ETOKENHELPER', message: /exited with status 3/ })
++  // even if the helper would work now, the process has its answer
++  fs.writeFileSync(flag, '')
++  const second = await getTokenHelperHeader(helper, REG_KEY).catch(er => er)
++  t.equal(second, first, 'the same rejection')
++  t.equal(runs.count(), 1)
++})
++
++t.test('stderr lines become warnings and the token is never logged', async t => {
++  const helper = makeHelper(t, `
++    process.stderr.write('refreshing session\\r\\n\\n  \\nusing cached login\\n')
++    ${print('s3cret')}
++  `)
++  const logs = logsOf(t)
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer s3cret')
++  t.same(logs, [
++    ['warn', 'token-helper', 'refreshing session'],
++    ['warn', 'token-helper', 'using cached login'],
++  ])
++})
++
++t.test('credentials in stderr are masked', async t => {
++  const helper = makeHelper(t, `
++    process.stderr.write('Authorization: Bearer abc123\\n')
++    ${print('s3cret')}
++  `)
++  const logs = logsOf(t)
++
++  await getTokenHelperHeader(helper, REG_KEY)
++  t.same(logs, [['warn', 'token-helper', 'Authorization: Bearer ***']])
++  t.notMatch(JSON.stringify(logs), 'abc123')
++})
++
++t.test('mask', async t => {
++  t.equal(mask('Authorization: Bearer abc123'), 'Authorization: Bearer ***')
++  t.equal(mask('sent basic   dXNlcjpwYXNz.'), 'sent basic ***')
++  t.equal(mask('TOKEN xyz and Bearer 1 Token 2'), 'TOKEN *** and Bearer *** Token ***')
++  t.equal(mask('refreshing session'), 'refreshing session')
++})
++
++t.test('mask hides key=value and JSON forms, keeping the key', async t => {
++  t.equal(mask('{"authorizationToken":"eyJabc.def"}'), '{"authorizationToken":"***"}')
++  t.equal(mask('Authorization: glpat-abc123'), 'Authorization: ***')
++  t.equal(mask('using token=abc123 now'), 'using token=*** now')
++  t.equal(mask('NPM_TOKEN=abc123'), 'NPM_TOKEN=***')
++  t.equal(mask('token = abc123'), 'token = ***', 'spaces around the sign')
++  t.equal(mask(`PASSWORD: 'hunter2', user: me`), `PASSWORD: '***', user: me`)
++  t.equal(mask('{"secret": "abc123"}'), '{"secret": "***"}')
++  t.equal(mask('Authorization: "Bearer abc123"'), 'Authorization: "Bearer ***')
++  t.equal(mask('authorization=Basic dXNlcjpwYXNz'), 'authorization=Basic ***', 'a scheme stays visible')
++  t.equal(mask('token: ***'), 'token: ***', 'idempotent')
++  // words that only look like keys
++  t.equal(mask('the token was refreshed'), 'the token was refreshed')
++  t.equal(mask('password prompt: '), 'password prompt: ')
++})
++
++t.test('the helper token is hidden wherever stderr repeats it', async t => {
++  const token = 'eyJhbGciOi.payload.sig'
++  const helper = makeHelper(t, `
++    ${warn(`+ echo ${token}\nAuthorization:\n${token}\n{"authorizationToken":"zzz999"}\ntoken=qqq111\n`)}
++    ${print(`${token}\n`)}
++  `)
++  const logs = logsOf(t)
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), `Bearer ${token}`)
++  t.same(logs, [
++    ['warn', 'token-helper', '+ echo ***'],
++    ['warn', 'token-helper', 'Authorization:'],
++    ['warn', 'token-helper', '***'],
++    ['warn', 'token-helper', '{"authorizationToken":"***"}'],
++    ['warn', 'token-helper', 'token=***'],
++  ])
++  t.notMatch(JSON.stringify(logs), /eyJ|zzz999|qqq111/)
++})
++
++t.test('the part after a scheme is hidden too', async t => {
++  const helper = makeHelper(t, `
++    ${warn('curl -H Authorization: Bearer glpat-xyz789\nonly glpat-xyz789\n')}
++    ${print('Bearer glpat-xyz789')}
++  `)
++  const logs = logsOf(t)
++
++  await getTokenHelperHeader(helper, REG_KEY)
++  t.same(logs, [
++    ['warn', 'token-helper', 'curl -H Authorization: ***'],
++    ['warn', 'token-helper', 'only ***'],
++  ])
++})
++
++t.test('the helper token is hidden in stderr when the run fails too', async t => {
++  const helper = makeHelper(t, `
++    ${warn('+ echo s3cr3tvalue\n')}
++    ${print('s3cr3tvalue')}
++    process.exit(3)
++  `)
++  const logs = logsOf(t)
++
++  const error = await getTokenHelperHeader(helper, REG_KEY).catch(er => er)
++  t.match(error, { message: /exited with status 3/ })
++  t.same(logs, [['warn', 'token-helper', '+ echo ***']])
++})
++
++t.test('scrub', async t => {
++  t.equal(scrub('a tok b tok', 'tok\n'), 'a *** b ***')
++  t.equal(scrub('Bearer  tok|tok', ' Bearer  tok '), '***|***', 'with and without the scheme')
++  t.equal(scrub('nothing here', ''), 'nothing here', 'no output, nothing to hide')
++  t.equal(scrub('abc', 'abc def'), 'abc', 'only the whole value, the part after a scheme or a long run')
++  // refused output never appears whole: each long printable run of it is hidden
++  for (const out of ['npm_8Hq2sK9xLmZ4\x1b[0m', 'npm_8Hq2sK9xLmZ4\0', 'npm_8Hq2sK9xLmZ4\nexpires soon',
++    'npm_8Hq2sK9xLmZ4é', 'npm_8Hq2sK9xLmZ4�', '“npm_8Hq2sK9xLmZ4”', 'npm_8Hq2sK9xLmZ4​']) {
++    t.equal(scrub('+ printf %s npm_8Hq2sK9xLmZ4', out), '+ printf %s ***', JSON.stringify(out))
++  }
++})
++
++t.test('npm\'s own variables are not passed on', async t => {
++  const dropped = ['NODE_OPTIONS', 'Node_Options', 'npm_config_registry', 'NPM_CONFIG_USERCONFIG', 'EDITOR',
++    'NODE_ENV', 'COLOR', 'INIT_CWD', 'NODE', 'npm_execpath', 'npm_node_execpath', 'npm_command']
++  const kept = { PATH: 'p', NODE_PATH: 'n', EDITORIAL: 'e' }
++  t.same(helperEnv({ ...Object.fromEntries(dropped.map(name => [name, 'x'])), ...kept }), kept)
++})
++
++t.test('empty output fails the request', async t => {
++  const helper = makeHelper(t, print('  \n'))
++
++  await t.rejects(
++    fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }),
++    { code: 'ETOKENHELPER', message: /printed an empty token/ }
++  )
++})
++
++// Headers would refuse such a value with an error that quotes it, and that
++// error is printed and logged like any other
++t.test('output that is not a valid header value is refused without quoting it', async t => {
++  for (const out of ['tok\nsecond line', 'tok\u0001', 'tok\u007fen', 'tokĀ', 'tok中', 'Bearer toké']) {
++    let err
++    try {
++      toHeader('h', `${out}\n`)
++    } catch (er) {
++      err = er
++    }
++    t.match(err, { code: 'ETOKENHELPER', message: /printed something that is not a valid header value/ },
++      JSON.stringify(out))
++    t.notMatch(err.message, 'tok', 'the output is not in the message')
++  }
++  t.equal(toHeader('h', 'a\tb ~!'), 'Bearer a\tb ~!', 'printable ASCII and tabs pass')
++})
++
++t.test('a token printed by a helper that fails is not used or leaked', async t => {
++  const helper = makeHelper(t, `
++    process.stderr.write('Authorization: Bearer abc123\\n')
++    ${print('Bearer sup3rs3cret')}
++    process.exit(3)
++  `)
++  const logs = logsOf(t)
++
++  const error = await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }).catch(er => er)
++  t.same(error.cause, { code: 3, signal: null }, 'the cause is only a code and a signal')
++  t.match(error, { code: 'ETOKENHELPER', message: /exited with status 3/ })
++  const texts = [error.message, error.stack, JSON.stringify(error), JSON.stringify(error.cause),
++    util.inspect(error, { depth: 10 }), JSON.stringify(logs)]
++  for (const text of texts) {
++    t.notMatch(text, 'sup3rs3cret')
++    t.notMatch(text, 'abc123')
++  }
++  t.same(logs, [['warn', 'token-helper', 'Authorization: Bearer ***']])
++})
++
++t.test('a helper that reads stdin gets an empty input, not a hang', async t => {
++  // node with no script argument reads its program from stdin
++  await t.rejects(getTokenHelperHeader(process.execPath, REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /printed an empty token/,
++  })
++})
++
++t.test('a helper that cannot be started fails the request', async t => {
++  const missing = path.join(t.testdir({}), 'no-such-helper')
++
++  await t.rejects(getTokenHelperHeader(missing, REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /could not be run/,
++  })
++})
++
++t.test('a path that makes spawn throw fails the request', async t => {
++  const nul = path.join(t.testdir({}), 'he\0lper')
++
++  const error = await getTokenHelperHeader(nul, REG_KEY).catch(er => er)
++  t.match(error, { code: 'ETOKENHELPER', message: /could not be run/ })
++  t.equal(error.cause.code, 'ERR_INVALID_ARG_VALUE')
++})
++
++t.test('run turns every way spawn fails into ETOKENHELPER', async t => {
++  const throws = () => {
++    throw Object.assign(new Error('name too long'), { code: 'ENAMETOOLONG' })
++  }
++  await t.rejects(run('/h', 1000, throws), {
++    code: 'ETOKENHELPER',
++    message: /could not be run: name too long/,
++    cause: { code: 'ENAMETOOLONG' },
++  })
++
++  // no file descriptors left: there is a callback error and no stdin
++  const emfile = (bin, args, opts, cb) => {
++    process.nextTick(cb, Object.assign(new Error('spawn EMFILE'), { code: 'EMFILE' }), '', '')
++    return new EventEmitter()
++  }
++  await t.rejects(run('/h', 1000, emfile), {
++    code: 'ETOKENHELPER',
++    message: /could not be run: spawn EMFILE/,
++  })
++})
++
++t.test('why a helper failed', async t => {
++  t.equal(reason({ code: 3 }), 'exited with status 3')
++  t.equal(reason({ code: null, signal: 'SIGKILL' }), 'was killed by SIGKILL')
++  t.equal(reason({ code: 'ENOENT', message: 'spawn /h ENOENT' }), 'could not be run: spawn /h ENOENT')
++})
++
++// what the kernel reports for a missing #! interpreter is the helper's own
++// ENOENT; the message names the interpreter instead
++t.test('a script whose interpreter is missing is reported as such', async t => {
++  const enoent = (bin, args, opts, cb) => {
++    process.nextTick(cb, Object.assign(new Error(`spawn ${bin} ENOENT`), { code: 'ENOENT' }), '', '')
++    return Object.assign(new EventEmitter(), { stdin: null })
++  }
++  const script = (name, content) => {
++    const helper = file(t, name)
++    fs.writeFileSync(helper, content)
++    return helper
++  }
++  await t.rejects(run(script('lf', '#!/usr/local/bin/node\nprint()\n'), 1000, enoent), {
++    message: /could not be run: its interpreter "\/usr\/local\/bin\/node" was not found$/,
++  })
++  await t.rejects(run(script('crlf', '#!/bin/sh\r\necho tok\r\n'), 1000, enoent), {
++    message: /its interpreter "\/bin\/sh" was not found \(the #! line ends in a carriage return/,
++  })
++  await t.rejects(run(script('binary', 'MZ\0\0'), 1000, enoent), { message: /could not be run: spawn .* ENOENT$/ })
++  await t.rejects(run(path.join(path.dirname(file(t, 'x')), 'gone'), 1000, enoent), {
++    message: /could not be run: spawn .* ENOENT$/,
++  })
++})
++
++// a path with whitespace that exists but cannot be looked at (EACCES, or
++// EPERM under macOS privacy protection) is not "not found"; any error other
++// than ENOENT stands for those here
++t.test('a helper path that cannot be checked is left to spawn to explain', async t => {
++  await t.rejects(getTokenHelperHeader('/tools dir/he\0lper', REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /could not be run/,
++  })
++})
++
++t.test('a helper killed by a signal is reported as such', { skip: WIN && 'POSIX signals' }, async t => {
++  const helper = makeHelper(t, `process.kill(process.pid, 'SIGKILL')`)
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /was killed by SIGKILL/,
++    cause: { code: null, signal: 'SIGKILL' },
++  })
++})
++
++t.test('a helper that prints too much is reported as such', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    ${recordPid(pidFile)}
++    process.stdout.write('x'.repeat(2 * 1024 * 1024))
++  `)
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /printed more than 1048576 bytes/,
++    cause: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' },
++  })
++  await untilGone(pidFile)
++})
++
++t.test('the message says which stream printed too much', async t => {
++  for (const [stream, name] of [['stdout', 'out'], ['stderr', 'err']]) {
++    const pidFile = file(t, `${name}.pid`)
++    const helper = makeHelper(t, `
++      ${recordPid(pidFile)}
++      process.${stream}.write('x'.repeat(2 * 1024 * 1024))
++    `, name)
++
++    await t.rejects(getTokenHelperHeader(helper, `//${name}/`), {
++      code: 'ETOKENHELPER',
++      message: new RegExp(`printed more than 1048576 bytes to ${stream}$`),
++    }, stream)
++    // the rejection does not wait for the process
++    await untilGone(pidFile)
++  }
++})
++
++// The helper outlives a broken pipe, so only killTree() can end it: on
++// Windows execFile's own maxBuffer kill reaches cmd.exe and not the helper.
++t.test('a helper that prints too much is ended', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    ${recordPid(pidFile)}
++    process.stdout.on('error', () => {})
++    process.stdout.write('x'.repeat(2000000))
++    setTimeout(() => {}, 60000)
++  `)
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), { message: /printed more than 1048576 bytes to stdout/ })
++  await untilGone(pidFile)
++})
++
++const fakeStream = () => Object.assign(new EventEmitter(), {
++  destroyed: false,
++  destroy () {
++    this.destroyed = true
++  },
++})
++
++t.test('run ends the helper as soon as a stream overflows', async t => {
++  for (const stream of ['stdout', 'stderr']) {
++    const child = Object.assign(fakeChild(4242), { stdout: fakeStream(), stderr: fakeStream() })
++    let done
++    const promise = run('/h', 60000, (bin, args, opts, cb) => {
++      done = cb
++      t.equal(opts.maxBuffer, Infinity, 'execFile, which would kill cmd.exe alone, has no limit')
++      return child
++    }, 'linux')
++
++    // ENOTCONN on a pipe of a process that could not start; the callback
++    // reports the failure, the pipe's own error must not throw
++    child[stream].emit('error', new Error('read ENOTCONN'))
++    child[stream].emit('data', 'x'.repeat(1024 * 1024))
++    t.same(child.signals, [], `${stream}: the limit itself is allowed`)
++    child[stream].emit('data', 'x')
++    t.same(child.signals, ['SIGTERM'], `${stream}: one byte more ends it`)
++    t.ok(child.stdout.destroyed && child.stderr.destroyed, `${stream}: and nothing more is read`)
++
++    // without waiting for the process: the callback comes after it is gone
++    await t.rejects(promise, {
++      message: new RegExp(`bytes to ${stream}$`),
++      cause: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' },
++    })
++    const logs = logsOf(t)
++    done(null, 'tok', '+ curl --data raw-secret https://idp\n'.repeat(3))
++    t.same(logs.filter(l => l[1] === 'token-helper'), [], `${stream}: the flood is not logged afterwards`)
++    child.emit('exit', null, 'SIGTERM')
++  }
++
++  // the limit is in bytes: 600 KiB of two-byte characters is over it
++  const wide = Object.assign(fakeChild(4244), { stdout: fakeStream(), stderr: fakeStream() })
++  const widePromise = run('/h', 60000, () => wide, 'linux')
++  wide.stdout.emit('data', 'é'.repeat(600 * 1024))
++  await t.rejects(widePromise, { message: /bytes to stdout$/ })
++  wide.emit('exit', null, 'SIGTERM')
++
++  // each stream has its own count
++  const child = Object.assign(fakeChild(4243), { stdout: fakeStream(), stderr: fakeStream() })
++  let finish
++  const counted = run('/h', 60000, (bin, args, opts, cb) => {
++    finish = cb
++    return child
++  }, 'linux')
++  child.stdout.emit('data', 'x'.repeat(700 * 1024))
++  child.stderr.emit('data', 'x'.repeat(700 * 1024))
++  t.same(child.signals, [], 'two streams do not add up')
++  // finishing the run clears its deadline timer, which would otherwise keep
++  // the test process alive for a minute
++  finish(null, 'tok', '')
++  t.equal(await counted, 'Bearer tok')
++})
++
++t.test('a helper that runs too long is killed', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    ${recordPid(pidFile)}
++    setTimeout(() => {}, 60000)
++  `)
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY, 1500), {
++    code: 'ETOKENHELPER',
++    message: /timed out after 1500 ms/,
++  })
++  await untilGone(pidFile)
++})
++
++t.test('a helper that ignores SIGTERM is rejected at the deadline and then killed', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    process.on('SIGTERM', () => {})
++    ${recordPid(pidFile)}
++    setTimeout(() => {}, 30000)
++  `)
++
++  const start = Date.now()
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY, 1500), {
++    code: 'ETOKENHELPER',
++    message: /timed out after 1500 ms/,
++  })
++  t.ok(Date.now() - start < 5000, 'rejected at the deadline, not when the helper ends')
++
++  // the process behind the .cmd wrapper on Windows, the shell script's exec
++  // elsewhere
++  await untilGone(pidFile)
++  t.pass('the helper is gone')
++})
++
++t.test('a token that arrives after the deadline is ignored', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    process.on('SIGTERM', () => {})
++    ${recordPid(pidFile)}
++    setTimeout(() => { ${print('late')} }, 2000)
++  `)
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY, 1000), {
++    code: 'ETOKENHELPER',
++    message: /timed out after 1000 ms/,
++  })
++  await untilGone(pidFile)
++  // the rejection is what the cache hands out from now on
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), { message: /timed out/ })
++})
++
++t.test('killTree on POSIX: SIGTERM, then SIGKILL after the grace period', async t => {
++  const fake = () => Object.assign(new EventEmitter(), {
++    exitCode: null,
++    signalCode: null,
++    signals: [],
++    kill (signal) {
++      this.signals.push(signal)
++    },
++  })
++
++  const stubborn = fake()
++  killTree(stubborn, 'linux', null, 50)
++  t.same(stubborn.signals, ['SIGTERM'])
++  await sleep(200)
++  t.same(stubborn.signals, ['SIGTERM', 'SIGKILL'])
++
++  const obedient = fake()
++  killTree(obedient, 'linux', null, 50)
++  obedient.emit('exit', null, 'SIGTERM')
++  await sleep(200)
++  t.same(obedient.signals, ['SIGTERM'], 'no SIGKILL for a process that exited')
++
++  const gone = Object.assign(fake(), { exitCode: 0 })
++  killTree(gone, 'linux', null, 50)
++  t.same(gone.signals, [], 'nothing is sent to a process that has exited')
++  const signaled = Object.assign(fake(), { signalCode: 'SIGTERM' })
++  killTree(signaled, 'linux', null, 50)
++  t.same(signaled.signals, [])
++})
++
++t.test('killTree on Windows: taskkill for the whole tree', async t => {
++  const child = Object.assign(new EventEmitter(), {
++    pid: 4242,
++    exitCode: null,
++    signalCode: null,
++    signals: [],
++    kill (signal) {
++      this.signals.push(signal)
++    },
++  })
++  const calls = []
++  killTree(child, 'win32', (...args) => {
++    calls.push(args)
++    args[3]()
++  })
++  t.match(calls[0][0], /System32[\\/]taskkill\.exe$/)
++  t.same(calls[0][1], ['/pid', '4242', '/T', '/F'])
++  t.match(calls[0][2], { windowsHide: true })
++  t.same(child.signals, [], 'the process itself is left to taskkill')
++
++  killTree(child, 'win32', () => {
++    throw new Error('no taskkill')
++  })
++  t.same(child.signals, [undefined], 'falls back to ending the process')
++
++  const { SystemRoot } = process.env
++  delete process.env.SystemRoot
++  t.teardown(() => {
++    if (SystemRoot !== undefined) {
++      process.env.SystemRoot = SystemRoot
++    }
++  })
++  killTree(child, 'win32', (...args) => {
++    calls.push(args)
++    args[3]()
++  })
++  t.equal(calls[1][0], 'C:\\Windows\\System32\\taskkill.exe', 'without SystemRoot')
++})
++
++t.test('a relative path or a command with arguments is refused', async t => {
++  const real = makeHelper(t, print('x'))
++  for (const helper of [
++    'helper', './helper.sh', 'aws codeartifact get-authorization-token', true, undefined,
++    `${real} --flag`,
++  ]) {
++    await t.rejects(getTokenHelperHeader(helper, REG_KEY), {
++      code: 'ETOKENHELPER',
++      message: /must be an absolute path with no arguments \(arguments are not supported\)/,
++    }, String(helper))
++  }
++  // a missing path with a space in it is missing, not a command with arguments
++  await t.rejects(getTokenHelperHeader(path.join(path.dirname(real), 'missing helper'), REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /was not found$/,
++  })
++  // a space in a path that exists is fine
++  t.equal(await getTokenHelperHeader(real, REG_KEY), 'Bearer x')
++})
++
++t.test('whitespace and a byte order mark around the output are removed', async t => {
++  t.equal(toHeader('h', '\uFEFFtok\r\n'), 'Bearer tok', 'PowerShell 5.1 writes a BOM')
++  t.equal(toHeader('h', '  tok  '), 'Bearer tok', 'no double space after the scheme')
++  t.equal(toHeader('h', ' \uFEFFBasic dXNlcjpwYXNz\n'), 'Basic dXNlcjpwYXNz')
++})
++
++t.test('a helper has 60 seconds by default', async t => {
++  t.equal(getTokenHelperHeader.TIMEOUT, 60 * 1000)
++})
++
++t.test('header mapping matches pnpm', async t => {
++  t.equal(toHeader('h', 'abc\n'), 'Bearer abc')
++  t.equal(toHeader('h', 'Token abc'), 'Token abc')
++  t.equal(toHeader('h', 'npm_x-y z'), 'Bearer npm_x-y z', 'a token is not mistaken for a scheme')
++  t.equal(toHeader('h', 'npm_abc def'), 'Bearer npm_abc def', 'a scheme is letters only')
++  t.throws(() => toHeader('h', '\r\n'), { code: 'ETOKENHELPER' })
++})
++
++t.test('batch files run through cmd.exe on Windows only', async t => {
++  t.same(command('C:\\tools\\token.cmd', 'win32', 'C:\\Windows\\system32\\cmd.exe'), {
++    file: 'C:\\Windows\\system32\\cmd.exe',
++    args: ['/d', '/s', '/c', '""C:\\tools\\token.cmd""'],
++    verbatim: true,
++    cwd: 'C:\\tools',
++  })
++  t.equal(command('C:\\tools\\token.BAT', 'win32', '').file, 'cmd.exe')
++  t.same(command('C:\\tools\\token.exe', 'win32'), {
++    file: 'C:\\tools\\token.exe', args: [], verbatim: false, cwd: 'C:\\tools',
++  })
++  t.same(command('/usr/local/bin/token.cmd', 'linux'), {
++    file: '/usr/local/bin/token.cmd', args: [], verbatim: false, cwd: '/usr/local/bin',
++  })
++})
++
++// what npm runs a command by bare name from: a repository's node.cmd would
++// otherwise run in place of the node a .cmd helper starts
++t.test('a helper does not start in npm\'s directory', { skip: !WIN && 'cmd.exe' }, async t => {
++  const out = file(t, 'out')
++  const helper = file(t, 'helper.cmd')
++  fs.writeFileSync(helper, `@node -e "require('fs').writeFileSync(process.argv[1], process.cwd()); console.log('tok')" "${out}"\r\n`)
++  const repo = file(t, 'repo')
++  fs.mkdirSync(repo)
++  fs.writeFileSync(path.join(repo, 'node.cmd'), '@echo repository-node\r\n')
++  const cwd = process.cwd()
++  process.chdir(repo)
++  t.teardown(() => process.chdir(cwd))
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer tok', 'the real node ran')
++  t.equal(fs.readFileSync(out, 'utf8'), path.dirname(helper))
++})
++
++// a repository's .npmrc reaches both through npm's own environment
++t.test('a helper gets no NODE_OPTIONS and no npm_config_ variables', async t => {
++  const out = file(t, 'env.json')
++  const helper = makeHelper(t, `
++    require('fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify({
++      names: Object.keys(process.env),
++      nodeOptions: process.env.NODE_OPTIONS || '',
++    }))
++    ${print('tok')}
++  `)
++  const loaded = file(t, 'loaded')
++  const saved = { ...process.env }
++  t.teardown(() => {
++    for (const name of Object.keys(process.env)) {
++      if (!(name in saved)) {
++        delete process.env[name]
++      }
++    }
++    Object.assign(process.env, saved)
++  })
++  process.env.NODE_OPTIONS = `--require=${JSON.stringify(path.join(__dirname, 'no-such-file.js')).slice(1, -1)}`
++  process.env.npm_config_registry = 'https://from-a-project.example/'
++  process.env.NPM_CONFIG_USERCONFIG = loaded
++  process.env.KEEP_ME = '1'
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer tok', 'NODE_OPTIONS did not reach it')
++  const seen = JSON.parse(fs.readFileSync(out, 'utf8'))
++  const envNames = seen.names.map(n => n.toLowerCase())
++  // the coverage tool these tests run under adds a NODE_OPTIONS of its own
++  t.notMatch(seen.nodeOptions, 'no-such-file', 'npm\'s NODE_OPTIONS is not passed on')
++  t.same(envNames.filter(n => n.startsWith('npm_config_')), [], 'nor are npm_config_ variables')
++  t.ok(envNames.includes('keep_me'), 'the rest of the environment is')
++})
++
++// a background process that keeps the helper's stdout open must not cost the
++// token the helper printed before it exited
++t.test('a helper that exits while a background process holds its stdout', async t => {
++  const pidFile = file(t, 'pid')
++  const helper = makeHelper(t, `
++    require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(
++      `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 3000)`
++    )}], { stdio: 'inherit', detached: true }).unref()
++    ${print('tok')}
++  `)
++  const start = Date.now()
++  t.equal(await getTokenHelperHeader(helper, REG_KEY, 10000), 'Bearer tok')
++  t.ok(Date.now() - start < 2500, 'without waiting for the background process')
++  await untilGone(pidFile)
++})
++
++t.test('the output limit counts the bytes the helper wrote', async t => {
++  // 400 kB that decode to three times as many bytes of U+FFFD
++  const helper = makeHelper(t, 'process.stdout.write(Buffer.alloc(400000, 0xff))')
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), { message: /not a valid header value/ })
++})
++
++t.test('a directory path too long for Windows to start a program in is refused', async t => {
++  const dir = `C:\\${'d'.repeat(255)}`
++  t.ok(command(`${dir}\\h.exe`, 'win32'), 'up to 258 characters')
++  t.throws(() => command(`${dir}x\\h.exe`, 'win32'), {
++    code: 'ETOKENHELPER',
++    message: /longer than the 258 characters Windows starts a program in/,
++  })
++  t.ok(command(`/${'d'.repeat(300)}/h`, 'linux'), 'not elsewhere')
++})
++
++t.test('cmd.exe cannot be given a path with a quote or a percent sign', async t => {
++  for (const helper of ['C:\\tools\\100%.cmd', 'C:\\tools\\%TEMP%.bat', 'C:\\to"ols\\token.cmd']) {
++    t.throws(() => command(helper, 'win32', 'cmd.exe'), {
++      code: 'ETOKENHELPER',
++      message: /cannot be run through cmd.exe because its path contains " or %/,
++    }, helper)
++  }
++  // nothing to expand when the file is executed directly or on another platform
++  t.ok(command('C:\\tools\\100%.exe', 'win32', 'cmd.exe'))
++  t.ok(command('/tools/100%.cmd', 'linux'))
++})
++
++t.test('a .cmd path with a percent sign is refused on Windows', { skip: !WIN && 'cmd.exe' }, async t => {
++  const helper = file(t, '100%.cmd')
++  fs.writeFileSync(helper, '@echo off\r\necho token\r\n')
++
++  await t.rejects(getTokenHelperHeader(helper, REG_KEY), {
++    code: 'ETOKENHELPER',
++    message: /cannot be run through cmd.exe/,
++  })
++})
++
++t.test('a .cmd helper starts in its own directory', { skip: !WIN && 'cmd.exe' }, async t => {
++  const helper = file(t, 'cwd.cmd')
++  fs.writeFileSync(helper, '@echo %CD%\r\n')
++
++  const header = await getTokenHelperHeader(helper, REG_KEY)
++  t.equal(header.toLowerCase(), `bearer ${path.dirname(helper)}`.toLowerCase())
++})
++
++t.test('a body promise that rejects while the helper runs rejects the request', async t => {
++  const unhandled = unhandledOf(t)
++  const runs = countRuns(t)
++  const { helper, finish } = gated(t, `${runs.record}; ${print('s3cret')}`)
++  const failure = new Error('body failed')
++  const body = new Promise((resolve, reject) => setTimeout(reject, 50, failure))
++
++  const start = Date.now()
++  await t.rejects(
++    fetch('/pkg', { ...OPTS, method: 'PUT', body, [`${REG_KEY}:tokenHelper`]: helper }),
++    failure
++  )
++  t.ok(Date.now() - start < 2000, 'without waiting for the helper')
++  await finish()
++  await sleep(50)
++  t.same(unhandled, [], 'no unhandled rejection')
++})
++
++for (const gzip of [false, true]) {
++  t.test(`a stream body that errors while the helper runs rejects the request (gzip: ${gzip})`, async t => {
++    const { helper, finish } = gated(t, print('s3cret'))
++    const failure = new Error('stream failed')
++    const body = new Minipass()
++    setTimeout(() => body.emit('error', failure), 50)
++
++    const start = Date.now()
++    await t.rejects(
++      fetch('/pkg', { ...OPTS, method: 'PUT', body, gzip, [`${REG_KEY}:tokenHelper`]: helper }),
++      failure
++    )
++    t.ok(Date.now() - start < 2000, 'without waiting for the helper')
++    await finish()
++  })
++}
++
++t.test('an abort while the helper runs rejects the request without waiting', async t => {
++  const { helper, finish } = gated(t, print('s3cret'))
++  const controller = new AbortController()
++  setTimeout(() => controller.abort(), 100)
++
++  const start = Date.now()
++  await t.rejects(
++    fetch('/pkg', { ...OPTS, signal: controller.signal, [`${REG_KEY}:tokenHelper`]: helper }),
++    { name: 'AbortError' }
++  )
++  t.ok(Date.now() - start < 2000, 'without waiting for the helper')
++  t.equal(require('events').getEventListeners(controller.signal, 'abort').length, 0)
++  await finish()
++})
++
++t.test('a request that is already aborted does not run the helper', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `${runs.record}; ${print('s3cret')}`)
++  const stop = new Error('stop')
++
++  await t.rejects(
++    fetch('/pkg', { ...OPTS, signal: AbortSignal.abort(stop), [`${REG_KEY}:tokenHelper`]: helper }),
++    stop
++  )
++  t.equal(runs.count(), 0)
++})
++
++t.test('an offline request does not run the helper', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `${runs.record}; process.exit(3)`)
++  const cache = file(t, '_cacache')
++  const opts = { ...OPTS, cache, [`${REG_KEY}:tokenHelper`]: helper }
++
++  // nothing cached: the failure is the cache's
++  await t.rejects(fetch('/pkg', { ...opts, offline: true }), { code: 'ENOTCACHED' })
++
++  tnock(t, 'https://helper.registry').get('/npm/pkg').reply(200, { cached: true })
++  await fetch.json('/pkg', { ...OPTS, cache })
++  t.same(await fetch.json('/pkg', { ...opts, offline: true }), { cached: true }, 'served from the cache')
++  t.equal(runs.count(), 0, 'the broken helper was never started')
++})
+-- 
+2.52.0.windows.1
+
