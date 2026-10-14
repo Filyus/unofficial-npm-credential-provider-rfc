@@ -47,7 +47,7 @@ jobs:
           git fetch -q --depth 1 https://github.com/npm/npm-registry-fetch.git "$NPM_REGISTRY_FETCH_BASE"
           git checkout -q FETCH_HEAD
           git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-registry-fetch.patch
-          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --ignore-scripts --no-audit --no-fund
       - name: Test npm-registry-fetch
         working-directory: npm-registry-fetch
         run: npm test
