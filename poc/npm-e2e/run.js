@@ -203,7 +203,12 @@ const main = async () => {
     expect(publishConfig, 'no request carries the helper token', !publishConfig.requests.some(r => r.endsWith('helper-token')))
     expect(publishConfig, 'the key is reported as ignored', publishConfig.notices.some(l => l.includes('Ignoring publishConfig')))
 
-    const results = [user, project, redirect, stale, publish, publishConfig]
+    const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
+    expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
+    expect(login, 'nothing is sent', login.requests.length === 0)
+    expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'user.npmrc'), 'utf8') === helperLine)
+
+    const results = [user, project, redirect, stale, publish, publishConfig, login]
     console.log(JSON.stringify(results, null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)
