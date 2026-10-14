@@ -44,7 +44,10 @@ const overlay = () => {
     backup.clear()
     if (failures.length) {
       console.error(`could not restore:\n${failures.join('\n')}\nrun: git -C ${npmCliDir} checkout -- node_modules/npm-registry-fetch/lib`)
+      // a run that leaves the checkout modified has not passed
+      process.exitCode = 1
     }
+    return failures.length === 0
   }
   try {
     for (const file of OVERLAY) {
@@ -79,7 +82,10 @@ const writeHelper = (root) => {
   }
   // a shell wrapper, so a node path with spaces cannot break a shebang
   const helper = path.join(dir, 'helper')
-  fs.writeFileSync(helper, `#!/bin/sh\nexec "${process.execPath}" "${script}"\n`)
+  // single quotes, with any single quote in a path escaped, so the shell
+  // expands nothing in the paths
+  const sq = s => `'${s.replaceAll("'", "'\\''")}'`
+  fs.writeFileSync(helper, `#!/bin/sh\nexec ${sq(process.execPath)} ${sq(script)}\n`)
   fs.chmodSync(helper, 0o755)
   return helper
 }
@@ -145,16 +151,21 @@ const main = async () => {
   const expect = (result, what, ok) => checks.push({ scenario: result.name, what, ok: !!ok })
   const auths = r => [...new Set(r.requests.map(x => x.split(' ').slice(1).join(' ')))]
 
-  let restore = overlay()
+  // handlers first, so an interrupt during the overlay itself is covered; on
+  // Windows only Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) reach a handler,
+  // a forced termination cannot be intercepted at all
+  let restore = null
   const onSignal = sig => {
     if (restore) {
       restore()
       restore = null
     }
-    process.exit(sig === 'SIGINT' ? 130 : 143)
+    process.exit(128 + (os.constants.signals[sig] || 1))
   }
-  process.once('SIGINT', onSignal)
-  process.once('SIGTERM', onSignal)
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+    process.once(sig, onSignal)
+  }
+  restore = overlay()
 
   try {
     const user = await run('user-config', { user: helperLine })
@@ -199,7 +210,7 @@ const main = async () => {
     }
     const ok = checks.every(c => c.ok)
     console.log(ok ? 'PASS' : 'FAIL')
-    process.exitCode = ok ? 0 : 1
+    process.exitCode = ok && process.exitCode !== 1 ? 0 : 1
   } finally {
     if (restore) {
       restore()
