@@ -48,9 +48,13 @@ jobs:
           git checkout -q FETCH_HEAD
           git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-registry-fetch.patch
           npm install --ignore-scripts --no-audit --no-fund
+      # tests and eslint, without template-oss-check, which compares the repo's
+      # git remote and branch with npm's template and has neither here
       - name: Test npm-registry-fetch
         working-directory: npm-registry-fetch
-        run: npm test
+        run: |
+          npm test --ignore-scripts
+          npm run eslint --ignore-scripts
 
       - name: Apply the npm-cli patch
         run: |
