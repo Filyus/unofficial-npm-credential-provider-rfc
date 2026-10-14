@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 12
+> Revision: 13
 > Date: 2026-10-14
 
 > A draft proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It lets npm obtain registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment.
@@ -42,7 +42,7 @@ The same npm v12 release made install scripts, git dependencies and remote tarba
 
 ### npm is behind its neighbours
 
-pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm the request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), has 40 👍 and no maintainer reply since March 2025, and a `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all. npm 12 also reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), and treats it as an error under `strict-npmrc`, so a configuration shared with pnpm is on a path to breaking npm outright.
+pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm the request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), has 41 👍, no maintainer reply, and since 2026-10-01 the `Priority 1` label, and a `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all. npm 12 also reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), and treats it as an error under `strict-npmrc`, so a configuration shared with pnpm is on a path to breaking npm outright.
 
 ## Scope
 
@@ -525,23 +525,25 @@ Registries disagree on the tiers, as the table under [Operations](#4-operations)
 
 ## Prior Art
 
-| | Git | Docker | pnpm `tokenHelper` | Cargo | npm RFC #850 | This proposal |
-|---|---|---|---|---|---|---|
-| **Year** | 2012 | 2016 | 2022 | 2023 | 2025 | 2026 |
-| **Format** | key=value | JSON | Plain string | JSON (single-line) | JSON | Phase 1: plain string; Phase 2: JSON (single-line) |
-| **Direction** | Bidirectional | Bidirectional | Unidirectional | Bidirectional | Unidirectional | Bidirectional |
-| **Request kinds** | get, store, erase | get, store, erase | get only | get, login, logout | get only | get, erase, login, logout |
-| **Context on input** | protocol, host, path | ServerURL | None | registry, operation, name, version | None (args only) | registry, scope, package, version, operation, command |
-| **Operations** | — | — | — | read, publish, yank, unyank, owners | — | read, publish, stage, deprecate, dist-tag, unpublish, owner, access |
-| **Versioning** | None | None | None | Hello `{"v":[1]}` | None | Hello `{"v":[1]}` + `v` in every message |
-| **Auth type** | Implicit | Implicit | Raw token or header value | Raw token | Implicit | Explicit `bearer`/`basic` |
-| **Refresh** | In helper | In helper | In helper | In provider | Re-run | In provider |
-| **Cache control** | None | None | None | `never`/`session`/`expires` | `expiresAt` | Cargo's three + `granularity` + `operationIndependent` |
-| **Rejection signal** | `erase` | `erase` | None | Challenge headers | None | `erase` + one retry with status and challenges |
-| **Chaining** | Yes | No | No | Yes (`url-not-supported`) | No | Yes (`url-not-supported`) |
-| **Process reuse** | No | No | Once per registry per run | Allowed by the protocol; Cargo starts one per request | One per cache miss | One per npm command |
-| **Discovery** | `git-credential-*` | `docker-credential-*` | Explicit | Explicit | Explicit | Explicit; suggest-only lookup |
-| **Production-tested** | Yes | Yes | Yes | Yes | No | No |
+| | Git | Docker | pnpm `tokenHelper` | Cargo | NuGet plugins | npm RFC #850 | This proposal |
+|---|---|---|---|---|---|---|---|
+| **Year** | 2012 | 2016 | 2022 | 2023 | 2018 (NuGet 4.8) | 2025 | 2026 |
+| **Format** | key=value | JSON | Plain string | JSON (single-line) | JSON over stdin/stdout | JSON | Phase 1: plain string; Phase 2: JSON (single-line) |
+| **Direction** | Bidirectional | Bidirectional | Unidirectional | Bidirectional | Bidirectional (the plugin also sends requests, such as log messages) | Unidirectional | Bidirectional |
+| **Request kinds** | get, store, erase | get, store, erase | get only | get, login, logout | get (Get Authentication Credentials), set credentials, operation claims | get only | get, erase, login, logout |
+| **Context on input** | protocol, host, path | ServerURL | None | registry, operation, name, version | source URI, isRetry, NonInteractive, CanShowDialog | None (args only) | registry, scope, package, version, operation, command |
+| **Operations** | — | — | — | read, publish, yank, unyank, owners | — | — | read, publish, stage, deprecate, dist-tag, unpublish, owner, access |
+| **Versioning** | None | None | None | Hello `{"v":[1]}` | Handshake negotiates a protocol version (2.0.0 for authentication) | None | Hello `{"v":[1]}` + `v` in every message |
+| **Auth type** | Implicit | Implicit | Raw token or header value | Raw token | Username/password with a list of auth types | Implicit | Explicit `bearer`/`basic` |
+| **Refresh** | In helper | In helper | In helper | In provider | In plugin | Re-run | In provider |
+| **Cache control** | None | None | None | `never`/`session`/`expires` | None in the protocol (operation claims cached 30 days) | `expiresAt` | Cargo's three + `granularity` + `operationIndependent` |
+| **Rejection signal** | `erase` | `erase` | None | Challenge headers | `isRetry` on the next request | None | `erase` + one retry with status and challenges |
+| **Chaining** | Yes | No | No | Yes (`url-not-supported`) | Yes (plugins in priority order; an empty claim set passes) | No | Yes (`url-not-supported`) |
+| **Process reuse** | No | No | Once per registry per run | Allowed by the protocol; Cargo starts one per request | Yes; shut down after 1 minute idle | One per cache miss | One per npm command |
+| **Discovery** | `git-credential-*` | `docker-credential-*` | Explicit | Explicit | `~/.nuget/plugins`, `NUGET_PLUGIN_PATHS`, and since 6.13 `nuget-plugin-*` on `PATH` | Explicit | Explicit; suggest-only lookup |
+| **Production-tested** | Yes | Yes | Yes | Yes | Yes | No | No |
+
+NuGet's plugins are the closest prior art to Phase 2: one long-lived process, a negotiated protocol version, plugins tried in priority order, a retry flag after a rejection, and a request that says whether the client may block for the user. Phase 2 differs in three places, each for a reason particular to npm. NuGet times each request out after 5 seconds and lets a plugin extend that with progress messages; Phase 2 instead gives a request kind a fixed budget, and an interactive `get` the `login` one, which keeps the client simpler but cannot tell a stuck provider from a slow user before the budget runs out. NuGet also finds plugins on `PATH` by name (`nuget-plugin-*`, since 6.13); npm cannot, because a script npm runs puts the project's `node_modules/.bin` first on `PATH`, so a dependency could provide a provider by that name. And a NuGet request carries the source URI only, while npm sends the package, version and operation, because npm registries scope tokens by package and by action ([NuGet cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins), [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin)).
 
 Further references: [Git credential helpers](https://git-scm.com/docs/gitcredentials), [Docker credential stores](https://docs.docker.com/reference/cli/docker/login/#credential-stores), [pnpm `tokenHelper`](https://pnpm.io/npmrc#urltokenhelper), [Cargo credential provider protocol](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html), [NuGet cross-platform authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin), [pip keyring support](https://pip.pypa.io/en/stable/topics/authentication/).
 
