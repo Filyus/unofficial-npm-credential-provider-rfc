@@ -37,3 +37,9 @@ python tools/generate_from_policy.py --check
 python -m unittest discover -v
 cargo test --manifest-path poc/rust/Cargo.toml
 ```
+
+End-to-end check of the Phase 1 `tokenHelper` prototype, given local checkouts of npm/cli and npm/npm-registry-fetch on their `token-helper` branches (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
+
+```sh
+node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
+```
