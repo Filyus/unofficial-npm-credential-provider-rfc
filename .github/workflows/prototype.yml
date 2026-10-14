@@ -31,8 +31,11 @@ jobs:
       run:
         shell: bash
     steps:
-      # the patches have LF endings, and lint checks them
-      - run: git config --global core.autocrlf false
+      # the patches have LF endings, and lint checks them; npm/cli has test
+      # fixtures deeper than the Windows path limit
+      - run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
       - uses: actions/checkout@v4
         with:
           path: rfc

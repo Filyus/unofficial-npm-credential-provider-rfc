@@ -1,4 +1,4 @@
-From 8f71783759673b2318dd9e90f00a5670c570adbd Mon Sep 17 00:00:00 2001
+From ea9d6b4b77620bfacffcd258e097280ea4303c1c Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -50,7 +50,7 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/fixtures/token-helper/helper.cmd      |   1 +
  test/fixtures/token-helper/index.js        |   5 +
  test/lib/commands/config.js                |  32 ++
- test/lib/commands/login.js                 |  27 ++
+ test/lib/commands/login.js                 |  27 +
  test/lib/commands/logout.js                |  42 ++
  test/lib/commands/profile.js               |  11 +
  test/lib/commands/publish.js               |  33 ++
@@ -60,11 +60,11 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/lib/utils/oidc.js                     |  39 ++
  test/lib/utils/publish-config.js           |  26 +
  workspaces/config/lib/definitions/index.js |   1 +
- workspaces/config/lib/index.js             | 235 ++++++++-
+ workspaces/config/lib/index.js             | 239 ++++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 531 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 547 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1180 insertions(+), 21 deletions(-)
+ 29 files changed, 1200 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -782,7 +782,7 @@ index b5b63bf..41d6ba1 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..5a2f103 100644
+index 37dfecf..878dbeb 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -4,7 +4,7 @@ const ini = require('ini')
@@ -883,7 +883,7 @@ index 37dfecf..5a2f103 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -857,14 +885,191 @@ class Config {
+@@ -857,14 +885,195 @@ class Config {
      }
    }
  
@@ -951,14 +951,18 @@ index 37dfecf..5a2f103 100644
 +
 +  // Paths as the filesystem resolves them: \\?\ long paths, 8.3 short names,
 +  // case on Windows and links all name the same file in different spellings.
++  // A path that does not exist yet is resolved through its nearest ancestor
++  // that does: on macOS the temp directory is under /var, a link to
++  // /private/var, and both spellings must come out the same.
 +  #realPath (p) {
-+    p = resolve(p.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, ''))
-+    for (const [dir, rest] of [[p, ''], [dirname(p), p.slice(dirname(p).length)]]) {
++    const full = resolve(p.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, ''))
++    p = full
++    for (const dir of walkUp(full)) {
 +      try {
-+        p = realpathSync.native(dir) + rest
++        p = realpathSync.native(dir) + full.slice(dir.length)
 +        break
 +      } catch {
-+        // a file that does not exist yet: its directory may
++        // not there yet: try its parent
 +      }
 +    }
 +    return this.platform === 'win32' ? p.toLowerCase() : p
@@ -1075,7 +1079,7 @@ index 37dfecf..5a2f103 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1181,14 @@ class Config {
+@@ -976,6 +1185,14 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -1111,7 +1115,7 @@ index 12719b5..e9be8d3 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..99638a6 100644
+index 9f83d98..c61bd2c 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,7 +2,7 @@ const t = require('tap')
@@ -1142,7 +1146,7 @@ index 9f83d98..99638a6 100644
    readFileSync: (path, ...args) => {
      throwIfExternalNpmrc(path)
      if (path.includes('WEIRD-ERROR')) {
-@@ -2468,3 +2478,522 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2478,538 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -1227,7 +1231,7 @@ index 9f83d98..99638a6 100644
 +  // relative paths in a project .npmrc resolve against the process cwd, which
 +  // in a real run is the project but here is not, so the tests use absolute ones
 +  const loadWith = async (t, projectNpmrc, extraArgv = [], projectFiles = {}, extraEnv = {}, cwd = '',
-+    platform = null) => {
++    platform = null, prepare = () => {}) => {
 +    const path = outsideProjects(t, {
 +      project: {
 +        'package.json': '{}',
@@ -1237,6 +1241,7 @@ index 9f83d98..99638a6 100644
 +      },
 +      home: { '.npmrc': '' },
 +    })
++    prepare(path)
 +    fs.writeFileSync(join(path, 'project', '.npmrc'), projectNpmrc.replace('<path>', path))
 +    for (const [name, content] of Object.entries(projectFiles)) {
 +      fs.mkdirSync(dirname(join(path, 'project', name)), { recursive: true })
@@ -1471,6 +1476,21 @@ index 9f83d98..99638a6 100644
 +  t.test('a ..\\x name under a prefix that does not exist yet', { skip: process.platform === 'win32' && 'POSIX names' }, async t => {
 +    const { config } = await loadWith(t, '', ['--prefix=<path>/gone', '--userconfig=<path>/gone/..\\x/u.npmrc'],
 +      {}, {}, '', 'linux')
++    t.same(config.tokenHelperUntrusted, ['user', 'global'], 'the file lies in the prefix')
++  })
++
++  // macOS's temp directory is under /var, a link to /private/var: a path that
++  // does not exist yet is resolved through its nearest ancestor that does
++  t.test('a file under a prefix that does not exist yet, named through a link', async t => {
++    const aliasDir = fs.mkdtempSync(join(tmpdir(), 'npm-config-token-helper-alias-'))
++    const alias = join(aliasDir, 'alias')
++    t.teardown(() => {
++      // the link alone, never what it points to
++      fs.rmSync(alias)
++      fs.rmdirSync(aliasDir)
++    })
++    const { config } = await loadWith(t, '', ['--prefix=<path>/gone', `--userconfig=${alias}/gone/sub/u.npmrc`],
++      {}, {}, '', null, (path) => fs.symlinkSync(path, alias, 'junction'))
 +    t.same(config.tokenHelperUntrusted, ['user', 'global'], 'the file lies in the prefix')
 +  })
 +
