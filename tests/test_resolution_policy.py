@@ -112,8 +112,8 @@ class ProviderResolutionTests(unittest.TestCase):
                     global_provider(),
                     ProviderLocation(
                         "npm-credential-provider-gitlab",
-                        "enterprise",
-                        "/opt/company/bin/npm-credential-provider-gitlab",
+                        "global-bin",
+                        "/opt/node/bin/npm-credential-provider-gitlab",
                     ),
                 ],
             )

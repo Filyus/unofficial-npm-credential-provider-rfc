@@ -56,6 +56,7 @@ pub enum Operation {
     Read,
     Publish,
     Stage,
+    StageRead,
     Deprecate,
     DistTag,
     Unpublish,
@@ -71,7 +72,7 @@ pub enum Operation {
 
 impl Operation {
     pub fn requires_version(&self) -> bool {
-        matches!(self, Self::Publish | Self::Stage)
+        matches!(self, Self::Publish | Self::Stage | Self::StageReject)
     }
 }
 
@@ -216,7 +217,10 @@ impl Request {
                 "a client must not send an unknown operation",
             )?;
             if operation.requires_version() {
-                require(self.version.is_some(), "publish and stage require version")?;
+                require(
+                    self.version.is_some(),
+                    "publish, stage and stage-reject require version",
+                )?;
             }
         }
         if let Some(token) = &self.token {
@@ -596,6 +600,7 @@ mod tests {
             Operation::Read,
             Operation::Publish,
             Operation::Stage,
+            Operation::StageRead,
             Operation::Deprecate,
             Operation::DistTag,
             Operation::Unpublish,

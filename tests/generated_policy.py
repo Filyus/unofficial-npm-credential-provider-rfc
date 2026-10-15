@@ -3,15 +3,15 @@ from __future__ import annotations
 
 PROTOCOL_VERSION = 1
 SUPPORTED_REQUEST_KINDS = frozenset(['login', 'logout', 'get', 'erase'])
-SUPPORTED_OPERATIONS = frozenset(['read', 'publish', 'stage', 'deprecate', 'dist-tag', 'unpublish', 'owner', 'access', 'stage-reject', 'account'])
-OPERATIONS_REQUIRING_VERSION = frozenset(['publish', 'stage'])
+SUPPORTED_OPERATIONS = frozenset(['read', 'publish', 'stage', 'stage-read', 'deprecate', 'dist-tag', 'unpublish', 'owner', 'access', 'stage-reject', 'account'])
+OPERATIONS_REQUIRING_VERSION = frozenset(['publish', 'stage', 'stage-reject'])
 KNOWN_COMMANDS = frozenset(['install', 'ci', 'publish', 'search', 'view'])
 SUPPORTED_CAPABILITIES = frozenset(['login', 'logout', 'erase', 'auth-challenges', 'retry-context'])
 SUPPORTED_AUTH_TYPES = frozenset(['bearer', 'basic'])
 SUPPORTED_CACHE = frozenset(['never', 'session', 'expires'])
 SUPPORTED_GRANULARITY = frozenset(['registry', 'scope', 'package'])
 ERROR_KINDS = frozenset(['url-not-supported', 'not-found', 'operation-not-supported', 'other'])
-TRUSTED_LOCATION_KINDS = frozenset(['builtin', 'absolute', 'global-bin', 'enterprise'])
+TRUSTED_LOCATION_KINDS = frozenset(['builtin', 'absolute', 'global-bin'])
 ALLOWED_CONFIG_SOURCES = frozenset(['user', 'global'])
 DEFAULT_CACHE_POLICY = 'session'
 DEFAULT_GRANULARITY = 'registry'
@@ -22,3 +22,4 @@ TOKEN_HELPER_TIMEOUT_SECONDS = 60
 IDENTIFIER_PATTERN = '^[a-z][a-z0-9-]*$'
 TIMEOUT_SECONDS = {'hello': 10, 'get': 30, 'getInteractive': 300, 'erase': 10, 'login': 300, 'logout': 30}
 STORED_CREDENTIAL_ENTRY = 'npm:token'
+OPERATION_BOUND_REGARDLESS = frozenset(['stage-read'])

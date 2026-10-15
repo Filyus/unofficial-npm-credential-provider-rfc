@@ -77,6 +77,7 @@ def render_python(policy: dict) -> str:
             f"IDENTIFIER_PATTERN = {policy['forwardCompatibility']['identifierPattern']!r}",
             f"TIMEOUT_SECONDS = {policy['credentialProvider']['timeoutSeconds']!r}",
             f"STORED_CREDENTIAL_ENTRY = {policy['chain']['storedCredentialEntry']!r}",
+            f"OPERATION_BOUND_REGARDLESS = frozenset({cache['operationBoundRegardless']!r})",
             "",
         ]
     )

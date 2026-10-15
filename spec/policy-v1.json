@@ -12,6 +12,7 @@
       "read",
       "publish",
       "stage",
+      "stage-read",
       "deprecate",
       "dist-tag",
       "unpublish",
@@ -22,7 +23,8 @@
     ],
     "operationsRequiringVersion": [
       "publish",
-      "stage"
+      "stage",
+      "stage-reject"
     ],
     "knownCommands": [
       "install",
@@ -98,7 +100,9 @@
     "storedCredentialEntry": "npm:token",
     "implicitStoredCredentialEntry": "end-of-global-chain-unless-a-provider-answered-not-found",
     "builtinPrefix": "npm:",
-    "unknownBuiltin": "fail"
+    "unknownBuiltin": "fail",
+    "loginAndLogout": "as-get-listed-npm-token-runs-npm-login",
+    "oidcExchangedToken": "asks-no-provider"
   },
   "resolution": {
     "allowedConfigSources": [
@@ -108,8 +112,7 @@
     "trustedLocationKinds": [
       "builtin",
       "absolute",
-      "global-bin",
-      "enterprise"
+      "global-bin"
     ],
     "untrustedLocationKinds": [
       "project-node_modules",
@@ -155,6 +158,9 @@
     ],
     "doNotStorePolicies": [
       "never"
+    ],
+    "operationBoundRegardless": [
+      "stage-read"
     ]
   },
   "nonInteractive": {

@@ -10,8 +10,8 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | Protocol version | `1` |
 | Request kinds | `login`, `logout`, `get`, `erase` |
-| Operations | `read`, `publish`, `stage`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access`, `stage-reject`, `account` |
-| Operations that require `version` | `publish`, `stage` |
+| Operations | `read`, `publish`, `stage`, `stage-read`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access`, `stage-reject`, `account` |
+| Operations that require `version` | `publish`, `stage`, `stage-reject` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
 | Capabilities | `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
 | Auth types | `bearer`, `basic` |
@@ -36,7 +36,7 @@ Source: `spec/policy-v1.json`.
 | Setting | Value |
 | --- | --- |
 | Allowed config sources | `user`, `global` |
-| Trusted location kinds | `builtin`, `absolute`, `global-bin`, `enterprise` |
+| Trusted location kinds | `builtin`, `absolute`, `global-bin` |
 | Untrusted location kinds | `project-node_modules`, `cwd`, `path` |
 | Ambiguous trusted provider | `fail` |
 | Missing provider | `fail` |
@@ -75,6 +75,8 @@ Source: `spec/policy-v1.json`.
 | `implicitStoredCredentialEntry` | `end-of-global-chain-unless-a-provider-answered-not-found` |
 | `builtinPrefix` | `npm:` |
 | `unknownBuiltin` | `fail` |
+| `loginAndLogout` | `as-get-listed-npm-token-runs-npm-login` |
+| `oidcExchangedToken` | `asks-no-provider` |
 
 ## Non-Interactive Behavior
 

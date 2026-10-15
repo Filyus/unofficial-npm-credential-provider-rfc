@@ -11,6 +11,7 @@ pub const OPERATIONS: &[&str] = &[
     "read",
     "publish",
     "stage",
+    "stage-read",
     "deprecate",
     "dist-tag",
     "unpublish",
@@ -22,6 +23,7 @@ pub const OPERATIONS: &[&str] = &[
 pub const OPERATIONS_REQUIRING_VERSION: &[&str] = &[
     "publish",
     "stage",
+    "stage-reject",
 ];
 pub const KNOWN_COMMANDS: &[&str] = &[
     "install",
@@ -61,7 +63,6 @@ pub const TRUSTED_LOCATION_KINDS: &[&str] = &[
     "builtin",
     "absolute",
     "global-bin",
-    "enterprise",
 ];
 pub const ALLOWED_CONFIG_SOURCES: &[&str] = &[
     "user",

@@ -22,6 +22,7 @@ from tests.generated_policy import (
     SUPPORTED_CAPABILITIES,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
+    OPERATION_BOUND_REGARDLESS,
     STORED_CREDENTIAL_ENTRY,
     SUPPORTED_REQUEST_KINDS,
     TIMEOUT_SECONDS,
@@ -281,6 +282,10 @@ class CredentialClientModel:
     ) -> None:
         if cache == "never":
             return
+        # a `stage-read` answer serves the lookup only: the write after it
+        # always gets a `get` of its own, with the record's package and version
+        if request.get("operation") in OPERATION_BOUND_REGARDLESS:
+            operation_independent = False
         entry = CacheEntry(
             auth=auth,
             granularity=granularity,
@@ -551,6 +556,7 @@ def resolve_chain(
     per_registry: bool,
     stored_credential: bool,
     legacy_fallback: bool = False,
+    oidc_token: bool = False,
 ) -> ChainOutcome:
     """The end of a provider chain. `answers` holds, in chain order, either
     `STORED_CREDENTIAL_ENTRY` (`npm:token`) or one provider's outcome: `ok`,
@@ -563,6 +569,10 @@ def resolve_chain(
     `not-found` the stored credential needs the legacy opt-in, as it does
     after a version mismatch. A per-registry list never consults a stored
     credential it does not list, and says so."""
+    if oidc_token:
+        # a token from a successful trusted-publishing exchange: no provider is
+        # asked, and it is not a stored credential, so nothing is "ignored"
+        return ChainOutcome("oidc")
     entries = list(answers)
     listed = STORED_CREDENTIAL_ENTRY in entries
 
@@ -597,6 +607,52 @@ def resolve_chain(
     if stored_credential and not listed:
         return done("stored-credential", None, "stored credential used after every global provider declined the registry")
     return done("anonymous")
+
+
+def resolve_login_chain(answers: list[str], *, per_registry: bool) -> ChainOutcome:
+    """`login` and `logout` travel the chain and end the way `get` ends. A
+    listed `npm:token` runs today's `npm login` (`npm-login`); the implicit
+    one ends a global chain only when every provider declined, with a warning
+    that a plaintext token is stored. After a `not-found` with nothing listed
+    behind it, `login` fails rather than store a token `get` would not send."""
+    entries = list(answers)
+    listed = STORED_CREDENTIAL_ENTRY in entries
+    if not per_registry and not listed:
+        entries.append(STORED_CREDENTIAL_ENTRY)
+    not_found = False
+    for index, answer in enumerate(entries):
+        if answer == STORED_CREDENTIAL_ENTRY:
+            implicit = index == len(answers)
+            if implicit and not_found:
+                return ChainOutcome("fail", None)
+            if implicit:
+                return ChainOutcome("npm-login", None, ("plaintext token stored after every global provider declined the registry",))
+            return ChainOutcome("npm-login", index)
+        if answer == "ok":
+            return ChainOutcome("ok", index)
+        if answer == "try-next-provider":
+            continue
+        if answer == "try-next-provider-not-found":
+            not_found = True
+            continue
+        return ChainOutcome("fail", index)
+    return ChainOutcome("fail", None)
+
+
+def classify_401(www_authenticate: str | None, body: Any) -> str:
+    """npm's own classification of a 401 (npm-registry-fetch check-response.js
+    and npm/cli otplease), which decides erase: `eauthip` and `otp` keep the
+    credential, `reject` erases it. `body` is the raw text, or the parsed
+    object when the body was JSON, which never matches the text test."""
+    asks_otp = isinstance(body, str) and "one-time pass" in body
+    if www_authenticate is not None:
+        challenge = www_authenticate.lower()
+        if "ipaddress" in challenge:
+            return "eauthip"
+        if "otp" in challenge:
+            return "otp"
+        return "otp" if asks_otp else "reject"
+    return "otp" if asks_otp else "reject"
 
 
 @dataclass
