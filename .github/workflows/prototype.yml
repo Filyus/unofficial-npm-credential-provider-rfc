@@ -94,6 +94,8 @@ jobs:
         run: node rfc/poc/npm-config-matrix/run.js npm-cli "$RUNNER_TEMP"
       - name: End to end against a local registry
         run: node rfc/poc/npm-e2e/run.js npm-cli npm-registry-fetch
+      - name: tokenHelper spellings from untrusted sources
+        run: node rfc/poc/npm-config-fuzz/spellings.js npm-cli npm-registry-fetch "$RUNNER_TEMP" 500 "$GITHUB_RUN_NUMBER"
       - name: Platform probes
         run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
       - name: Every claim's evidence still exists

@@ -106,6 +106,20 @@ const writeHelper = (root) => {
 const main = async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'npm-token-helper-e2e-'))
   const seen = []
+  // another host, for redirects and tarballs that lead away from the
+  // registry; it listens on both stacks, as `localhost` may resolve to ::1
+  const elsewhereSeen = []
+  const elsewhere = http.createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      elsewhereSeen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ name: 'landed', 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { name: 'landed', version: '1.0.0' } } }))
+    })
+  })
+  await new Promise((resolve, reject) => elsewhere.once('error', reject).listen(0, '::', resolve))
+    .catch(() => new Promise(resolve => elsewhere.listen(0, '127.0.0.1', resolve)))
+  const otherPort = elsewhere.address().port
   const server = http.createServer((req, res) => {
     req.resume()
     req.on('end', () => {
@@ -115,6 +129,28 @@ const main = async () => {
       if (req.url.startsWith('/echo')) {
         res.statusCode = 401
         return res.end(JSON.stringify({ error: `rejected: ${req.headers.authorization}` }))
+      }
+      // a registry that sends the client somewhere else: another host name,
+      // or the same host on another port
+      const redirects = {
+        '/redirect-host': `http://localhost:${otherPort}/redirect-host`,
+        '/redirect-port': `http://127.0.0.1:${otherPort}/redirect-port`,
+      }
+      const target = redirects[req.url.split('?')[0]]
+      if (target) {
+        res.statusCode = 302
+        res.setHeader('location', target)
+        return res.end()
+      }
+      // a package whose tarball lives on another host
+      const foreign = { '/foreign-host': 'localhost', '/foreign-port': '127.0.0.1' }[req.url]
+      if (foreign) {
+        const name = req.url.slice(1)
+        return res.end(JSON.stringify({
+          name,
+          'dist-tags': { latest: '1.0.0' },
+          versions: { '1.0.0': { name, version: '1.0.0', dist: { tarball: `http://${foreign}:${otherPort}/${name}.tgz` } } },
+        }))
       }
       res.end(JSON.stringify(req.method === 'PUT' ? { ok: true } : {
         name: 'demo',
@@ -149,6 +185,7 @@ const main = async () => {
       fs.writeFileSync(path.join(dir, name), content.replaceAll('<dir>', dir))
     }
     seen.length = 0
+    elsewhereSeen.length = 0
     const { stdout, stderr, failed } = await new Promise(resolve => execFile(process.execPath, [
       path.join(npmCliDir, 'bin', 'npm-cli.js'), ...args,
       `--registry=${registry}`,
@@ -168,6 +205,7 @@ const main = async () => {
       output: stdout + stderr,
       stdout: stdout.trim(),
       requests: seen.map(s => `${s.method} ${s.authorization || '-'}`),
+      elsewhere: elsewhereSeen.map(s => `${s.method} ${s.url} ${s.authorization || "-"}`),
       notices: stderr.split(/\r?\n/).filter(l =>
         /tokenHelper|token-helper|ETOKENHELPER|Unknown|ENEEDAUTH|leaked/.test(l)),
     }
@@ -189,6 +227,7 @@ const main = async () => {
       restore = null
     }
     server.close()
+    elsewhere.close()
     fs.rmSync(root, { recursive: true, force: true })
   }
   const onSignal = sig => {
@@ -343,12 +382,35 @@ const main = async () => {
       `(helper: ${helperLeaks.join(', ') || 'nowhere'}; _authToken: ${tokenLeaks.join(', ') || 'nowhere'})`,
     helperLeaks.every(where => tokenLeaks.includes(where)))
 
+    // A registry that sends npm elsewhere: whatever reaches the other host is
+    // compared with what a stored _authToken would send there. A different
+    // host name must get no credential; the same host on another port gets
+    // what a stored token gets (scheme and port are not compared).
+    const hostile = []
+    for (const [what, args, mustBeBare] of [
+      ['redirect-host', ['view', 'redirect-host', 'version'], true],
+      ['redirect-port', ['view', 'redirect-port', 'version'], false],
+      ['foreign-host', ['cache', 'add', 'foreign-host@1.0.0'], true],
+      ['foreign-port', ['cache', 'add', 'foreign-port@1.0.0'], true],
+    ]) {
+      const viaHelper = await run(`${what}-helper`, { args, user: helperLine })
+      const viaToken = await run(`${what}-token`, { args, user: `${nerf}:_authToken=helper-token\n` })
+      hostile.push(viaHelper, viaToken)
+      const sent = r => r.elsewhere.filter(line => line.endsWith('Bearer helper-token'))
+      expect(viaHelper, 'the request reached the other host', viaHelper.elsewhere.length > 0)
+      expect(viaHelper, `it carries no more than a stored token would (helper: ${sent(viaHelper).length}, ` +
+        `_authToken: ${sent(viaToken).length})`, sent(viaHelper).length <= sent(viaToken).length)
+      if (mustBeBare) {
+        expect(viaHelper, 'and no credential at all', sent(viaHelper).length === 0)
+      }
+    }
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, login]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)
