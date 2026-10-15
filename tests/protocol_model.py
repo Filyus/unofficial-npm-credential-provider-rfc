@@ -5,6 +5,7 @@ from enum import Enum
 import os
 import re
 from typing import Any, Callable, NamedTuple
+from urllib.parse import urlsplit
 
 from tests.generated_policy import (
     ALLOWED_CONFIG_SOURCES,
@@ -359,6 +360,8 @@ def _is_nonempty_string(value: Any) -> bool:
 _SCOPE = re.compile(r"@[^/]+")
 # the schema's `kind` and `operation` pattern: new values may appear within v1
 _IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
+# the schema's hello `registries` item pattern
+_SERVED_REGISTRY = re.compile(r"https?://[^/?#\s]+(/[^?#\s]*)?")
 
 
 def validate_hello(message: Any) -> tuple[list[int], list[str]]:
@@ -381,7 +384,53 @@ def validate_hello(message: Any) -> tuple[list[int], list[str]]:
         or len(set(capabilities)) != len(capabilities)
     ):
         raise ProtocolViolation("provider hello capabilities must be unique non-empty strings")
+    registries = message.get("registries", [])
+    if (
+        not isinstance(registries, list)
+        or not all(isinstance(entry, str) and _SERVED_REGISTRY.fullmatch(entry) for entry in registries)
+        or len(set(registries)) != len(registries)
+    ):
+        raise ProtocolViolation("provider hello registries must be unique absolute http(s) URLs")
     return versions, capabilities
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _canonical(url: str) -> tuple[str | None, str, int | None, str]:
+    """Scheme (None for a `//host/path/` key), host (lowercase, punycode),
+    port (None when default), and path with dot segments resolved, ending
+    in `/`. The path keeps its case and its percent-encodings."""
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower() or None
+    host = ".".join(label.encode("idna").decode("ascii") if label else label
+                    for label in (parts.hostname or "").split("."))
+    port = parts.port
+    if scheme is not None and port == _DEFAULT_PORTS.get(scheme):
+        port = None
+    segments: list[str] = []
+    for segment in parts.path.split("/")[1:]:
+        if segment == "..":
+            if segments:
+                segments.pop()
+        elif segment != ".":
+            segments.append(segment)
+    path = "/" + "/".join(segments)
+    return scheme, host, port, path if path.endswith("/") else path + "/"
+
+
+def registry_matches(served: str, url: str) -> bool:
+    """Registry matching: does `url` fall under `served`? Host and port equal
+    after canonicalization; the served path a prefix of the URL's path at a
+    segment boundary, compared byte for byte; the scheme compared only when
+    `served` carries one (a hello entry), not for a `//host/path/` key."""
+    served_scheme, served_host, served_port, served_path = _canonical(served)
+    scheme, host, port, path = _canonical(url)
+    if served_scheme is None and scheme is not None and port == _DEFAULT_PORTS.get(scheme):
+        port = None
+    if served_scheme is not None and served_scheme != scheme:
+        return False
+    return (served_host, served_port) == (host, port) and path.startswith(served_path)
 
 
 def validate_request(message: dict[str, Any]) -> None:

@@ -61,6 +61,8 @@ pub enum Operation {
     Unpublish,
     Owner,
     Access,
+    StageReject,
+    Account,
     /// An action this build does not know. A provider must not treat it as
     /// `read`; it answers `operation-not-supported`.
     #[serde(other)]
@@ -599,6 +601,8 @@ mod tests {
             Operation::Unpublish,
             Operation::Owner,
             Operation::Access,
+            Operation::StageReject,
+            Operation::Account,
         ];
         let requiring_version: Vec<String> = all
             .iter()

@@ -91,6 +91,16 @@ def rejected_cases() -> list[tuple[str, object]]:
     cases.append(("hello-capability-empty", {"v": [1], "capabilities": [""]}))
     cases.append(("hello-capability-duplicate", {"v": [1], "capabilities": ["login", "login"]}))
     cases.append(("hello-capability-not-string", {"v": [1], "capabilities": [1]}))
+    for name, registries in (
+        ("not-array", "https://x.test/"),
+        ("relative", ["/npm/"]),
+        ("no-scheme", ["//x.test/"]),
+        ("ftp", ["ftp://x.test/"]),
+        ("query", ["https://x.test/?a"]),
+        ("duplicate", ["https://x.test/", "https://x.test/"]),
+        ("not-string", [1]),
+    ):
+        cases.append((f"hello-registries-{name}", {"v": [1], "registries": registries}))
     # request fields, on every kind
     for kind in KINDS:
         base = {**GET, "kind": kind}
@@ -138,6 +148,8 @@ def rejected_cases() -> list[tuple[str, object]]:
 def accepted_cases() -> list[tuple[str, object]]:
     cases: list[tuple[str, object]] = [
         ("hello-v-many", {"v": [1, 2, 7]}),
+        ("hello-registries", {"v": [1], "registries": ["https://gitlab.example.com/", "http://10.0.0.1:4873/npm"]}),
+        ("hello-registries-empty", {"v": [1], "registries": []}),
         ("request-login-token-and-login-url", {
             "v": 1, "kind": "login", "registry": REGISTRY, "token": "t", "loginUrl": "https://x.test/login",
         }),

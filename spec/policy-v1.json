@@ -16,7 +16,9 @@
       "dist-tag",
       "unpublish",
       "owner",
-      "access"
+      "access",
+      "stage-reject",
+      "account"
     ],
     "operationsRequiringVersion": [
       "publish",
@@ -94,7 +96,9 @@
     "notFound": "try-next-provider",
     "urlNotSupportedRemembered": "per-provider-and-registry-for-the-command",
     "storedCredentialEntry": "npm:token",
-    "implicitStoredCredentialEntry": "end-of-global-chain-unless-a-provider-answered-not-found"
+    "implicitStoredCredentialEntry": "end-of-global-chain-unless-a-provider-answered-not-found",
+    "builtinPrefix": "npm:",
+    "unknownBuiltin": "fail"
   },
   "resolution": {
     "allowedConfigSources": [

@@ -16,6 +16,8 @@ pub const OPERATIONS: &[&str] = &[
     "unpublish",
     "owner",
     "access",
+    "stage-reject",
+    "account",
 ];
 pub const OPERATIONS_REQUIRING_VERSION: &[&str] = &[
     "publish",

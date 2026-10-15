@@ -24,6 +24,12 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
           "uniqueItems": true
+        },
+        "registries": {
+          "description": "The registries this provider serves. npm matches requests against them itself (scheme compared) and sends the provider nothing about any other registry. An empty list serves none.",
+          "type": "array",
+          "items": { "type": "string", "pattern": "^https?://[^/?#\\s]+(/[^?#\\s]*)?$" },
+          "uniqueItems": true
         }
       },
       "additionalProperties": true
@@ -57,10 +63,10 @@
           "minLength": 1
         },
         "operation": {
-          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, deprecate, dist-tag, unpublish, owner, access.",
+          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, deprecate, dist-tag, unpublish, owner, access, stage-reject, account.",
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "examples": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"]
+          "examples": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access", "stage-reject", "account"]
         },
         "granularity": {
           "description": "erase only: the granularity of the Ok response that carried the rejected credential, so the provider can tell which of its credentials was rejected.",

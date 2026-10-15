@@ -10,7 +10,7 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | Protocol version | `1` |
 | Request kinds | `login`, `logout`, `get`, `erase` |
-| Operations | `read`, `publish`, `stage`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access` |
+| Operations | `read`, `publish`, `stage`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access`, `stage-reject`, `account` |
 | Operations that require `version` | `publish`, `stage` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
 | Capabilities | `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
@@ -73,6 +73,8 @@ Source: `spec/policy-v1.json`.
 | `urlNotSupportedRemembered` | `per-provider-and-registry-for-the-command` |
 | `storedCredentialEntry` | `npm:token` |
 | `implicitStoredCredentialEntry` | `end-of-global-chain-unless-a-provider-answered-not-found` |
+| `builtinPrefix` | `npm:` |
+| `unknownBuiltin` | `fail` |
 
 ## Non-Interactive Behavior
 
