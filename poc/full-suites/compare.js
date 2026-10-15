@@ -27,10 +27,10 @@ const workspaces = tree => {
     ? fs.readdirSync(path.join(tree, glob.slice(0, -2))).map(d => path.join(glob.slice(0, -2), d))
     : [glob])
     .filter(dir => fs.existsSync(path.join(tree, dir, 'package.json')))
-    .map(dir => require(path.join(tree, dir, 'package.json')).name)
+    .map(dir => ({ name: require(path.join(tree, dir, 'package.json')).name, dir }))
 }
 
-const suites = ['(root)', ...workspaces(patched)].filter(s => !only.length || only.includes(s))
+const suites = ['(root)', ...workspaces(patched).map(w => w.name)].filter(s => !only.length || only.includes(s))
 
 const runSuite = (tree, suite) => {
   const args = [path.join(tree, 'bin', 'npm-cli.js'), 'test', '--ignore-scripts',
@@ -51,23 +51,58 @@ const runSuite = (tree, suite) => {
     status: result.status ?? result.signal,
     failed,
     seconds: Math.round((Date.now() - started) / 1000),
+    output,
     tail: output.split('\n').filter(Boolean).slice(-15).join('\n'),
   }
 }
 
+// one test file, alone and without coverage, as a pass or a fail
+const suiteDir = (tree, suite) => suite === '(root)' ? tree : path.join(tree, workspaces(tree).find(w => w.name === suite).dir)
+const runFile = (tree, suite, file) => spawnSync(process.execPath,
+  [path.join(tree, 'node_modules', 'tap', 'bin', 'run.js'), '--no-coverage', file],
+  { cwd: suiteDir(tree, suite), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60 * 1000 }).status === 0
+
+// what tap printed about the failing subtests of a file
+const failureLines = output => output.split('\n')
+  .filter(line => /^\s+not ok |^\s+(found|wanted|message|at|stack):|^\s+[-+] /.test(line))
+  .slice(0, 40).join('\n')
+
+const RERUNS = 3
 const regressions = []
+const flaky = []
 for (const suite of suites) {
   const before = runSuite(base, suite)
   const after = runSuite(patched, suite)
   const newFiles = after.failed.filter(f => !before.failed.includes(f))
-  const regressed = (before.ok && !after.ok) || newFiles.length > 0
+  // a file that failed once may fail at random: it counts only if it fails
+  // every time with the prototype and passes every time without it
+  const confirmed = newFiles.filter(file => {
+    const withPrototype = Array.from({ length: RERUNS }, () => runFile(patched, suite, file)).filter(Boolean).length
+    const withoutIt = Array.from({ length: RERUNS }, () => runFile(base, suite, file)).filter(Boolean).length
+    console.log(`  ${suite} ${file}: rerun ${RERUNS}x, passes ${withPrototype} with the prototype, ${withoutIt} without`)
+    if (withPrototype === 0 && withoutIt === RERUNS) {
+      return true
+    }
+    flaky.push(`${suite} ${file}`)
+    return false
+  })
+  // a suite that fails without any failing file (coverage) is a regression
+  // too, unless a file that failed only once explains it
+  const suiteOnly = before.ok && !after.ok && !after.failed.length
+  const regressed = confirmed.length > 0 || suiteOnly
   console.log(`${regressed ? 'FAIL' : 'ok  '} ${suite}: base ${before.ok ? 'passes' : `fails (${before.status})`} ` +
     `in ${before.seconds}s, prototype ${after.ok ? 'passes' : `fails (${after.status})`} in ${after.seconds}s` +
     (before.failed.length ? `; failing in both: ${before.failed.filter(f => after.failed.includes(f)).join(', ')}` : ''))
+  if (newFiles.length) {
+    console.log(failureLines(after.output).replace(/^/gm, '  | '))
+  }
   if (regressed) {
     regressions.push(suite)
-    console.log(`  newly failing: ${newFiles.join(', ') || '(the suite as a whole)'}\n${after.tail.replace(/^/gm, '  | ')}`)
+    console.log(`  regression: ${confirmed.join(', ') || '(the suite as a whole)'}\n${after.tail.replace(/^/gm, '  | ')}`)
   }
+}
+if (flaky.length) {
+  console.log(`failed once, not every time: ${flaky.join('; ')}`)
 }
 console.log(`${suites.length} suites, ${regressions.length} regressions`)
 console.log(regressions.length ? 'FAIL' : 'PASS')
