@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 19
+> Revision: 20
 > Date: 2026-10-15
 
 > A draft proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It lets npm obtain registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment.
@@ -622,9 +622,16 @@ They move the secret instead of removing it. An environment variable is inherite
 
 ### Why one provider process per command?
 
-The real alternative is a process per cache miss: pnpm runs a helper once per registry per run, RFC #850 caches each result for the life of the process, and Cargo starts its provider afresh for every request and closes stdin after one response. With a handful of lookups per install, what a session saves is start-ups and the work each start repeats. Starting node takes about 60 ms on Windows 11 (`node -e 0`, median of 7 rounds of 10 starts, 56..68 ms), so a node-based provider started per cache miss costs a few hundred milliseconds per command; vendor CLIs built on Python start slower, and each start may repeat an OS keychain unlock or a token exchange that a session does once. Against an instant mock provider the difference per lookup is 118 µs in a session against 10.3 ms for a fresh process (Windows 11, release build, 1000 lookups, 7 rotated rounds, [benchmark](poc/rust/crates/mock-client/examples/round_trip.rs)); that measures the floor, not a real provider.
+Because what a credential lookup costs is mostly starting the program, and a session starts it once. The alternative is a process per cache miss: pnpm runs a helper once per registry per run, RFC #850 caches each result for the life of the process, and Cargo starts its provider afresh for every request and closes stdin after one response.
 
-The session is the client's choice, not the provider's burden: a provider that serves requests until stdin closes, as Cargo's providers do, works the same when started per cache miss. What the session costs is on the client side: serializing requests, coalescing concurrent misses, and ending the session on a timeout (see [Session lifecycle](#session-lifecycle)).
+| Measured on Windows 11 | Process per cache miss | One session per command |
+|---|---|---|
+| Starting node (`node -e 0`, median of 7 rounds of 10 starts) | about 60 ms (56..68) per start | once |
+| An instant mock provider, per lookup (release build, 1000 lookups, 7 rotated rounds, [benchmark](poc/rust/crates/mock-client/examples/round_trip.rs)) | 10.3 ms | 118 µs |
+
+With a handful of lookups per install, a node-based provider started per cache miss costs a few hundred milliseconds per command. The mock measures the floor, not a real provider: vendor CLIs built on Python start slower, and each start may repeat an OS keychain unlock or a token exchange that a session does once.
+
+The session is the client's choice, not the provider's burden: a provider that serves requests until stdin closes, as Cargo's providers do, works the same when started per cache miss. What the session costs is on the client side: serializing requests, coalescing concurrent misses, and ending the session on a timeout ([Session lifecycle](#session-lifecycle)).
 
 ### Why no `refresh` request?
 
@@ -660,6 +667,8 @@ This section is informative: it describes one way to meet the requirements above
 
 ## Prior Art
 
+### Protocol shape
+
 | | Git | Docker | pnpm `tokenHelper` | Cargo | NuGet plugins | npm RFC #850 | This proposal |
 |---|---|---|---|---|---|---|---|
 | **Year** | 2012 | 2016 | 2022 | 2023 | 2018 (NuGet 4.8) | 2025 | 2026 |
@@ -670,6 +679,11 @@ This section is informative: it describes one way to meet the requirements above
 | **Operations** | — | — | — | read, publish, yank, unyank, owners | — | — | read, publish, stage, deprecate, dist-tag, unpublish, owner, access |
 | **Versioning** | None | None | None | Hello `{"v":[1]}` | Handshake negotiates a protocol version (2.0.0 for authentication) | None | Hello `{"v":[1]}` + `v` in every message |
 | **Auth type** | Implicit | Implicit | Raw token or header value | Raw token | Username/password with a list of auth types | Implicit | Explicit `bearer`/`basic` |
+
+### Lifecycle and trust
+
+| | Git | Docker | pnpm `tokenHelper` | Cargo | NuGet plugins | npm RFC #850 | This proposal |
+|---|---|---|---|---|---|---|---|
 | **Refresh** | In helper | In helper | In helper | In provider | In plugin | Re-run | In provider |
 | **Cache control** | None | None | None | `never`/`session`/`expires` | None in the protocol (operation claims cached 30 days) | `expiresAt` | Cargo's three + `granularity` + `operationIndependent` |
 | **Rejection signal** | `erase` | `erase` | None | Challenge headers | `isRetry` on the next request | None | `erase` + one retry with status and challenges |
@@ -678,53 +692,50 @@ This section is informative: it describes one way to meet the requirements above
 | **Discovery** | `git-credential-*` | `docker-credential-*` | Explicit | Explicit | `~/.nuget/plugins`, `NUGET_PLUGIN_PATHS`, and since 6.13 `nuget-plugin-*` on `PATH` | Explicit | Explicit; suggest-only lookup |
 | **Production-tested** | Yes | Yes | Yes | Yes | Yes | No | No |
 
-NuGet's plugins are the closest prior art to Phase 2: one long-lived process, a negotiated protocol version, plugins tried in priority order, a retry flag after a rejection, and a request that says whether the client may block for the user. Phase 2 differs in three places, each for a reason particular to npm. NuGet times each request out after 5 seconds and lets a plugin extend that with progress messages; Phase 2 instead gives a request kind a fixed budget, and an interactive `get` the `login` one, which keeps the client simpler but cannot tell a stuck provider from a slow user before the budget runs out. NuGet also finds plugins on `PATH` by name (`nuget-plugin-*`, since 6.13); npm cannot, because a script npm runs puts the project's `node_modules/.bin` first on `PATH`, so a dependency could provide a provider by that name. And a NuGet request carries the source URI only, while npm sends the package, version and operation, because npm registries scope tokens by package and by action ([NuGet cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins), [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin)).
+### NuGet
 
-Further references: [Git credential helpers](https://git-scm.com/docs/gitcredentials), [Docker credential stores](https://docs.docker.com/reference/cli/docker/login/#credential-stores), [pnpm `tokenHelper`](https://pnpm.io/npmrc#urltokenhelper), [Cargo credential provider protocol](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html), [NuGet cross-platform authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin), [pip keyring support](https://pip.pypa.io/en/stable/topics/authentication/).
+NuGet's plugins are the closest prior art to Phase 2: one long-lived process, a negotiated protocol version, plugins tried in priority order, a retry flag after a rejection, and a request that says whether the client may block for the user ([cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins), [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin)). Phase 2 differs in three places, each for a reason particular to npm:
+
+- **Timeouts.** NuGet times each request out after 5 seconds and lets a plugin extend that with progress messages. Phase 2 gives each request kind a fixed budget, and an interactive `get` the `login` one: a simpler client, which cannot tell a stuck provider from a slow user before the budget runs out.
+- **Discovery.** NuGet finds plugins on `PATH` by name (`nuget-plugin-*`, since 6.13). npm cannot: a script npm runs puts the project's `node_modules/.bin` first on `PATH`, so a dependency could provide a provider by that name.
+- **Context.** A NuGet request carries the source URI only; npm sends the package, version and operation, because npm registries scope tokens by package and by action.
+
+### References
+
+[Git credential helpers](https://git-scm.com/docs/gitcredentials), [Docker credential stores](https://docs.docker.com/reference/cli/docker/login/#credential-stores), [pnpm `tokenHelper`](https://pnpm.io/npmrc#urltokenhelper), [Cargo credential provider protocol](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html), [NuGet cross-platform authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin), [pip keyring support](https://pip.pypa.io/en/stable/topics/authentication/).
 
 ## Migration Plan
 
 No phase changes behavior for anyone who has not configured a helper or provider.
 
-### Phase 1: `tokenHelper` (next minor release)
-
-- Accept `//<registry>/:tokenHelper` where [Trust](#trust) allows it, mapping the helper's output to a header as pnpm does.
-- Warn about and ignore it everywhere else, and pnpm's unscoped and per-package-scope forms anywhere.
-- Let `publish` and `whoami` count a helper as a login, make `logout` explain it, make `login` and `profile enable-2fa` refuse for a helper-backed registry, and let OIDC trusted publishing win over a helper.
-
-### Phase 2: `credentialProvider` (a later minor release)
-
-- Ship the protocol: `get`, `erase`, `login`, `logout`, cache control, chaining, one retry after a rejection.
-- Delegate `npm login` and `npm logout` to a configured provider.
-- Publish the schema and conformance vectors so vendors can ship providers against a fixed target.
-
-### Phase 3: Ecosystem
-
-- Registry vendors ship providers; their `login` wrappers stop writing tokens into `.npmrc`.
-- Evaluate discovery suggestions, enterprise pinning, and a built-in provider for npm-owned registries as separate changes.
+| Phase | Release | Ships | Done when |
+|---|---|---|---|
+| 1: `tokenHelper` | next minor | `//<registry>/:tokenHelper` where [Trust](#trust) allows it, its output mapped to a header as pnpm does; a warning for it anywhere else and for pnpm's unscoped and per-scope forms; `publish` and `whoami` counting a helper as a login, `logout` explaining it, `login` and `profile enable-2fa` refusing, OIDC winning over it | One helper serves npm and pnpm from the same `~/.npmrc` |
+| 2: `credentialProvider` | a later minor | The protocol (`get`, `erase`, `login`, `logout`, cache control, chaining, one retry after a rejection), `npm login` and `npm logout` delegated to a provider, the schema and conformance vectors published | A provider written against the vectors alone works with npm |
+| 3: Ecosystem | separate changes | Vendor providers, with their `login` wrappers no longer writing tokens into `.npmrc`; an evaluation of discovery suggestions, enterprise pinning and a built-in provider for npm-owned registries | — |
 
 ## Unresolved Questions
 
-1. Should npm adopt pnpm 11.4's load-time pinning of an unscoped `tokenHelper` to the registry declared in the same user file, which keeps a shared `~/.npmrc` working without letting a project redirect it? Should npm accept pnpm's whitespace-split form (a command with arguments, or a bare name), at the cost of paths that contain a space and of a `PATH` lookup inside scripts, or keep the single absolute path? And should a later release offer a migration for pnpm's unscoped form, for example `npm config fix` rewriting it to the default registry's nerf-dart key after asking?
-2. The operation for `npm stage reject`, and whether account-level commands (`npm token`, `npm profile`) belong to the protocol at all, given that npmjs.com already requires an interactive 2FA challenge for them.
-3. Whether npm should ship a built-in provider for npmjs.com that reuses web login sessions.
-4. The format of enterprise provider pinning (`{ name, version, integrity }` or path plus checksum).
-5. Whether discovery suggestions are worth their typosquatting surface at all.
-6. Whether npm should obtain the write credential for a publish before any lifecycle script runs, so that a provider can refuse write requests for the rest of the command ([Publishing while a script runs](#publishing-while-a-script-runs)).
+| Question | Decide before |
+|---|---|
+| Should npm adopt pnpm 11.4's load-time pinning of an unscoped `tokenHelper` to the registry declared in the same user file, which keeps a shared `~/.npmrc` working without letting a project redirect it? | Nothing; it can be added later |
+| Should npm accept pnpm's whitespace-split form (a command with arguments, or a bare name), at the cost of paths that contain a space and of a `PATH` lookup inside scripts, or keep the single absolute path? | Nothing; accepting more later stays compatible |
+| Should a later release migrate pnpm's unscoped form, for example `npm config fix` rewriting it to the default registry's key after asking? | Nothing |
+| Which operation does `npm stage reject` send? | Phase 2 |
+| Do account-level commands (`npm token`, `npm profile`) belong to the protocol at all, given that npmjs.com already requires an interactive 2FA challenge for them? | Phase 2 |
+| Should npm obtain the write credential for a publish before any lifecycle script runs, so that a provider can refuse write requests for the rest of the command ([Publishing while a script runs](#publishing-while-a-script-runs))? | Phase 2 |
+| Should npm ship a built-in provider for npmjs.com that reuses web login sessions? | Phase 3 |
+| What format does enterprise provider pinning take (`{ name, version, integrity }`, or a path plus checksum)? | Phase 3 |
+| Are discovery suggestions worth their typosquatting surface at all? | Phase 3 |
 
 ## Appendix: Comparison with RFC #850
+
+This proposal grew out of the RFC #850 discussion. Where the two differ beyond the rows of [Prior Art](#prior-art):
 
 | Aspect | RFC #850 | This proposal |
 |---|---|---|
 | **Delivery** | One mechanism | Phase 1 pnpm-compatible `tokenHelper`, Phase 2 protocol |
-| **Request kinds** | get only | get, erase, login, logout |
 | **Auth flows** | Not specified | OAuth, SSO, device code, MFA via `login` |
 | **Granularity** | Per registry | Per registry, scope, or package |
 | **Provider input** | No stdin, arguments only | JSON on stdin with full context |
-| **Versioning** | None | Hello message + `v` in every message |
-| **Permission context** | None | npm action as `operation` |
-| **Token rejection** | Not specified | `erase` + one retry with status and challenges |
-| **Cache control** | `expiresAt` only | `cache` + `expiresAt` + `granularity` + `operationIndependent` |
-| **Provider chaining** | Not specified | `url-not-supported` → next provider |
-| **Session model** | One process per cache miss | One process per command |
 | **Configuration source** | Project or user | User and global only |
