@@ -214,6 +214,7 @@ const main = async () => {
   // Each check names the scenario and what must hold; a scenario that never
   // reached the registry fails rather than passing on an empty list.
   const checks = []
+  const notes = []
   const expect = (result, what, ok) => checks.push({ scenario: result.name, what, ok: !!ok })
   const auths = r => [...new Set(r.requests.map(x => x.split(' ').slice(1).join(' ')))]
 
@@ -306,6 +307,58 @@ const main = async () => {
     })
     expect(parent, 'the child npm reaches the registry', !parent.failed && parent.requests.length)
     expect(parent, 'the repository file supplies no credential to it', auths(parent).join() === '-')
+
+    // Other ways a repository's scripts start npm. A script that drops the
+    // marker is the repository's own code, so the rule that a file inside
+    // the project is the repository's has to hold without the marker.
+    const childScript = (cwd, dropMarker) => [
+      "const { spawnSync } = require('child_process')",
+      'const env = { ...process.env }',
+      dropMarker ? 'delete env.npm_config_token_helper_untrusted' : '',
+      `spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(npmCli)}, 'view', 'demo', 'version', ` +
+        `${JSON.stringify(`--registry=${registry}`)}], { cwd: ${cwd}, env, stdio: 'inherit' })`,
+    ].join('\n')
+    const chosenUserconfig = { project: 'userconfig=<dir>/repo-user.npmrc\n', userconfigFlag: false }
+    const children = []
+    for (const [name, options] of [
+      ['child-in-the-repository', {
+        args: ['run', 'child'],
+        pkg: { scripts: { child: `"${process.execPath}" child.js` } },
+        files: { 'child.js': childScript('__dirname', false) },
+      }],
+      ['child-without-the-marker', {
+        args: ['run', 'child'],
+        pkg: { scripts: { child: `"${process.execPath}" child.js` } },
+        files: { 'child.js': childScript('__dirname', true) },
+      }],
+      ['child-of-npm-exec', {
+        args: ['exec', '-c', `"${process.execPath}" child.js`],
+        files: { 'child.js': childScript('__dirname', false) },
+      }],
+      ['child-of-a-workspace-script', {
+        args: ['run', 'child', '--workspace', 'a'],
+        pkg: { workspaces: ['packages/*'] },
+        files: {
+          'packages/a/package.json': JSON.stringify({ name: 'a', version: '1.0.0', scripts: { child: `"${process.execPath}" child.js` } }),
+          'packages/a/child.js': childScript('__dirname', false),
+        },
+      }],
+    ]) {
+      const result = await run(name, { ...chosenUserconfig, ...options })
+      children.push(result)
+      expect(result, 'the child npm reaches the registry', result.requests.length > 0)
+      expect(result, 'the repository file supplies no credential to it', auths(result).join() === '-')
+    }
+    // a script that drops the marker and leaves the project: the repository's
+    // code already runs, so this is outside what the rule can stop
+    const outside = await run('child-without-the-marker-outside', {
+      ...chosenUserconfig,
+      args: ['run', 'child'],
+      pkg: { scripts: { child: `"${process.execPath}" child.js` } },
+      files: { 'child.js': childScript(JSON.stringify(elsewhere), true) },
+    })
+    children.push(outside)
+    notes.push(`a script that drops the marker and starts npm outside the project: ${auths(outside).join(', ')} (accepted: the repository's code is already running)`)
 
     // a repository's node-options would reach a node-based helper through
     // NODE_OPTIONS and could read the credential it prints
@@ -410,8 +463,11 @@ const main = async () => {
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, ...children, login]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
+    for (const note of notes) {
+      console.log(`info ${note}`)
+    }
     for (const c of checks) {
       console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.scenario}: ${c.what}`)
     }

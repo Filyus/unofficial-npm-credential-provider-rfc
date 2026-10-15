@@ -127,9 +127,45 @@ const trust = async () => {
 
 // ---------- the helper runtime ----------
 
+// .cmd helpers go through cmd.exe, which gives meaning to & ^ ! ; ( ) and
+// more: in a directory name each must reach the helper unchanged, start it in
+// that directory, and run nothing else
+const windows = async () => {
+  const short = s => s.split(JSON.stringify(root).slice(1, -1)).join('<root>').split(root).join('<root>')
+  const names = ['plain', 'with space', 'amp&ersand', 'caret^here', 'bang!here', 'semi;colon', 'paren(x86)',
+    'Program Files (x86)', "apostrophe's", 'comma,equals=', 'café папка 目录',
+    'x&mkdir injected-marker&x', 'x^&mkdir injected-marker', 'x"&mkdir injected-marker&"x']
+  for (const name of names) {
+    const dir = path.join(root, 'cmd-helpers', name)
+    let helper
+    try {
+      helper = path.join(dir, 'helper.cmd')
+      write(helper, `@echo off\r\nnode -e "require('fs').writeFileSync(require('path').join(process.cwd(), 'cwd.txt'), process.cwd())"\r\necho tok-cmd\r\n`)
+    } catch (er) {
+      // a name Windows does not allow at all (")
+      info(`a .cmd helper in "${name}"`, `not creatable: ${er.code}`)
+      continue
+    }
+    const header = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => h, e => e.message)
+    const cwd = fs.existsSync(path.join(dir, 'cwd.txt')) ? fs.readFileSync(path.join(dir, 'cwd.txt'), 'utf8') : null
+    const injected = [root, dir, path.dirname(dir), process.cwd()].some(d => fs.existsSync(path.join(d, 'injected-marker')))
+    check(`a .cmd helper in "${name}" runs as itself, in its own directory`,
+      header === 'Bearer tok-cmd' && cwd === dir && !injected, `${header}; cwd ${cwd === dir ? 'ok' : cwd}`)
+  }
+  for (const name of ['100%done', '%TEMP%']) {
+    const helper = path.join(root, 'cmd-refused', name, 'helper.cmd')
+    write(helper, '@echo tok\r\n')
+    const outcome = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => `header ${h}`, e => e.message)
+    check(`a .cmd helper under "${name}" is refused with a reason`, outcome.includes('contains " or %'), short(outcome))
+  }
+  const ps1 = path.join(root, 'ps1', 'helper.ps1')
+  write(ps1, 'Write-Output tok\r\n')
+  info('a .ps1 helper', await getTokenHelperHeader(ps1, '//ps1/', 15000).then(h => `header ${h}`, e => short(e.message)))
+}
+
 const runtime = async () => {
   if (WIN) {
-    return
+    return windows()
   }
   const script = (name, content) => {
     const p = path.join(root, 'helpers', name)

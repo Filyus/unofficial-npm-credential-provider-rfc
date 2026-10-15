@@ -43,6 +43,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | Keys are compared after environment expansion | `config: a key that expands to a selecting setting` |
 | globalconfig provenance follows the layer that holds the value in effect | `config: globalconfig set in the project over one from`, `config: a project globalconfig over a user one, with one from`, `config: a trusted user file overrides a project globalconfig` |
 | A child npm is told which files the parent did not trust | `config: a child npm keeps distrusting files its parent did not trust`, `config: a child npm is told which config files the parent did not trust for a token helper`, `e2e: parent-runs-child`, `e2e: child-project-globalconfig` |
+| npm started by a repository's scripts (`npm run` in the repository or a workspace, `npm exec -c`, a script that drops the marker) gets no helper from a repository-chosen file; a script that drops the marker and leaves the project is outside what the rule can stop | `e2e: the child npm reaches the registry`, `e2e: the repository file supplies no credential to it`, `e2e: a script that drops the marker and starts npm outside the project` |
 | A file inside a project is not trusted however chosen, including through a cli or env prefix | `config: a file inside the project chosen by`, `e2e: prefix-into-repository` |
 | Projects are every ancestor with package.json or node_modules | `config: a file in an outer project is not trusted from a nested one` |
 | Whether a run is global is read only from layers a project cannot write | `config: a cli prefix outside the project in`, `config: does not make a cli prefix global` |
@@ -58,7 +59,8 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | Claim | Evidence |
 |---|---|
 | An absolute path with no arguments; anything else refused with `ETOKENHELPER` | `fetch: a relative path or a command with arguments is refused` |
-| `.cmd`/`.bat` through `cmd.exe` on Windows only; `"` or `%` refused there | `fetch: batch files run through cmd.exe on Windows only`, `fetch: cmd.exe cannot be given a path with a quote or a percent sign` |
+| `.cmd`/`.bat` through `cmd.exe` on Windows only; `"` or `%` refused there; `& ^ ! ; ( ) ' , =`, spaces and non-ASCII in the directory reach the helper unchanged and inject nothing | `fetch: batch files run through cmd.exe on Windows only`, `probe: runs as itself, in its own directory`, `probe: is refused with a reason` |
+| A path with `"` or `%` is refused before `cmd.exe` sees it | `fetch: batch files run through cmd.exe on Windows only`, `fetch: cmd.exe cannot be given a path with a quote or a percent sign` |
 | Starts in its own directory | `fetch: a helper does not start in npm`, `fetch: a .cmd helper starts in its own directory` |
 | No `NODE_OPTIONS`, `npm_config_*` or other variables npm sets from config | `fetch: a helper gets no NODE_OPTIONS and no npm_config_ variables`, `fetch: own variables are not passed on`, `e2e: project-node-options` |
 | Lazily, once per registry per process, failures cached | `fetch: the helper runs once per registry per process`, `fetch: a failed run is cached too`, `fetch: a different registry key runs the helper separately` |
