@@ -273,6 +273,7 @@ Publish, readable form:
 | `interactive` | boolean | for `get` | Whether the client can display prompts (for MFA flows). |
 | `retry` | boolean | no | `true` when this request follows a rejected registry request. |
 | `httpStatus` | number | when `retry` is `true` | HTTP status of the rejected request, 100–599. |
+| `granularity` | string | for `erase` | The `granularity` of the response that carried the rejected credential, so the provider can tell which of its credentials was rejected. |
 | `authChallenges` | string[] | no | `WWW-Authenticate` header values (without the header name) from the rejected request. Sent with `erase` and retry requests. |
 
 The client sends all the context it has. A provider that issues one token per registry ignores `scope` and `package`; one that issues finer tokens uses them, and says so in `granularity`.
@@ -317,7 +318,7 @@ npm sends `Authorization: Bearer <token>`, or base64-encodes `username:password`
 | `"operation-not-supported"` | Provider does not support this request kind or operation. | Fail with an unsupported-operation error. |
 | `"other"` | Anything else; carries `message` and optional `causedBy`. | Show the error and fail. |
 
-**Provider chaining:** providers are tried in order; the first `Ok` wins, `url-not-supported` means "try the next one", and any other error stops the chain.
+**Provider chaining:** providers are tried in order; the first `Ok` wins, `url-not-supported` means "try the next one", and any other error stops the chain. A chain in which every provider answers `url-not-supported` is covered under [Legacy fallback](#legacy-fallback).
 
 ```ini
 # ~/.npmrc — two providers, tried in order
@@ -332,7 +333,10 @@ Whether npm falls back to a token stored in `.npmrc` (`_authToken`, `_auth`, `us
 | Situation | Stored token used? |
 |---|---|
 | No provider configured for the registry | Yes, as today |
-| A provider is configured and fails: `not-found`, another error, no common version, an oversized line, a timeout | No, unless `credential-provider-legacy-fallback` is set in user or global config, for migration |
+| Every provider in the global chain answers `url-not-supported` | Yes: no provider serves the registry, so it is treated as one without a provider |
+| Every provider in a per-registry list answers `url-not-supported` | No: the user said this registry uses a provider |
+| The provider answers `not-found`, or shares no protocol version with npm | No, unless `credential-provider-legacy-fallback` is set in user or global config, for migration |
+| Any other error, an oversized line, a timeout | No |
 
 A silent fallback would mask provider failures and bring back the stored secret the user set out to remove.
 
@@ -490,7 +494,7 @@ The client never persists credentials to disk.
 
 #### 6. Provider discovery
 
-Discovery is not part of Phase 2; it is described here so the Phase 3 evaluation has a concrete design to weigh. If no provider is configured for a registry and authentication fails, npm may look for a provider named `npm-credential-provider-<registry-host>` in trusted global locations only. If it finds one, it **suggests** it and never installs or executes it:
+Discovery is not part of Phase 2; it is described here so the Phase 3 evaluation has a concrete design to weigh. If no provider is configured for a registry and authentication fails, npm may look for a provider named after the registry's host, `npm-credential-provider-<name>` where `<name>` is a label of the host (`gitlab` for `gitlab.example.com`), in trusted global locations only. If it finds one, it **suggests** it and never installs or executes it:
 
 ```
 $ npm install @scope/package
@@ -570,7 +574,7 @@ npm install @scope/package
   |     |
   |     |-- Send one JSON line, read one JSON line
   |     |     |-- "Ok"                         -> cache it, use it
-  |     |     |-- "Err: url-not-supported"     -> next provider in the chain
+  |     |     |-- "Err: url-not-supported"     -> next provider in the chain; none left: see Legacy fallback
   |     |     |-- "Err: not-found"             -> fail unless legacy fallback is enabled
   |     |     |-- "Err: other" / unsupported   -> show the error
   |     |
@@ -653,7 +657,7 @@ This section is informative: it describes one way to meet the requirements above
 - **Shape.** As suggested in the #850 review from NuGet's experience, npm can define one internal credential-source interface with implementations for the existing config lookup (`_authToken`, `_auth`, `username`/`_password`), `tokenHelper`, the provider protocol, and optionally a built-in source for npm-owned registries that spawns no process.
 - **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`.
 - **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket.
-- **Config.** `@npmcli/config` gains `tokenHelper` and `credentialProvider` as per-registry keys, filtered by source as [Trust](#trust) requires.
+- **Config.** `@npmcli/config` gains the per-registry `tokenHelper` key and the `credentialProvider` keys, filtered by source as [Trust](#trust) requires.
 - **Phase 1 prototype.** About 440 lines in npm-registry-fetch and 340 in npm/cli, with tests at both repositories' 100% coverage, published as [patches](poc/patches) and run by CI on macOS, Linux and Windows. [prototype.md](prototype.md) describes the code, the checks (end-to-end runs with a real npm, a 2048-combination config matrix, fuzzers, platform probes, every npm/cli suite) and the eight audit rounds that shaped it; [claims.md](claims.md) maps each statement in this document to its evidence.
 - **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so npm and third-party providers can be tested against the same cases.
 
@@ -661,9 +665,9 @@ This section is informative: it describes one way to meet the requirements above
 
 | Setting | Where | Default | Description |
 |---|---|---|---|
-| `tokenHelper`, `//<registry>/:tokenHelper` | user, global | none | Phase 1: absolute path of a program that prints a token. |
+| `//<registry>/:tokenHelper` | user, global | none | Phase 1: absolute path of a program that prints a token. |
 | `credentialProvider[]`, `//<registry>/:credentialProvider[]` | user, global | none | Phase 2: provider chain, tried in order. |
-| `credential-provider-legacy-fallback` | user, global | `false` | Allow falling back to stored `_authToken`/`_auth` when a configured provider fails, for migration. |
+| `credential-provider-legacy-fallback` | user, global | `false` | For migration: use a stored `_authToken`, `_auth` or `username`/`_password` when the provider answers `not-found` or shares no protocol version with npm ([Legacy fallback](#legacy-fallback)). |
 
 ## Prior Art
 

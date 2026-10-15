@@ -58,6 +58,8 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | `noProviderConfigured` | `legacy-auth` |
 | `providerConfiguredFailure` | `fail` |
+| `globalChainAllUrlNotSupported` | `legacy-auth` |
+| `registryChainAllUrlNotSupported` | `fail` |
 | `providerConfiguredFailureWithExplicitLegacyFallback` | `legacy-auth` |
 
 ## Non-Interactive Behavior
