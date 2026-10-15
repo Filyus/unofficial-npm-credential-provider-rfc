@@ -100,3 +100,46 @@ jobs:
         run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
       - name: Every claim's evidence still exists
         run: node rfc/poc/claims/check.js npm-cli npm-registry-fetch
+
+  # every npm/cli suite with the prototype against the same suites without
+  # it: the prototype must break nothing outside its own tests
+  full-suites:
+    name: every npm/cli suite, ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          path: rfc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Prepare the base and the patched trees
+        run: |
+          for tree in base patched; do
+            git init -q $tree
+            (cd $tree &&
+              git fetch -q --depth 1 https://github.com/npm/cli.git "$NPM_CLI_BASE" &&
+              git checkout -q FETCH_HEAD &&
+              if [ $tree = patched ]; then git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch; fi &&
+              node scripts/resetdeps.js)
+          done
+          # npm itself then runs on the prototype's npm-registry-fetch too
+          git init -q npm-registry-fetch
+          (cd npm-registry-fetch &&
+            git fetch -q --depth 1 https://github.com/npm/npm-registry-fetch.git "$NPM_REGISTRY_FETCH_BASE" &&
+            git checkout -q FETCH_HEAD &&
+            git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-registry-fetch.patch)
+          cp npm-registry-fetch/lib/auth.js npm-registry-fetch/lib/index.js npm-registry-fetch/lib/token-helper.js patched/node_modules/npm-registry-fetch/lib/
+      - name: Every suite, base against prototype
+        run: node rfc/poc/full-suites/compare.js base patched
