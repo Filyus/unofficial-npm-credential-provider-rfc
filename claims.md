@@ -86,6 +86,12 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | `logout` explains, names a stored token, revokes nothing | `cli: tokenHelper logout explains instead of claiming no login`, `cli: tokenHelper logout names a token stored beside the helper` |
 | `login` refuses, also for a scoped registry | `cli: tokenHelper refuses instead of saving a token it would shadow`, `cli: tokenHelper on a scoped registry refuses a scoped login`, `e2e: login-with-helper` |
 
+## The rest of npm
+
+| Claim | Evidence |
+|---|---|
+| The prototype breaks nothing else: every npm/cli suite (the root and 16 workspaces, smoke tests included) passes with it wherever it passes without it, with npm running on the prototype's npm-registry-fetch | [`poc/full-suites/compare.js`](poc/full-suites/compare.js), the `full-suites` job on Ubuntu and Windows; a file that fails once is rerun three times in both trees before it counts |
+
 ## Phase 2: numbers and rules in the spec
 
 | Claim | Evidence |
