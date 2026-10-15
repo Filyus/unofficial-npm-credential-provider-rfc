@@ -1,4 +1,4 @@
-From 141bd60c3888fac9868d9cb1d1bb79002b40eca0 Mon Sep 17 00:00:00 2001
+From fd648dcb3fedf7d0b64cb97302bd1bfcc91742b3 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -60,11 +60,11 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/lib/utils/oidc.js                     |  39 ++
  test/lib/utils/publish-config.js           |  26 +
  workspaces/config/lib/definitions/index.js |   1 +
- workspaces/config/lib/index.js             | 264 ++++++++-
+ workspaces/config/lib/index.js             | 265 ++++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 594 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 604 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1272 insertions(+), 21 deletions(-)
+ 29 files changed, 1283 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -782,7 +782,7 @@ index b5b63bf..41d6ba1 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..5880e29 100644
+index 37dfecf..90ed3d2 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -4,7 +4,7 @@ const ini = require('ini')
@@ -857,7 +857,7 @@ index 37dfecf..5880e29 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +687,50 @@ class Config {
+@@ -678,6 +687,51 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -871,8 +871,9 @@ index 37dfecf..5880e29 100644
 +    // too. Without one pnpm falls back to registry.npmjs.org, which is
 +    // rarely the registry a helper serves, so npm asks instead of guessing.
 +    if (key === 'tokenHelper') {
-+      const raw = this.data.get(where).raw || {}
-+      const value = raw.tokenHelper ?? '<path>'
++      // publishConfig keys arrive here without a config file behind them
++      const raw = this.data.get(where)?.raw || {}
++      const value = raw[key] ?? '<path>'
 +      let registry = null
 +      try {
 +        registry = raw.registry && nerfDart(raw.registry)
@@ -908,7 +909,7 @@ index 37dfecf..5880e29 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -857,14 +910,195 @@ class Config {
+@@ -857,14 +911,195 @@ class Config {
      }
    }
  
@@ -1104,7 +1105,7 @@ index 37dfecf..5880e29 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1210,14 @@ class Config {
+@@ -976,6 +1211,14 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -1140,7 +1141,7 @@ index 12719b5..e9be8d3 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..e8ae4d8 100644
+index 9f83d98..67742d8 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,7 +2,7 @@ const t = require('tap')
@@ -1171,7 +1172,7 @@ index 9f83d98..e8ae4d8 100644
    readFileSync: (path, ...args) => {
      throwIfExternalNpmrc(path)
      if (path.includes('WEIRD-ERROR')) {
-@@ -2468,3 +2478,585 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2478,595 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -1752,6 +1753,16 @@ index 9f83d98..e8ae4d8 100644
 +    'Ignoring user config "//npm.corp.example:tokenHelper": a registry key ends in "/" before the colon; ' +
 +    'use "//npm.corp.example/:tokenHelper"')), 'the slashless key, as pnpm documents it, names the key to write')
 +  t.notOk(slashless.config.getCredentialsByURI('https://npm.corp.example/').tokenHelper, 'and it never runs')
++
++  const logs = []
++  const logHandler = (...args) => logs.push(args)
++  process.on('log', logHandler)
++  t.teardown(() => process.off('log', logHandler))
++  pinned.config.checkUnknown('publishConfig', 'tokenHelper')
++  pinned.config.logWarnings()
++  t.ok(logs.some(l => l[0] === 'warn' && l.join(' ').includes(
++    'Ignoring publishConfig config "tokenHelper"') && l.join(' ').includes('"//<registry>/:tokenHelper=<path>"')),
++  'a publishConfig key, which has no file behind it, names a placeholder')
 +
 +  const scoped = await warnings('//npm.corp.example/:tokenHelper=/usr/local/bin/token\n')
 +  t.notOk(scoped.warned.some(w => w.includes('tokenHelper')), 'the scoped key gets no warning')
