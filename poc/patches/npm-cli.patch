@@ -1,4 +1,4 @@
-From ea9d6b4b77620bfacffcd258e097280ea4303c1c Mon Sep 17 00:00:00 2001
+From 141bd60c3888fac9868d9cb1d1bb79002b40eca0 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -54,17 +54,17 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/lib/commands/logout.js                |  42 ++
  test/lib/commands/profile.js               |  11 +
  test/lib/commands/publish.js               |  33 ++
- test/lib/commands/unpublish.js             |  29 ++
+ test/lib/commands/unpublish.js             |  29 +
  test/lib/commands/whoami.js                |  11 +
  test/lib/utils/error-message.js            |  10 +
  test/lib/utils/oidc.js                     |  39 ++
  test/lib/utils/publish-config.js           |  26 +
  workspaces/config/lib/definitions/index.js |   1 +
- workspaces/config/lib/index.js             | 239 ++++++++-
+ workspaces/config/lib/index.js             | 264 ++++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 547 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 594 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1200 insertions(+), 21 deletions(-)
+ 29 files changed, 1272 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -782,7 +782,7 @@ index b5b63bf..41d6ba1 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..878dbeb 100644
+index 37dfecf..5880e29 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -4,7 +4,7 @@ const ini = require('ini')
@@ -857,7 +857,7 @@ index 37dfecf..878dbeb 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +687,25 @@ class Config {
+@@ -678,6 +687,50 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -866,10 +866,35 @@ index 37dfecf..878dbeb 100644
 +    // It gets a pointer to the scoped form instead of the generic unknown
 +    // warning, and does not fail under strict-npmrc, so a ~/.npmrc shared
 +    // with pnpm keeps working for npm's other settings.
++    // The warning names the line to write: for the registry the same file
++    // sets, which is where pnpm 11.4 pins the key, so the line works there
++    // too. Without one pnpm falls back to registry.npmjs.org, which is
++    // rarely the registry a helper serves, so npm asks instead of guessing.
 +    if (key === 'tokenHelper') {
++      const raw = this.data.get(where).raw || {}
++      const value = raw.tokenHelper ?? '<path>'
++      let registry = null
++      try {
++        registry = raw.registry && nerfDart(raw.registry)
++      } catch {
++        // an unparseable registry= names nothing to point to
++      }
 +      this.queueWarning('token-helper:unscoped',
-+        `Ignoring ${where} config "tokenHelper": npm only accepts a token helper scoped to a registry, ` +
-+        'such as "//registry.npmjs.org/:tokenHelper".')
++        `Ignoring ${where} config "tokenHelper": npm only accepts a token helper scoped to a registry. ` +
++        (registry
++          ? `Write "${registry}:tokenHelper=${value}" instead, which pnpm reads the same way.`
++          : `Write "//<registry>/:tokenHelper=${value}" with the registry the helper serves; ` +
++            'pnpm sends this one\'s token to registry.npmjs.org, as the file names no registry.'))
++      return
++    }
++    // pnpm's docs show the per-registry key without a slash before the colon
++    // (`//host:tokenHelper`); pnpm adds it, while npm's keys always end in
++    // one, so the key would pass as a known nerf-dart key and never match
++    const slashless = /^(\/\/.*[^/]):tokenHelper$/.exec(key)
++    if (slashless && !/:@[^:]+$/.test(slashless[1])) {
++      this.queueWarning(`token-helper:slashless:${key}`,
++        `Ignoring ${where} config "${key}": a registry key ends in "/" before the colon; ` +
++        `use "${slashless[1]}/:tokenHelper".`)
 +      return
 +    }
 +    // pnpm's per-package-scope form, `//host/:@scope:tokenHelper`, would
@@ -883,7 +908,7 @@ index 37dfecf..878dbeb 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -857,14 +885,195 @@ class Config {
+@@ -857,14 +910,195 @@ class Config {
      }
    }
  
@@ -1079,7 +1104,7 @@ index 37dfecf..878dbeb 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1185,14 @@ class Config {
+@@ -976,6 +1210,14 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -1115,7 +1140,7 @@ index 12719b5..e9be8d3 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..c61bd2c 100644
+index 9f83d98..e8ae4d8 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,7 +2,7 @@ const t = require('tap')
@@ -1146,7 +1171,7 @@ index 9f83d98..c61bd2c 100644
    readFileSync: (path, ...args) => {
      throwIfExternalNpmrc(path)
      if (path.includes('WEIRD-ERROR')) {
-@@ -2468,3 +2478,538 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2478,585 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -1682,8 +1707,55 @@ index 9f83d98..c61bd2c 100644
 +  t.same(config.getUnknownConfigs('user'), [], 'not collected as unknown, so strict-npmrc does not fail')
 +  t.ok(logs.some(l => l[0] === 'warn' && l.join(' ').includes('only accepts a token helper scoped to a registry')))
 +  t.ok(logs.some(l => l[0] === 'warn' && l.join(' ').includes(
++    'Write "//<registry>/:tokenHelper=/usr/local/bin/token" with the registry the helper serves')),
++  'with no registry= in the file, the unscoped form asks for the registry')
++  t.ok(logs.some(l => l[0] === 'warn' && l.join(' ').includes(
 +    'does not support a token helper per package scope; use "//npm.pkg.github.com/:tokenHelper"')),
 +  'the per-package-scope form names the registry form')
++})
++
++t.test('pnpm-only tokenHelper forms are pointed at the exact line to write', async t => {
++  const warnings = async (npmrc) => {
++    const path = outsideProjects(t, { project: { 'package.json': '{}' }, home: { '.npmrc': npmrc } })
++    const logs = []
++    const logHandler = (...args) => logs.push(args)
++    process.on('log', logHandler)
++    t.teardown(() => process.off('log', logHandler))
++    const config = new Config({
++      npmPath: `${path}/npm`,
++      env: {},
++      argv: [process.execPath, __filename, `--userconfig=${path}/home/.npmrc`],
++      cwd: `${path}/project`,
++      excludeNpmCwd: true,
++      shorthands,
++      definitions,
++      nerfDarts,
++      flatten,
++    })
++    await config.load()
++    config.logWarnings()
++    t.same(config.getUnknownConfigs('user'), [], 'not collected as unknown, so strict-npmrc does not fail')
++    return { config, warned: logs.filter(l => l[0] === 'warn').map(l => l.join(' ')) }
++  }
++
++  const pinned = await warnings('registry=https://npm.corp.example/npm/\ntokenHelper=/usr/local/bin/token\n')
++  t.ok(pinned.warned.some(w => w.includes(
++    'Write "//npm.corp.example/npm/:tokenHelper=/usr/local/bin/token" instead')),
++  'the unscoped form names the key for the registry the same file sets, as pnpm 11.4 pins it')
++
++  const unparseable = await warnings('registry=not a url\ntokenHelper=/usr/local/bin/token\n')
++  t.ok(unparseable.warned.some(w => w.includes('with the registry the helper serves')),
++    'an unparseable registry= names nothing')
++
++  const slashless = await warnings('//npm.corp.example:tokenHelper=/usr/local/bin/token\n')
++  t.ok(slashless.warned.some(w => w.includes(
++    'Ignoring user config "//npm.corp.example:tokenHelper": a registry key ends in "/" before the colon; ' +
++    'use "//npm.corp.example/:tokenHelper"')), 'the slashless key, as pnpm documents it, names the key to write')
++  t.notOk(slashless.config.getCredentialsByURI('https://npm.corp.example/').tokenHelper, 'and it never runs')
++
++  const scoped = await warnings('//npm.corp.example/:tokenHelper=/usr/local/bin/token\n')
++  t.notOk(scoped.warned.some(w => w.includes('tokenHelper')), 'the scoped key gets no warning')
++  t.equal(scoped.config.getCredentialsByURI('https://npm.corp.example/').tokenHelper, '/usr/local/bin/token')
 +})
 diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
 index 9426265..e899208 100644

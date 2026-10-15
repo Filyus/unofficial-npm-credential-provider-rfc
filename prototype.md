@@ -7,7 +7,7 @@ How the `tokenHelper` prototype described in [the RFC](rfc-credential-provider.m
 | Repository | Size | What it adds |
 |---|---|---|
 | npm-registry-fetch | about 440 lines | a `tokenHelper` module (own deadline and kill, one cached result per registry and process, stderr forwarded with credentials masked), a branch in `getAuth()`, and a step in `regFetch()` that waits for the helper while watching the request body and abort signal, skipped for `--offline` |
-| npm/cli | about 340 lines | config trust (who selected a file, where it lies, what a parent npm passed on), `publishConfig` filtering, `publish`, `whoami`, `login`, `logout`, `profile`, `config set`/`ls` and OIDC handling, docs |
+| npm/cli | about 370 lines | config trust (who selected a file, where it lies, what a parent npm passed on), `publishConfig` filtering, `publish`, `whoami`, `login`, `logout`, `profile`, `config set`/`ls` and OIDC handling, docs |
 
 Both are published as [patches](poc/patches) against upstream commits, and each comes with tests at the repository's 100% coverage.
 

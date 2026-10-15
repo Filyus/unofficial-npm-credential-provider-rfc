@@ -63,6 +63,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | No spelling of the key in a project or workspace `.npmrc`, `npm_config_*`, a flag or `publishConfig` makes npm use a helper (case, Unicode lookalikes, `${VAR?}`, ini sections and quoting, BOM, CRLF) | [`poc/npm-config-fuzz/spellings.js`](poc/npm-config-fuzz/spellings.js): 2000 spellings in-process, 30 with a real npm and a marker-writing helper, 10 through `npm publish`; positive controls in user config; 500 per CI job |
 | `publishConfig` cannot supply a helper | `cli: publishConfig cannot supply a tokenHelper`, `e2e: publishConfig-helper` |
 | pnpm's unscoped and per-package-scope forms are warned about and not fatal; `config set` refuses the unscoped form and project config | `config: pnpm-only tokenHelper forms get a pointer to the registry form and are not fatal`, `cli: config set tokenHelper` |
+| The unscoped form's warning names the line to write for the file's own `registry=`, or asks for the registry when there is none; a key without a slash before the colon is ignored with a warning naming the key to write | `config: pnpm-only tokenHelper forms are pointed at the exact line to write` |
 
 ## Phase 1: running the helper
 
