@@ -1,0 +1,34 @@
+# Runs the Phase 2 conformance material: the generated files are fresh
+# relative to spec/policy-v1.json, the Python model's tests (every policy
+# value, the provider chain included) pass, and the Rust client and provider
+# pair builds, lints clean and passes its tests.
+name: conformance
+
+on:
+  push:
+    paths:
+      - 'spec/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'poc/rust/**'
+      - '.github/workflows/conformance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: generated files are fresh
+        run: python3 tools/generate_from_policy.py --check
+      - name: python model
+        run: python3 -m unittest discover -v
+      - name: rust
+        working-directory: poc/rust
+        run: |
+          cargo fmt --all --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
