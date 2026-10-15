@@ -49,6 +49,8 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | An OIDC exchange sends the CI identity token on the exchange request, and npm clears the exchanged token at its next exchange attempt | npm/cli `lib/utils/oidc.js` at 83ea1a1 | read the source |
 | `npm login --auth-type=web` posts to `/-/v1/login` and polls the returned done URL for a token; Verdaccio serves the same flow behind `webLogin` | npm-profile 13.0.1 `lib/index.js`; [Verdaccio web login](https://verdaccio.org/docs/web-login) | read |
 | The builtin `npmrc` ranks lowest of npm's config files and may set `globalconfig` or `prefix`, which the trust rule accepts since no project chose them | npm/cli `workspaces/config/lib/index.js` at 83ea1a1; the prototype's `#globalconfigSource` | read the source |
+| npmjs.com lists granular tokens (`npmAccessToken`, and `granularAccessToken` as its alias) as the security of every `/-/stage` path, naming no tier; it documents 401 on the list and 401 and 404 on the record and the tarball, no 403 on these reads, 403 and `npm-otp` on approve and delete, and that the list returns only items visible to the caller | [npm registry API](https://api-docs.npmjs.com/) | read (documented, not tested live) |
+| Short-lived trusted-publishing tokens can be used with `npm stage publish` and `npm publish`, not the other `npm stage` subcommands | npm/cli `docs/lib/content/commands/npm-stage.md` at 83ea1a1 | read the source |
 | npm's message for a 404 says the package "could not be found or you do not have permission to access it" | npm/cli `lib/utils/error-message.js` | read the source |
 | Cargo starts a provider per request and closes stdin after one response | `src/util/credential/process.rs` (`perform`, `run`) | read the source |
 | NuGet: plugins since 4.8; protocol 2.0.0 with a handshake; 5 s handshake and request timeouts, extended by progress; idle shutdown after 1 minute; `Uri`, `isRetry`, `NonInteractive`, `CanShowDialog`; discovery in `~/.nuget/plugins`, `NUGET_PLUGIN_PATHS`, `nuget-plugin-*` on PATH since 6.13 | [cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins), [authentication plugin](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin) | read |
@@ -133,7 +135,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 ## Not verified
 
 - make-fetch-happen as shipped in npm 12 recording a header named in `Vary` in the cache index: seen in a historical version's source and in an audit probe, not re-read in the current source.
-- Which npmjs.com token tiers `GET /-/stage` and `GET /-/stage/<id>` accept: an open question in the RFC.
+- Which npmjs.com token tiers serve the `/-/stage` reads, and so whether the interim `stage-read` mapping there (a stage-only token without bypass-2FA, under write policy) is needed or works at all, and whether a token's selected packages bound `stage list`: unverified; [stage-tiers-test.md](stage-tiers-test.md) is the test.
 - Node's Windows installer shipping a builtin `npmrc` that sets `prefix=${APPDATA}\npm`: recalled, not checked on an installed copy.
 - registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401: npm's own 404 message allows for it and it is commonly reported, but no request was made for this document.
 - Which registries send `Vary: Authorization`: none of the mainstream ones were found to, but no header survey was made.
