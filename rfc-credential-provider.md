@@ -10,10 +10,12 @@
 
 npm gains two ways to ask an external program for registry credentials, delivered in phases:
 
-1. **Phase 1: `tokenHelper`**, compatible with pnpm's setting of the same name. A user-configured executable prints a token; npm sends it as the `Authorization` header. This is what [npm/cli#8141](https://github.com/npm/cli/issues/8141) asks for, and it lets one helper serve both package managers.
-2. **Phase 2: `credentialProvider`**, a small versioned JSON protocol over stdin/stdout, modelled on [Cargo's credential providers](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html). npm tells the provider which registry, package and npm action it needs a credential for; the provider answers with the credential and how long npm may cache it, and is told when the registry rejects it.
+| Phase | Setting | What it is | Modelled on |
+|---|---|---|---|
+| 1 | `//<registry>/:tokenHelper` | An executable prints a token; npm sends it as the `Authorization` header. | pnpm's setting of the same name |
+| 2 | `credentialProvider` | A small versioned JSON protocol over stdin/stdout: npm says which registry, package and npm action it needs a credential for; the provider answers with the credential and how long npm may cache it, and is told when the registry rejects it. | [Cargo's credential providers](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html) |
 
-Both are configured only in user-level or global npm config. Neither changes anything for a user who has not configured it.
+Phase 1 is what [npm/cli#8141](https://github.com/npm/cli/issues/8141) asks for, and one helper serves both package managers. Both phases are configured only in user-level or global npm config ([Trust](#trust)), and neither changes anything for a user who has not configured it.
 
 ## Motivation
 
@@ -23,26 +25,33 @@ npm registry authentication ends in a bearer secret stored in `.npmrc` (where `n
 
 ### Registries already issue short-lived tokens, and npm cannot ask for them
 
-The registries companies run next to npmjs.com already hand out short-lived credentials, but only to a tool that writes them somewhere npm will read:
+The registries companies run next to npmjs.com already hand out short-lived credentials, and users already trust the tools that fetch them. What npm lacks is a way to ask: each tool writes the credential somewhere npm will read, to be renewed by hand.
 
-- **AWS CodeArtifact**: tokens last 12 hours by default and 15 minutes at least; "When the lifetime expires, you must fetch another token." `aws codeartifact login --tool npm` writes the token into npm's config ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)).
-- **Google Artifact Registry**: "Access tokens are valid for 60 minutes … If your access token has expired, you must generate a new access token" ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)).
-- **Azure Artifacts**: `vsts-npm-auth` writes a personal access token into the user `.npmrc`.
-- **GitLab Artifact Registry**: `glab artifact-registry login --docker` registers glab as a Docker credential helper that exchanges a fresh token on every pull or push, but for npm `--npm` can only write an `_authToken` (15 minutes by default, 12 hours at most) into `~/.npmrc`, to be run again before it expires ([docs](https://docs.gitlab.com/cli/artifact-registry/login/)).
+| Registry | Token lifetime | How the token reaches npm today |
+|---|---|---|
+| AWS CodeArtifact | 12 h by default, 15 min to 12 h | `aws codeartifact login --tool npm` writes it into npm's config ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)) |
+| Google Artifact Registry | 60 min | written into `.npmrc`, and "if your access token has expired, you must generate a new access token" ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)) |
+| Azure Artifacts | the PAT's lifetime | `vsts-npm-auth` writes a personal access token into the user `.npmrc` ([docs](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops)) |
+| GitLab Artifact Registry | 15 min by default, 12 h at most | `glab artifact-registry login --npm` writes an `_authToken` into `~/.npmrc`, to be run again before it expires; for Docker the same command registers glab as a credential helper that fetches a fresh token on every pull ([docs](https://docs.gitlab.com/cli/artifact-registry/login/)) |
 
-So the trust in the third party already exists; what this proposal removes is the step that turns a short-lived credential into a file on disk, renewed by hand.
+What this proposal removes is the step that turns a short-lived credential into a file on disk.
 
-### npmjs.com itself is moving away from long-lived publish tokens
+### npmjs.com itself is moving to short-lived, action-scoped tokens
 
-Since December 9, 2025, `npm login` issues "a two-hour session token instead of long-lived tokens", and classic tokens are revoked ([GitHub Changelog](https://github.blog/changelog/2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available/)); new write-enabled granular tokens default to 7 days ([GitHub Changelog, 2025-09-29](https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/)), and all granular write tokens are capped at 90 ([GitHub Changelog, 2025-11-05](https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/)). npm still saves the two-hour token as `_authToken` in the user `~/.npmrc` (`npm login` → `config.setCredentialsByURI()` → `config.save('user')`), so even the registry's own credentials are now short-lived secrets that npm can only keep by writing them to disk.
+- **2025-09-29:** new write-enabled granular tokens default to 7 days ([GitHub Changelog](https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/)).
+- **2025-11-05:** all granular write tokens are capped at 90 days ([GitHub Changelog](https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/)).
+- **2025-12-09:** `npm login` issues "a two-hour session token instead of long-lived tokens", and classic tokens are revoked ([GitHub Changelog](https://github.blog/changelog/2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available/)).
+- **2026-07-08:** npm 12 makes install scripts, git dependencies and remote tarball URLs opt-in, and points automation to trusted publishing (OIDC) or staged publishing with human approval ([npm v12 announcement](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)). Stage-only granular tokens can stage a version for a maintainer to approve with 2FA, but cannot publish.
+- **2026-07-31:** bypass-2FA tokens can no longer perform account-governance actions; their direct publishing is due to go in January 2027 ([GitHub Changelog](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/), [npm docs](https://docs.npmjs.com/about-access-tokens)).
 
-npm now offers stage-only granular tokens: they can `npm stage publish` a version for a maintainer to approve with 2FA, but cannot publish directly. Since 2026-07-31 bypass-2FA tokens can no longer perform account-governance actions, and their direct publishing is scheduled for removal in January 2027 ([GitHub Changelog, 2026-07-31](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/), [npm docs](https://docs.npmjs.com/about-access-tokens)). The [npm v12 announcement](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/) points automation to trusted publishing (OIDC) or staged publishing with human approval. That covers publishing from CI; it says nothing about how a developer's machine or a build agent should hold read credentials for private registries, which is the gap this proposal fills. Credentials are becoming shorter-lived and more finely split by action. A client that can only read one static token per registry fits that direction poorly.
-
-The same npm v12 release made install scripts, git dependencies and remote tarball URLs opt-in. A credential helper must not reopen what that closed, which is why this proposal accepts helpers and providers only from user and global config.
+npm still saves the two-hour token as `_authToken` in the user `~/.npmrc`, so even the registry's own credentials are short-lived secrets that npm can only keep by writing them to disk. And these changes cover publishing from CI; none says how a developer's machine or a build agent should hold read credentials for private registries, which is the gap this proposal fills. Since npm 12 closed install-time code execution by default, a credential helper must not reopen it, which is why [Trust](#trust) limits helpers and providers to user and global config.
 
 ### npm is behind its neighbours
 
-pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm the request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), has 41 👍, no maintainer reply, and since 2026-10-01 the `Priority 1` label, and a `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all. npm 12 also reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), and treats it as an error under `strict-npmrc`, so a configuration shared with pnpm is on a path to breaking npm outright.
+pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm:
+
+- The request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), has 41 👍, no maintainer reply, and since 2026-10-01 the `Priority 1` label.
+- A `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all, and npm 12 reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), an error under `strict-npmrc`. A configuration shared with pnpm is on a path to breaking npm outright.
 
 ## Scope
 
@@ -56,7 +65,7 @@ Out of scope:
 - Credentials for lifecycle scripts. Scripts never receive provider credentials.
 - Trusted publishing (OIDC) and the registry's own token model; both are unchanged.
 - Git dependencies, proxies, and client certificates (`certfile`/`keyfile`).
-- Protecting credentials from code that already runs as the same user. Such code can invoke a helper or provider exactly as npm does, just as any process can run `git credential fill`. What this design changes is what that code finds: no standing secret in `.npmrc` or in the environment, short-lived tokens, and write credentials gated by the provider (see [Threat model](#threat-model)).
+- Protecting credentials from code that already runs as the same user: it can run a helper or provider exactly as npm does, as any process can run `git credential fill`. What changes is what it finds: no standing secret in `.npmrc` or the environment, short-lived tokens, and write credentials gated by the provider ([Threat model](#threat-model)).
 
 ## Detailed Explanation
 
