@@ -225,6 +225,16 @@
           "message": "other example"
         }
       }
+    },
+    {
+      "name": "request-stage-read-without-package",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "stage-read",
+        "interactive": false
+      }
     }
   ],
   "invalidMessages": [
@@ -317,6 +327,16 @@
         "kind": "erase",
         "registry": "https://registry.example.test/",
         "granularity": "host"
+      }
+    },
+    {
+      "name": "request-stage-reject-missing-version",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "stage-reject",
+        "interactive": true
       }
     },
     {

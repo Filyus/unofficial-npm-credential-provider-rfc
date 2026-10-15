@@ -409,6 +409,13 @@ def render_vectors(policy: dict) -> str:
         for kind in policy["wire"]["errorKinds"]
     )
 
+    valid_messages.append(
+        {
+            "name": "request-stage-read-without-package",
+            "message": {"v": version, "kind": "get", "registry": registry, "operation": "stage-read", "interactive": False},
+        }
+    )
+
     invalid_messages = [
         {
             "name": "hello-empty-versions",
@@ -480,6 +487,16 @@ def render_vectors(policy: dict) -> str:
         {
             "name": "request-erase-granularity-unknown",
             "message": {"v": version, "kind": "erase", "registry": registry, "granularity": "host"},
+        },
+        {
+            "name": "request-stage-reject-missing-version",
+            "message": {
+                "v": version,
+                "kind": "get",
+                "registry": registry,
+                "operation": "stage-reject",
+                "interactive": True,
+            },
         },
         {
             "name": "request-stage-missing-version",
