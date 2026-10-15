@@ -17,6 +17,7 @@ pub const OPERATIONS: &[&str] = &[
     "unpublish",
     "owner",
     "access",
+    "trust",
     "stage-reject",
     "account",
 ];

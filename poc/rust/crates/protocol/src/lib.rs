@@ -62,6 +62,7 @@ pub enum Operation {
     Unpublish,
     Owner,
     Access,
+    Trust,
     StageReject,
     Account,
     /// An action this build does not know. A provider must not treat it as
@@ -606,6 +607,7 @@ mod tests {
             Operation::Unpublish,
             Operation::Owner,
             Operation::Access,
+            Operation::Trust,
             Operation::StageReject,
             Operation::Account,
         ];

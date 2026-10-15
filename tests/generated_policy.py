@@ -3,7 +3,7 @@ from __future__ import annotations
 
 PROTOCOL_VERSION = 1
 SUPPORTED_REQUEST_KINDS = frozenset(['login', 'logout', 'get', 'erase'])
-SUPPORTED_OPERATIONS = frozenset(['read', 'publish', 'stage', 'stage-read', 'deprecate', 'dist-tag', 'unpublish', 'owner', 'access', 'stage-reject', 'account'])
+SUPPORTED_OPERATIONS = frozenset(['read', 'publish', 'stage', 'stage-read', 'deprecate', 'dist-tag', 'unpublish', 'owner', 'access', 'trust', 'stage-reject', 'account'])
 OPERATIONS_REQUIRING_VERSION = frozenset(['publish', 'stage', 'stage-reject'])
 KNOWN_COMMANDS = frozenset(['install', 'ci', 'publish', 'search', 'view'])
 SUPPORTED_CAPABILITIES = frozenset(['login', 'logout', 'erase', 'auth-challenges', 'retry-context'])

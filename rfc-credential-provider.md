@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 23
+> Revision: 24
 > Date: 2026-10-15
 
 > A draft proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It lets npm obtain registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment.
@@ -145,7 +145,7 @@ Every failure names the helper, and npm does not fall back to another credential
 |---|---|
 | A helper and a stored token for the same registry | The helper is used |
 | OIDC trusted publishing in use | The OIDC token wins over both |
-| `publish`, `whoami` | A configured helper counts as being logged in |
+| `publish`, `whoami`, `access list packages` (which checks for a login through the same code) | A configured helper counts as being logged in |
 | `logout` | Explains that the helper setting has to be removed, and names a stored token rather than revoking it, since revoking would send the helper's credential |
 | `login` | Refuses: the token it saved would never be sent, and its requests would carry the helper's credential |
 | `profile enable-2fa` | Refuses: it cannot work through a helper |
@@ -504,13 +504,18 @@ The provider attempts server-side revocation as a best effort, always removes it
 | `dist-tag` | `dist-tag add`, `dist-tag rm` | optional |
 | `unpublish` | `unpublish` | optional (absent: the whole package) |
 | `owner` | `owner add`, `owner rm` | — |
-| `access` | `access`, `team`, `org`, and `trust` (trusted-publisher relationships) | — |
+| `access` | every `access`, `team` and `org` subcommand, the listings (`access list`, `access get`, `team ls`, `org ls`) included | — |
+| `trust` | every `trust` subcommand (`github`, `gitlab`, `circleci`, `list`, `revoke`) | — |
 | `stage-reject` | `npm stage reject` | required |
 | `account` | every `token` subcommand (`list`, `create`, `revoke`), `profile get`, `profile set` | — |
 
-The operation belongs to the command, not to each request: every request a write command makes for that write, including the lookups it needs first (a packument fetched with `?write=true`, the user record `owner add` reads), carries the command's operation, so a provider is never pushed by a 403 to widen a credential labelled `read`. Commands that write nothing and belong to no row (`whoami`, `owner ls`) send `read`, and so does `trust list`, whose npmjs.com endpoint takes granular tokens, not session tokens ([API](https://api-docs.npmjs.com/)). `profile enable-2fa` and `disable-2fa` refuse under a provider, as under a helper. What the read-only `access`, `team` and `org` subcommands send is open ([Unresolved Questions](#unresolved-questions)).
+The operation belongs to the command, not to each request: every request a command makes carries the command's operation, the lookups a write needs first (a packument fetched with `?write=true`, the user record `owner add` reads) and the reads that follow it (`access set status` reads the visibility back, `org rm` lists the members) included, so a provider is never pushed by a 403 to widen a credential labelled `read`. The one exception is the `stage-read` lookup that `stage approve` and `reject` make first ([below](#4-operations)). Commands that write nothing and belong to no row (`whoami`, `owner ls`) send `read`. `profile enable-2fa` and `disable-2fa` refuse under a provider, as under a helper. The protocol's `scope` is always the package's scope, never a team's or an org's.
 
 **Account commands** send `account` even when they only read: it names the account-management surface, not a write. `token revoke` lists tokens and `profile set` reads the profile before writing, so a credential that serves `account` already serves both reads. npmjs.com documents its token list for session tokens only, so a provider there maps `account` to a session token, which it could not do for `read` without handing one to every install. Where a registry accepts a read-only token on these reads and answers a write with 403, as Verdaccio does, the provider may start `account` with that token and escalate when the write that follows is refused; a 403 on the read itself is no reason to, since Verdaccio also answers 403 to a token used outside its address allowlist.
+
+**Access and trust commands** also send their operation when they only read: `access` and `trust` name a governance surface, not a write. On npmjs.com, as documented, the reads behind `access`, `team` and `org` take session tokens only (a package's collaborators and visibility, an org's packages, members and teams, a team's packages and members), and their writes take session or granular tokens ([API](https://api-docs.npmjs.com/)); a provider there maps `access` to a session token, which it could not do for `read` without handing one to every install. `trust` is its own operation because npmjs.com documents a different credential for its endpoint: granular tokens only, for `trust list` as for the writes, held by a user with write permission on the package and 2FA ([npm-trust](https://docs.npmjs.com/cli/v11/commands/npm-trust/)). As documented, the session token that serves `access` does not serve `trust`; where a registry accepts one credential for both, the provider maps both operations to it.
+
+Both credentials can write even when the command only lists, so the provider applies its write policy to every `access` and `trust` request: user presence, and only when `interactive` is `true`; on npmjs.com these listings therefore fail closed in CI. A provider binds a `trust` credential to the package the request names, answering with `granularity` `"package"` and `operationIndependent` `false`. `trust` and the package-level `access` subcommands (`list collaborators`, `get`, `set`, `grant`, `revoke`) send `scope` and `package`; `team`, `org` and `access list packages` send neither. Verdaccio, GitHub Packages and GitLab implement none of these endpoints; a registry that does, and accepts a lesser token on the reads, lets the provider start with it and escalate when a write is refused, as for `account`.
 
 **Staged versions.** `npm stage approve` and `reject` take only a stage id, while `publish` and `stage-reject` need the package and version:
 
@@ -727,7 +732,7 @@ This section is informative: it describes one way to meet the requirements above
 - **Where it plugs in.** In `npm-registry-fetch`, `regFetch()` resolves auth synchronously (`getAuth()` in `lib/auth.js`) before the asynchronous fetch starts. A helper or provider call is asynchronous, so helper- and provider-backed auth has to be resolved inside the async fetch path, which `regFetch()` already returns as a promise. pnpm's TypeScript CLI runs `tokenHelper` with `spawnSync`, which blocks the event loop while the helper runs and rules out a long-lived session.
 - **Shape.** As suggested in the #850 review from NuGet's experience, npm can define one internal credential-source interface with implementations for the existing config lookup (`_authToken`, `_auth`, `username`/`_password`), `tokenHelper` and the provider protocol, and later built-in `npm:` sources ([Future possibilities](#future-possibilities)).
 - **Hooks the commands need.** npm-registry-fetch reports which source served a registry (a provider, a helper, `npm:token`, none), so `stage approve` and `reject` know whether to look the stage up; the context learned from a stage record travels in a credential-context option of its own, never as `spec` or `scope`, which would change routing and the `npm-scope` header; and an OIDC exchange masks the chain for its registry key with an internal option, as the Phase 1 prototype masks a helper, not with an empty provider list, which the RFC gives no meaning.
-- **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`.
+- **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`. `trust`, `access list collaborators` and `access get status` pass no `spec` today, so their package reaches the provider through the credential-context option, never as `spec`, and their requests keep going to the default registry even for a scoped package whose scope names another registry, as they do today. The tab completion of `deprecate` and `unpublish` lists packages through the access endpoints under its command's operation; a provider that does not serve it only costs the suggestions.
 - **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket.
 - **Config.** `@npmcli/config` gains the per-registry `tokenHelper` key and the `credentialProvider` keys, filtered by source as [Trust](#trust) requires.
 - **Phase 1 prototype.** About 440 lines in npm-registry-fetch and 370 in npm/cli, with tests at both repositories' 100% coverage, published as [patches](poc/patches) and run by CI on macOS, Linux and Windows. [prototype.md](prototype.md) describes the code, the checks (end-to-end runs with a real npm, a 2048-combination config matrix, fuzzers, platform probes, every npm/cli suite) and the eight audit rounds that shaped it; [claims.md](claims.md) maps each statement in this document to its evidence.
@@ -752,7 +757,7 @@ This section is informative: it describes one way to meet the requirements above
 | **Direction** | Bidirectional | Bidirectional | Unidirectional | Bidirectional | Bidirectional (the plugin also sends requests, such as log messages) | Unidirectional | Bidirectional |
 | **Request kinds** | get, store, erase | get, store, erase | get only | get, login, logout | get (Get Authentication Credentials), set credentials, operation claims | get only | get, erase, login, logout |
 | **Context on input** | protocol, host, path | ServerURL | None | registry, operation, name, version | source URI, isRetry, NonInteractive, CanShowDialog | None (args only) | registry, scope, package, version, operation, command |
-| **Operations** | — | — | — | read, publish, yank, unyank, owners | — | — | read, publish, stage, stage-read, stage-reject, deprecate, dist-tag, unpublish, owner, access, account |
+| **Operations** | — | — | — | read, publish, yank, unyank, owners | — | — | read, publish, stage, stage-read, stage-reject, deprecate, dist-tag, unpublish, owner, access, trust, account |
 | **Versioning** | None | None | None | Hello `{"v":[1]}` | Handshake negotiates a protocol version (2.0.0 for authentication) | None | Hello `{"v":[1]}` + `v` in every message |
 | **Auth type** | Implicit | Implicit | Raw token or header value | Raw token | Username/password with a list of auth types | Implicit | Explicit `bearer`/`basic` |
 
@@ -786,7 +791,7 @@ No phase changes behavior for anyone who has not configured a helper or provider
 
 | Phase | Release | Ships | Done when |
 |---|---|---|---|
-| 1: `tokenHelper` | next minor | `//<registry>/:tokenHelper` where [Trust](#trust) allows it, its output mapped to a header as pnpm does; a warning for it anywhere else and for pnpm's unscoped and per-scope forms; `publish` and `whoami` counting a helper as a login, `logout` explaining it, `login` and `profile enable-2fa` refusing, OIDC winning over it | One helper serves npm and pnpm from the same `~/.npmrc` |
+| 1: `tokenHelper` | next minor | `//<registry>/:tokenHelper` where [Trust](#trust) allows it, its output mapped to a header as pnpm does; a warning for it anywhere else and for pnpm's unscoped and per-scope forms; `publish`, `whoami` and `access list packages` counting a helper as a login, `logout` explaining it, `login` and `profile enable-2fa` refusing, OIDC winning over it | One helper serves npm and pnpm from the same `~/.npmrc` |
 | 2: `credentialProvider` | a later minor | The protocol (`get`, `erase`, `login`, `logout`, cache control, chaining, one retry after a rejection), `npm login` and `npm logout` delegated along the chain, OIDC trusted publishing taking precedence over it, the schema and conformance vectors published | A provider written against the vectors alone works with npm |
 | 3: Ecosystem | separate changes | Vendor providers, with their `login` wrappers no longer writing tokens into `.npmrc`; an evaluation of a built-in web-login source ([Future possibilities](#future-possibilities)) | — |
 
@@ -794,7 +799,6 @@ No phase changes behavior for anyone who has not configured a helper or provider
 
 | Question | Decide before |
 |---|---|
-| Which operation do the read-only `access`, `team` and `org` subcommands (`access list`, `access get`, `team ls`, `org ls`) send? On npmjs.com their endpoints are documented for session tokens only, while `trust list`'s takes granular tokens only ([API](https://api-docs.npmjs.com/)), so neither `read` nor `access` fits all of them | Phase 2 |
 | Which npmjs.com token tiers do `GET /-/stage` and `GET /-/stage/<id>` accept? If only write-capable ones, `stage list`, `view`, `download` and the lookup before `approve` and `reject` need user presence under a provider on npmjs.com. npm registry staff, or a live test with each tier, can answer | Phase 2 |
 
 ## Future possibilities

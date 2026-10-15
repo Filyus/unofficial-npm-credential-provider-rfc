@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tests.protocol_model import CredentialClientModel, ProtocolViolation, RequestContext, validate_request
+from tests.generated_policy import SUPPORTED_OPERATIONS
 
 
 BASE_GET = {
@@ -95,10 +96,14 @@ class RequestValidationTests(unittest.TestCase):
             with self.assertRaises(ProtocolViolation):
                 validate_request({**BASE_GET, "granularity": granularity})
 
-    def test_every_npm_write_action_is_an_operation(self) -> None:
-        for operation in ("deprecate", "dist-tag", "unpublish", "owner", "access"):
+    def test_every_npm_action_is_a_known_operation(self) -> None:
+        # unknown operations are well-formed too, so this pins the list itself:
+        # the actions that cover reads (access, trust, account, stage-read)
+        # must be known values, not left to forward compatibility
+        for operation in ("deprecate", "dist-tag", "unpublish", "owner", "access", "trust", "account", "stage-read", "stage-reject"):
             with self.subTest(operation=operation):
-                validate_request({**BASE_GET, "operation": operation})
+                self.assertIn(operation, SUPPORTED_OPERATIONS)
+                validate_request({**BASE_GET, "operation": operation, "version": "1.0.0"})
 
     def test_unknown_operation_is_well_formed_and_left_to_the_provider(self) -> None:
         for operation in ("write", "admin", "yank"):

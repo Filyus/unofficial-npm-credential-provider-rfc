@@ -63,10 +63,10 @@
           "minLength": 1
         },
         "operation": {
-          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, stage-read, deprecate, dist-tag, unpublish, owner, access, stage-reject, account.",
+          "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, stage-read, deprecate, dist-tag, unpublish, owner, access, trust, stage-reject, account.",
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "examples": ["read", "publish", "stage", "stage-read", "deprecate", "dist-tag", "unpublish", "owner", "access", "stage-reject", "account"]
+          "examples": ["read", "publish", "stage", "stage-read", "deprecate", "dist-tag", "unpublish", "owner", "access", "trust", "stage-reject", "account"]
         },
         "granularity": {
           "description": "erase only: the granularity of the Ok response that carried the rejected credential, so the provider can tell which of its credentials was rejected.",

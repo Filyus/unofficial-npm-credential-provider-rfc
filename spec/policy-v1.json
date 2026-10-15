@@ -18,6 +18,7 @@
       "unpublish",
       "owner",
       "access",
+      "trust",
       "stage-reject",
       "account"
     ],
