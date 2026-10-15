@@ -27,6 +27,11 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | pnpm 11.4 pins an unscoped `tokenHelper` to the registry declared in the same file | [pnpm 11.4](https://pnpm.io/blog/releases/11.4) | read |
 | Cargo: hello `{"v":[1]}`, `--cargo-plugin`, cache `never`/`session`/`expires`, `operation_independent`, errors incl. `url-not-supported` | [Cargo credential provider protocol](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html) | read |
 | Cargo operations: read, publish, yank, unyank, owners | `credential/cargo-credential/src/lib.rs` `enum Operation` in [rust-lang/cargo](https://github.com/rust-lang/cargo) | read the source |
+| Cargo's chain: `UrlNotSupported` and `NotFound` move on, any other error stops; exhausted, it fails; the stored token is the `cargo:token` entry, and a token the chain does not use is ignored with a warning | `src/util/auth/mod.rs` (`credential_action`, `credential_provider`) in [rust-lang/cargo](https://github.com/rust-lang/cargo) | read the source |
+| Cargo asks for a read credential only for a registry whose `config.json` says `auth-required`, or after a 401 | `src/sources/registry/http_remote.rs` (`auth_required`) | read the source |
+| Git asks its helpers after a 401, or up front when the URL names a user or `http.proactiveAuth` is set | `http.c` in [git/git](https://github.com/git/git) | read the source |
+| NuGet sends `nuget.config` credentials first and asks plugins only after a 401 or 403, passing over a plugin that is not applicable | `HttpSourceAuthenticationHandler.cs`, `CredentialService.cs` in [NuGet/NuGet.Client](https://github.com/NuGet/NuGet.Client) | read the source |
+| npm's message for a 404 says the package "could not be found or you do not have permission to access it" | npm/cli `lib/utils/error-message.js` | read the source |
 | Cargo starts a provider per request and closes stdin after one response | `src/util/credential/process.rs` (`perform`, `run`) | read the source |
 | NuGet: plugins since 4.8; protocol 2.0.0 with a handshake; 5 s handshake and request timeouts, extended by progress; idle shutdown after 1 minute; `Uri`, `isRetry`, `NonInteractive`, `CanShowDialog`; discovery in `~/.nuget/plugins`, `NUGET_PLUGIN_PATHS`, `nuget-plugin-*` on PATH since 6.13 | [cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins), [authentication plugin](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin) | read |
 | RFC #850 caches the token in memory for the life of the process | [npm/rfcs PR 850](https://github.com/npm/rfcs/pull/850), step 5 | read |
@@ -100,11 +105,13 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | Unknown kinds and operations answered with `operation-not-supported` | `spec: unknownRequestKind`, `py: test_forward_compat_and_timeouts` |
 | Timeouts: get 30 s, interactive get 5 min, erase 10 s, login 5 min, logout 30 s, hello 10 s | `spec: getInteractive`, `py: test_forward_compat_and_timeouts` |
 | A rejected credential is evicted at every granularity before the retry | `py: test_cache_policy`, `py: test_handshake_and_transcripts` |
+| Chain: `not-found` moves on; a global chain that declines falls back to the stored credential with a warning, a per-registry list fails; the opt-in covers `not-found` and a version mismatch only; `npm:token`; `url-not-supported` remembered per provider and registry | `spec: globalChainAllUrlNotSupported`, `spec: storedCredentialEntry`, `py: test_chain_policy` |
 | Messages agree with the JSON schema | `py: test_model_schema_agreement`, `py: test_json_schema` |
 | Session reuse: 118 µs per lookup against 10.3 ms per fresh process (instant mock) | [`poc/rust/crates/mock-client/examples/round_trip.rs`](poc/rust/crates/mock-client/examples/round_trip.rs), measured once |
 
 ## Not verified
 
 - make-fetch-happen as shipped in npm 12 recording a header named in `Vary` in the cache index: seen in a historical version's source and in an audit probe, not re-read in the current source.
+- registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401: npm's own 404 message allows for it and it is commonly reported, but no request was made for this document.
 - Which registries send `Vary: Authorization`: none of the mainstream ones were found to, but no header survey was made.
 - Windows filesystems without inode numbers (FAT, some network shares): the fallback to spellings is tested with a simulated zero inode, not on such a filesystem.

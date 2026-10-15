@@ -8,8 +8,6 @@ from tests import protocol_model
 from tests.protocol_model import (
     CacheKey,
     CredentialClientModel,
-    ProviderConfig,
-    ProviderFailure,
     ProviderLocation,
     ResolutionFailure,
     resolve_provider,
@@ -160,15 +158,11 @@ class SpecConsistencyTests(unittest.TestCase):
             self.policy["errors"]["url-not-supported"]["default"],
         )
 
-        with self.assertRaises(ProviderFailure):
-            client.handle_response(request, {"Err": {"kind": "not-found"}})
-
-        fallback_client = CredentialClientModel(ProviderConfig(legacy_fallback=True))
-        fallback_client.receive_hello({"v": [1]})
         self.assertEqual(
-            fallback_client.handle_response(request, {"Err": {"kind": "not-found"}}),
-            self.policy["errors"]["not-found"]["legacyFallbackEnabled"],
+            client.handle_response(request, {"Err": {"kind": "not-found"}}),
+            self.policy["errors"]["not-found"]["default"],
         )
+        self.assertEqual(self.policy["chain"]["notFound"], "try-next-provider")
 
     def test_cache_defaults_match_python_model(self) -> None:
         client = CredentialClientModel()

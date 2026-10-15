@@ -7,7 +7,6 @@ from tests.protocol_model import (
     ClientState,
     CredentialClientModel,
     ProviderConfig,
-    ProviderFailure,
     ProtocolViolation,
     validate_transcript,
 )
@@ -102,9 +101,10 @@ class TranscriptTests(unittest.TestCase):
             self.assertEqual(entry.auth["token"], "registry-token-2")
         self.assertEqual(client.lookup(registry, "@scope").auth["token"], "registry-token-2")
 
-    def test_not_found_fails_without_explicit_legacy_fallback(self) -> None:
-        with self.assertRaises(ProviderFailure):
-            validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))
+    def test_not_found_leaves_the_session_usable_for_the_chain(self) -> None:
+        client = validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))
+
+        self.assertEqual(client.state.value, "ready")
 
     def test_not_found_can_use_explicit_legacy_fallback(self) -> None:
         client = validate_transcript(

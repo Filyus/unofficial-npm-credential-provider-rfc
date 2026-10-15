@@ -46,9 +46,7 @@ Source: `spec/policy-v1.json`.
 | Error kind | Context | Outcome |
 | --- | --- | --- |
 | `url-not-supported` | `default` | `try-next-provider` |
-| `not-found` | `configuredProvider` | `fail` |
-| `not-found` | `providerNotConfigured` | `legacy-auth` |
-| `not-found` | `legacyFallbackEnabled` | `legacy-auth` |
+| `not-found` | `default` | `try-next-provider-not-found` |
 | `operation-not-supported` | `default` | `fail` |
 | `other` | `default` | `fail` |
 
@@ -56,11 +54,25 @@ Source: `spec/policy-v1.json`.
 
 | Context | Outcome |
 | --- | --- |
-| `noProviderConfigured` | `legacy-auth` |
-| `providerConfiguredFailure` | `fail` |
-| `globalChainAllUrlNotSupported` | `legacy-auth` |
+| `noProviderConfigured` | `stored-credential-or-anonymous` |
+| `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous-with-warning` |
 | `registryChainAllUrlNotSupported` | `fail` |
-| `providerConfiguredFailureWithExplicitLegacyFallback` | `legacy-auth` |
+| `registryChainIgnoresStoredCredential` | `warn` |
+| `notFoundAtEnd` | `fail` |
+| `notFoundAtEndWithLegacyFallback` | `stored-credential-or-anonymous` |
+| `noCommonVersion` | `fail` |
+| `noCommonVersionWithLegacyFallback` | `as-not-found` |
+| `otherFailure` | `fail` |
+| `otherFailureWithLegacyFallback` | `fail` |
+
+## Provider Chain
+
+| Setting | Value |
+| --- | --- |
+| `notFound` | `try-next-provider` |
+| `urlNotSupportedRemembered` | `per-provider-and-registry-for-the-command` |
+| `storedCredentialEntry` | `npm:token` |
+| `implicitStoredCredentialEntry` | `end-of-global-chain-unless-a-provider-answered-not-found` |
 
 ## Non-Interactive Behavior
 

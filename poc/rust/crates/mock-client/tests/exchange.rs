@@ -1,5 +1,5 @@
 use credential_provider_protocol::{Auth, ErrorKind, ProviderResponse, Request, RequestKind};
-use mock_client::{ClientScenario, ProviderSession, run_exchange, run_provider_chain};
+use mock_client::{ChainKind, ClientScenario, ProviderSession, run_exchange, run_provider_chain};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -143,6 +143,7 @@ fn provider_chain_uses_second_provider_after_url_not_supported() {
             provider_command("get-success"),
         ],
         ClientScenario::InstallGet,
+        ChainKind::Global,
     )
     .expect("second provider should satisfy request");
 
@@ -151,43 +152,74 @@ fn provider_chain_uses_second_provider_after_url_not_supported() {
 }
 
 #[test]
-fn provider_chain_does_not_skip_not_found() {
-    let error = run_provider_chain(
+fn provider_chain_moves_on_after_not_found() {
+    let summary = run_provider_chain(
         vec![
             provider_command("not-found"),
             provider_command("get-success"),
         ],
         ClientScenario::InstallGet,
+        ChainKind::PerRegistry,
     )
-    .expect_err("not-found should stop the provider chain");
+    .expect("not-found passes the request on, as in Cargo");
 
-    assert!(error.to_string().contains("not-found fails closed"));
+    assert_eq!(summary.provider_index, 1);
+    assert_eq!(summary.outcome, "ok");
 }
 
 #[test]
-fn provider_chain_fails_when_all_providers_reject_url() {
+fn provider_chain_fails_when_nobody_has_a_credential() {
+    for kind in [ChainKind::Global, ChainKind::PerRegistry] {
+        let error = run_provider_chain(
+            vec![
+                provider_command("url-not-supported"),
+                provider_command("not-found"),
+            ],
+            ClientScenario::InstallGet,
+            kind,
+        )
+        .expect_err("a not-found at the end fails without the legacy opt-in");
+
+        assert!(error.to_string().contains("no provider had a credential"));
+    }
+}
+
+#[test]
+fn global_chain_that_declines_the_registry_leaves_it_without_a_provider() {
+    let summary = run_provider_chain(
+        vec![
+            provider_command("url-not-supported"),
+            provider_command("url-not-supported"),
+        ],
+        ClientScenario::InstallGet,
+        ChainKind::Global,
+    )
+    .expect("an anonymous registry stays reachable with a global chain");
+
+    assert_eq!(summary.outcome, "as-no-provider");
+}
+
+#[test]
+fn per_registry_list_that_declines_the_registry_fails() {
     let error = run_provider_chain(
         vec![
             provider_command("url-not-supported"),
             provider_command("url-not-supported"),
         ],
         ClientScenario::InstallGet,
+        ChainKind::PerRegistry,
     )
-    .expect_err("all providers rejected the url");
+    .expect_err("the user tied this registry to a provider");
 
-    assert!(
-        error
-            .to_string()
-            .contains("all providers returned url-not-supported")
-    );
+    assert!(error.to_string().contains("per-registry list"));
 }
 
 #[test]
-fn client_fails_closed_on_not_found() {
-    let error = run_exchange(provider_command("not-found"), ClientScenario::InstallGet)
-        .expect_err("not-found should fail closed");
+fn client_reports_not_found_as_a_chain_signal() {
+    let summary = run_exchange(provider_command("not-found"), ClientScenario::InstallGet)
+        .expect("not-found is decided at the end of the chain");
 
-    assert!(error.to_string().contains("not-found fails closed"));
+    assert_eq!(summary.outcome, "try-next-provider-not-found");
 }
 
 #[test]

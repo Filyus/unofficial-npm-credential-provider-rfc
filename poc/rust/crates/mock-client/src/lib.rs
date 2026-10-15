@@ -167,22 +167,58 @@ pub fn run_exchange(
     })
 }
 
+/// Which list the providers came from: the unscoped global chain, or a
+/// per-registry list, which the user tied to this registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainKind {
+    Global,
+    PerRegistry,
+}
+
+/// Tries providers in order, as Cargo does: `url-not-supported` and
+/// `not-found` move on, anything else stops. A global chain that every
+/// provider declined leaves the registry without a provider (outcome
+/// `as-no-provider`: npm's behaviour today); a per-registry list that does the
+/// same fails, and so does a chain in which someone answered `not-found`
+/// (the legacy opt-in is the model's business, not this mock's).
 pub fn run_provider_chain(
     provider_commands: Vec<Command>,
     scenario: ClientScenario,
+    kind: ChainKind,
 ) -> Result<ExchangeSummary, ExchangeError> {
+    let mut not_found = false;
+    let mut selected_version = 0;
     for (provider_index, provider_command) in provider_commands.into_iter().enumerate() {
         let mut summary = run_exchange(provider_command, scenario)?;
-        if summary.outcome == "try-next-provider" {
-            continue;
+        selected_version = summary.selected_version;
+        match summary.outcome.as_str() {
+            "try-next-provider" => continue,
+            "try-next-provider-not-found" => {
+                not_found = true;
+                continue;
+            }
+            _ => {}
         }
         summary.provider_index = provider_index;
         return Ok(summary);
     }
 
-    Err(ExchangeError::Provider(
-        "all providers returned url-not-supported".into(),
-    ))
+    if not_found {
+        return Err(ExchangeError::Provider(
+            "not-found: no provider had a credential, and there is no explicit legacy fallback"
+                .into(),
+        ));
+    }
+    match kind {
+        ChainKind::Global => Ok(ExchangeSummary {
+            selected_version,
+            outcome: "as-no-provider".into(),
+            provider_index: 0,
+        }),
+        ChainKind::PerRegistry => Err(ExchangeError::Provider(
+            "no credential provider in the per-registry list could handle the registry".into(),
+        )),
+    }
 }
 
 fn request_for(scenario: ClientScenario) -> Request {
@@ -218,9 +254,7 @@ fn summarize(response: &ProviderResponse) -> Result<String, ExchangeError> {
         }
         ProviderResponse::Err(err) => match err.kind {
             ErrorKind::UrlNotSupported => Ok("try-next-provider".into()),
-            ErrorKind::NotFound => Err(ExchangeError::Provider(
-                "not-found fails closed without explicit legacy fallback".into(),
-            )),
+            ErrorKind::NotFound => Ok("try-next-provider-not-found".into()),
             ErrorKind::OperationNotSupported => {
                 Err(ExchangeError::Provider("operation-not-supported".into()))
             }

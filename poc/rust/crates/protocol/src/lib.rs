@@ -558,7 +558,7 @@ mod tests {
             generated::GET_INTERACTIVE_TIMEOUT_SECONDS,
             generated::LOGIN_TIMEOUT_SECONDS
         );
-        assert!(generated::GET_INTERACTIVE_TIMEOUT_SECONDS > generated::GET_TIMEOUT_SECONDS);
+        const { assert!(generated::GET_INTERACTIVE_TIMEOUT_SECONDS > generated::GET_TIMEOUT_SECONDS) };
     }
 
     #[test]

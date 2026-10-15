@@ -76,6 +76,7 @@ def render_python(policy: dict) -> str:
             f"TOKEN_HELPER_TIMEOUT_SECONDS = {policy['tokenHelper']['timeoutSeconds']!r}",
             f"IDENTIFIER_PATTERN = {policy['forwardCompatibility']['identifierPattern']!r}",
             f"TIMEOUT_SECONDS = {policy['credentialProvider']['timeoutSeconds']!r}",
+            f"STORED_CREDENTIAL_ENTRY = {policy['chain']['storedCredentialEntry']!r}",
             "",
         ]
     )
@@ -200,6 +201,10 @@ def render_policy_summary(policy: dict) -> str:
     )
     for context, outcome in fallback.items():
         lines.append(f"| `{context}` | `{outcome}` |")
+
+    lines.extend(["", "## Provider Chain", "", "| Setting | Value |", "| --- | --- |"])
+    for setting, value in policy["chain"].items():
+        lines.append(f"| `{setting}` | `{value}` |")
 
     lines.extend(
         [

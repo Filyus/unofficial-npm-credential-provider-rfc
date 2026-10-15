@@ -21,6 +21,7 @@ from tests.generated_policy import (
     SUPPORTED_CAPABILITIES,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
+    STORED_CREDENTIAL_ENTRY,
     SUPPORTED_REQUEST_KINDS,
     TIMEOUT_SECONDS,
     TOKEN_HELPER_CONFIG_SOURCES,
@@ -263,8 +264,9 @@ class CredentialClientModel:
             raise ProtocolViolation("Err.causedBy must be string[]")
         if kind == "url-not-supported":
             return "try-next-provider"
-        if kind == "not-found" and (not self.config.configured or self.config.legacy_fallback):
-            return "legacy-auth"
+        if kind == "not-found":
+            # as in Cargo, the chain goes on; `resolve_chain` decides at its end
+            return "try-next-provider-not-found"
         raise ProviderFailure(kind)
 
     def _store_token(
@@ -483,6 +485,85 @@ def load_transcript(path: str) -> list[dict[str, Any]]:
                 raise ProtocolViolation(f"{path}:{line_number}: invalid JSON") from exc
             events.append(event)
     return events
+
+
+class ChainOutcome(NamedTuple):
+    """What a chain decided for one registry: `ok` (entry `entry` answered),
+    `stored-credential` (the credential in `.npmrc`), `anonymous`, or `fail`."""
+
+    result: str
+    entry: int | None = None
+    warnings: tuple[str, ...] = ()
+
+
+def resolve_chain(
+    answers: list[str],
+    *,
+    per_registry: bool,
+    stored_credential: bool,
+    legacy_fallback: bool = False,
+) -> ChainOutcome:
+    """The end of a provider chain. `answers` holds, in chain order, either
+    `STORED_CREDENTIAL_ENTRY` (`npm:token`) or one provider's outcome: `ok`,
+    `try-next-provider` (url-not-supported), `try-next-provider-not-found`,
+    `no-common-version`, or `fail` (any other error, a spawn failure, an
+    oversized line, a timeout).
+
+    A global chain that does not list `npm:token` ends with it implicitly, but
+    only while every provider before it declined the registry: after a
+    `not-found` the stored credential needs the legacy opt-in, as it does
+    after a version mismatch. A per-registry list never consults a stored
+    credential it does not list, and says so."""
+    entries = list(answers)
+    listed = STORED_CREDENTIAL_ENTRY in entries
+
+    def done(result: str, entry: int | None = None, *warnings: str) -> ChainOutcome:
+        if per_registry and stored_credential and not listed and result != "stored-credential":
+            warnings = ("stored credential ignored: the per-registry list does not include npm:token", *warnings)
+        return ChainOutcome(result, entry, tuple(warnings))
+
+    if not entries:
+        # no provider configured for the registry: what npm does today
+        return done("stored-credential" if stored_credential else "anonymous")
+    not_found = False
+    for index, answer in enumerate(entries):
+        if answer == STORED_CREDENTIAL_ENTRY:
+            if stored_credential:
+                return done("stored-credential", index)
+            continue
+        if answer == "ok":
+            return done("ok", index)
+        if answer == "try-next-provider":
+            continue
+        if answer == "try-next-provider-not-found" or (answer == "no-common-version" and legacy_fallback):
+            not_found = True
+            continue
+        return done("fail", index)
+    if not_found:
+        if legacy_fallback:
+            return done("stored-credential" if stored_credential else "anonymous")
+        return done("fail")
+    if per_registry:
+        return done("fail")
+    if stored_credential and not listed:
+        return done("stored-credential", None, "stored credential used after every global provider declined the registry")
+    return done("anonymous")
+
+
+@dataclass
+class DeclinedRegistries:
+    """`url-not-supported` depends on `registry` alone, so the client remembers
+    it per provider and registry for the rest of the command, and a provider
+    that does not serve a registry is asked about it once."""
+
+    declined: set[tuple[str, str]] = field(default_factory=set)
+
+    def should_ask(self, provider: str, registry: str) -> bool:
+        return (provider, registry) not in self.declined
+
+    def record(self, provider: str, registry: str, outcome: str) -> None:
+        if outcome == "try-next-provider":
+            self.declined.add((provider, registry))
 
 
 def validate_transcript(path: str, config: ProviderConfig | None = None) -> CredentialClientModel:

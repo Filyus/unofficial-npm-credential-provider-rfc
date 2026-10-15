@@ -21,3 +21,4 @@ TOKEN_HELPER_CONFIG_SOURCES = frozenset(['user', 'global'])
 TOKEN_HELPER_TIMEOUT_SECONDS = 60
 IDENTIFIER_PATTERN = '^[a-z][a-z0-9-]*$'
 TIMEOUT_SECONDS = {'hello': 10, 'get': 30, 'getInteractive': 300, 'erase': 10, 'login': 300, 'logout': 30}
+STORED_CREDENTIAL_ENTRY = 'npm:token'

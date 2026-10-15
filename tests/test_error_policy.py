@@ -26,19 +26,14 @@ class ErrorPolicyTests(unittest.TestCase):
 
         self.assertEqual(outcome, "try-next-provider")
 
-    def test_not_found_fails_closed_by_default(self) -> None:
-        with self.assertRaises(ProviderFailure):
-            self.client().handle_response(REQUEST, {"Err": {"kind": "not-found"}})
-
-    def test_not_found_uses_legacy_when_provider_not_configured(self) -> None:
-        outcome = self.client(configured=False).handle_response(REQUEST, {"Err": {"kind": "not-found"}})
-
-        self.assertEqual(outcome, "legacy-auth")
-
-    def test_not_found_uses_legacy_when_explicitly_enabled(self) -> None:
-        outcome = self.client(legacy_fallback=True).handle_response(REQUEST, {"Err": {"kind": "not-found"}})
-
-        self.assertEqual(outcome, "legacy-auth")
+    def test_not_found_moves_on_to_the_next_provider_whatever_the_config(self) -> None:
+        # what happens when nobody answers Ok is the chain's decision (test_chain_policy)
+        for configured, legacy_fallback in ((True, False), (False, False), (True, True)):
+            with self.subTest(configured=configured, legacy_fallback=legacy_fallback):
+                outcome = self.client(configured=configured, legacy_fallback=legacy_fallback).handle_response(
+                    REQUEST, {"Err": {"kind": "not-found"}}
+                )
+                self.assertEqual(outcome, "try-next-provider-not-found")
 
     def test_operation_not_supported_fails_for_every_kind(self) -> None:
         for request in (

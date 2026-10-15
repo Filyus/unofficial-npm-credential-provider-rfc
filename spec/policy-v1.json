@@ -2,15 +2,60 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "protocolVersion": 1,
   "wire": {
-    "requestKinds": ["login", "logout", "get", "erase"],
-    "operations": ["read", "publish", "stage", "deprecate", "dist-tag", "unpublish", "owner", "access"],
-    "operationsRequiringVersion": ["publish", "stage"],
-    "knownCommands": ["install", "ci", "publish", "search", "view"],
-    "capabilities": ["login", "logout", "erase", "auth-challenges", "retry-context"],
-    "authTypes": ["bearer", "basic"],
-    "cachePolicies": ["never", "session", "expires"],
-    "granularities": ["registry", "scope", "package"],
-    "errorKinds": ["url-not-supported", "not-found", "operation-not-supported", "other"]
+    "requestKinds": [
+      "login",
+      "logout",
+      "get",
+      "erase"
+    ],
+    "operations": [
+      "read",
+      "publish",
+      "stage",
+      "deprecate",
+      "dist-tag",
+      "unpublish",
+      "owner",
+      "access"
+    ],
+    "operationsRequiringVersion": [
+      "publish",
+      "stage"
+    ],
+    "knownCommands": [
+      "install",
+      "ci",
+      "publish",
+      "search",
+      "view"
+    ],
+    "capabilities": [
+      "login",
+      "logout",
+      "erase",
+      "auth-challenges",
+      "retry-context"
+    ],
+    "authTypes": [
+      "bearer",
+      "basic"
+    ],
+    "cachePolicies": [
+      "never",
+      "session",
+      "expires"
+    ],
+    "granularities": [
+      "registry",
+      "scope",
+      "package"
+    ],
+    "errorKinds": [
+      "url-not-supported",
+      "not-found",
+      "operation-not-supported",
+      "other"
+    ]
   },
   "forwardCompatibility": {
     "identifierPattern": "^[a-z][a-z0-9-]*$",
@@ -24,9 +69,7 @@
       "default": "try-next-provider"
     },
     "not-found": {
-      "configuredProvider": "fail",
-      "providerNotConfigured": "legacy-auth",
-      "legacyFallbackEnabled": "legacy-auth"
+      "default": "try-next-provider-not-found"
     },
     "operation-not-supported": {
       "default": "fail"
@@ -36,21 +79,47 @@
     }
   },
   "fallback": {
-    "noProviderConfigured": "legacy-auth",
-    "providerConfiguredFailure": "fail",
-    "globalChainAllUrlNotSupported": "legacy-auth",
+    "noProviderConfigured": "stored-credential-or-anonymous",
+    "globalChainAllUrlNotSupported": "stored-credential-or-anonymous-with-warning",
     "registryChainAllUrlNotSupported": "fail",
-    "providerConfiguredFailureWithExplicitLegacyFallback": "legacy-auth"
+    "registryChainIgnoresStoredCredential": "warn",
+    "notFoundAtEnd": "fail",
+    "notFoundAtEndWithLegacyFallback": "stored-credential-or-anonymous",
+    "noCommonVersion": "fail",
+    "noCommonVersionWithLegacyFallback": "as-not-found",
+    "otherFailure": "fail",
+    "otherFailureWithLegacyFallback": "fail"
+  },
+  "chain": {
+    "notFound": "try-next-provider",
+    "urlNotSupportedRemembered": "per-provider-and-registry-for-the-command",
+    "storedCredentialEntry": "npm:token",
+    "implicitStoredCredentialEntry": "end-of-global-chain-unless-a-provider-answered-not-found"
   },
   "resolution": {
-    "allowedConfigSources": ["user", "global"],
-    "trustedLocationKinds": ["builtin", "absolute", "global-bin", "enterprise"],
-    "untrustedLocationKinds": ["project-node_modules", "cwd", "path"],
+    "allowedConfigSources": [
+      "user",
+      "global"
+    ],
+    "trustedLocationKinds": [
+      "builtin",
+      "absolute",
+      "global-bin",
+      "enterprise"
+    ],
+    "untrustedLocationKinds": [
+      "project-node_modules",
+      "cwd",
+      "path"
+    ],
     "ambiguousTrustedProvider": "fail",
     "missingProvider": "fail"
   },
   "tokenHelper": {
-    "allowedConfigSources": ["user", "global"],
+    "allowedConfigSources": [
+      "user",
+      "global"
+    ],
     "absolutePathOnly": true,
     "arguments": false,
     "timeoutSeconds": 60,
@@ -71,11 +140,18 @@
   "cache": {
     "defaultPolicy": "session",
     "defaultGranularity": "registry",
-    "expiresRequires": ["expiresAt"],
+    "expiresRequires": [
+      "expiresAt"
+    ],
     "expiryMarginSeconds": 60,
     "operationIndependentDefault": true,
-    "storePolicies": ["session", "expires"],
-    "doNotStorePolicies": ["never"]
+    "storePolicies": [
+      "session",
+      "expires"
+    ],
+    "doNotStorePolicies": [
+      "never"
+    ]
   },
   "nonInteractive": {
     "interactiveFalseAllowsPrompts": false,

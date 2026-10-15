@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 
-from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation, ProviderFailure, RequestContext
+from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation, RequestContext
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -43,11 +43,10 @@ class MockProviderSubprocessTests(unittest.TestCase):
                 )
                 self.assertEqual(client.handle_response(request, response), kind)
 
-    def test_mock_provider_not_found_fails_closed(self) -> None:
+    def test_mock_provider_not_found_moves_on_to_the_next_provider(self) -> None:
         client, request, response = self.exchange("not-found")
 
-        with self.assertRaises(ProviderFailure):
-            client.handle_response(request, response)
+        self.assertEqual(client.handle_response(request, response), "try-next-provider-not-found")
 
     def test_mock_provider_version_mismatch_fails_closed(self) -> None:
         proc = self.start_provider("version-mismatch")
