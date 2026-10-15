@@ -42,10 +42,10 @@ jobs:
       - run: |
           git config --global core.autocrlf false
           git config --global core.longpaths true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: rfc
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           check-latest: ${{ endsWith(matrix.node, '.x') }}
@@ -118,20 +118,21 @@ jobs:
       - run: |
           git config --global core.autocrlf false
           git config --global core.longpaths true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: rfc
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.x
       - name: Prepare the base and the patched trees
         run: |
-          for tree in base patched; do
+          # names of the same length: Windows path limits apply to both alike
+          for tree in base next; do
             git init -q $tree
             (cd $tree &&
               git fetch -q --depth 1 https://github.com/npm/cli.git "$NPM_CLI_BASE" &&
               git checkout -q FETCH_HEAD &&
-              if [ $tree = patched ]; then git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch; fi &&
+              if [ $tree = next ]; then git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch; fi &&
               node scripts/resetdeps.js)
           done
           # npm itself then runs on the prototype's npm-registry-fetch too
@@ -140,6 +141,6 @@ jobs:
             git fetch -q --depth 1 https://github.com/npm/npm-registry-fetch.git "$NPM_REGISTRY_FETCH_BASE" &&
             git checkout -q FETCH_HEAD &&
             git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-registry-fetch.patch)
-          cp npm-registry-fetch/lib/auth.js npm-registry-fetch/lib/index.js npm-registry-fetch/lib/token-helper.js patched/node_modules/npm-registry-fetch/lib/
+          cp npm-registry-fetch/lib/auth.js npm-registry-fetch/lib/index.js npm-registry-fetch/lib/token-helper.js next/node_modules/npm-registry-fetch/lib/
       - name: Every suite, base against prototype
-        run: node rfc/poc/full-suites/compare.js base patched
+        run: node rfc/poc/full-suites/compare.js base next
