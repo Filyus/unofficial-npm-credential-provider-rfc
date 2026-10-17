@@ -18,7 +18,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | Bypass-2FA tokens lost account actions on 2026-07-31; their direct publish is due to go in January 2027 | [GitHub Changelog 2026-07-31](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/) | read |
 | npm 9 stopped accepting auth settings not scoped to a registry | [npm v9.0.0 release](https://github.com/npm/cli/releases/tag/v9.0.0) | read: "auth related settings that are not scoped to a specific registry … no longer supported" |
 | npm 12 warns about an unknown `.npmrc` key ("This will stop working in the next major version of npm") and errors under `strict-npmrc` | npm/cli `lib/base-cmd.js` at 83ea1a1; [PR 9729](https://github.com/npm/cli/pull/9729) | read the source |
-| npm/cli issue 8141: 41 👍, no comments, `Priority 1` added by nkolev92 on 2026-10-01 | [issue](https://github.com/npm/cli/issues/8141) | GitHub API, issue and timeline |
+| npm/cli issue 8141: 42 👍 (2026-10-17), no comments, `Priority 1` added by nkolev92 on 2026-10-01 | [issue](https://github.com/npm/cli/issues/8141) | GitHub API, issue and timeline |
 | pnpm runs `tokenHelper` in its TypeScript CLI and its Rust rewrite | `pnpm11/network/auth-header/src/getAuthHeadersFromConfig.ts`, `pnpm/crates/network/src/token_helper.rs` in [pnpm/pnpm](https://github.com/pnpm/pnpm) | read the source |
 | pnpm maps output with `/^[A-Z]+ /i` to a header as is, else `Bearer`, after `trimEnd()` | `getAuthHeadersFromConfig.ts` (2026-09-30) | read the source |
 | pnpm's parser splits the value on whitespace into a command and arguments | `pnpm11/config/reader/src/parseCreds.ts` | read the source |
