@@ -173,6 +173,8 @@ Vendor CLIs already print what a helper needs; since a helper takes no arguments
 | JFrog Artifactory | `jf atc --expiry=3600 \| jq -r .access_token` | as requested, within the platform limit | Bearer |
 | Azure Artifacts | a script printing `Basic <base64(user:PAT)>` | PAT lifetime | Basic: the documented npm scheme for Azure feeds is username + PAT ([docs](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops)), which the scheme pass-through above covers |
 
+Not every row narrows to reading. `gh auth token` prints a token that always carries `repo`, `read:org` and `gist` besides the package scope ([gh auth login](https://cli.github.com/manual/gh_auth_login)), and GitHub documents classic tokens for Packages ([npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)); `jf atc` prints a token with the rights of the user it is minted for.
+
 For npmjs.com itself a helper helps less: the two-hour session token comes from an interactive browser login with 2FA, so a helper can keep it in the OS keychain instead of `~/.npmrc` but cannot renew it silently.
 
 Phase 1 has no context, no cache control and no way to learn that a token was rejected; those are what Phase 2 adds.

@@ -52,10 +52,17 @@ impl Hello {
         let Some(registries) = &self.registries else {
             return true;
         };
-        registries.iter().any(|served| {
-            let served = served.strip_suffix('/').unwrap_or(served);
-            registry == served || registry.starts_with(&format!("{served}/"))
-        })
+        let with_slash = |url: &str| {
+            if url.ends_with('/') {
+                url.to_string()
+            } else {
+                format!("{url}/")
+            }
+        };
+        let registry = with_slash(registry);
+        registries
+            .iter()
+            .any(|served| registry.starts_with(&with_slash(served)))
     }
 
     pub fn v1() -> Self {
@@ -801,6 +808,15 @@ mod tests {
         assert!(!hello.serves("http://gitlab.example.com/api/v4/"));
         assert!(!hello.serves("https://registry.npmjs.org/"));
         assert!(Hello::v1().serves("https://registry.npmjs.org/"));
+
+        // an empty path segment is part of the path, as in a stored-token key
+        let doubled = Hello {
+            registries: Some(vec!["https://gitlab.example.com//".into()]),
+            ..hello
+        };
+        assert!(!doubled.serves("https://gitlab.example.com/"));
+        assert!(!doubled.serves("https://gitlab.example.com/api/"));
+        assert!(doubled.serves("https://gitlab.example.com//api/"));
     }
 
     #[test]

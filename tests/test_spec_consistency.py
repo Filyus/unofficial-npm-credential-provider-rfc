@@ -90,7 +90,23 @@ class SpecConsistencyTests(unittest.TestCase):
         )
 
     def test_operation_not_supported_has_no_fallback_left(self) -> None:
-        self.assertEqual(self.policy["errors"]["operation-not-supported"], {"default": "fail"})
+        self.assertEqual(
+            self.policy["errors"]["operation-not-supported"], {"default": "fail", "erase": "ignore-and-retry"}
+        )
+
+    def test_erase_errors_match_python_model(self) -> None:
+        client = CredentialClientModel()
+        client.receive_hello({"v": [1], "capabilities": ["erase"]})
+        erase = {
+            "v": 1,
+            "kind": "erase",
+            "registry": "https://registry.example.test/",
+            "operation": "read",
+            "granularity": "registry",
+        }
+        for kind, rules in self.policy["errors"].items():
+            with self.subTest(kind=kind):
+                self.assertEqual(client.handle_response(erase, {"Err": {"kind": kind}}), rules["erase"])
 
     def test_capabilities_match_policy_and_python_model(self) -> None:
         hello_properties = self.schema["$defs"]["hello"]["properties"]

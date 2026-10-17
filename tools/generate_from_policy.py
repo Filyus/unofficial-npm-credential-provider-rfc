@@ -82,6 +82,7 @@ def render_python(policy: dict) -> str:
             f"LINE_SIZE_MINIMUM = {policy['limits']['lineSizeMinimum']!r}",
             f"TIMEOUT_KILLS_BEFORE_NO_RESTART = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']!r}",
             f"SENTINEL_ARGUMENT = {policy['credentialProvider']['sentinelArgument']!r}",
+            f"ERASE_ERROR_OUTCOMES = {erase_error_outcomes(policy)!r}",
             "",
         ]
     )
@@ -115,10 +116,19 @@ def render_rust(policy: dict) -> str:
             f"pub const LINE_SIZE_MINIMUM: usize = {policy['limits']['lineSizeMinimum']};",
             f"pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']};",
             f"pub const SENTINEL_ARGUMENT: &str = {json.dumps(policy['credentialProvider']['sentinelArgument'])};",
+            "pub const ERASE_ERROR_OUTCOMES: &[(&str, &str)] = &["
+            + ", ".join(f"({json.dumps(k)}, {json.dumps(v)})" for k, v in erase_error_outcomes(policy).items())
+            + "];",
             *rust_timeouts(policy),
             "",
         ]
     )
+
+
+def erase_error_outcomes(policy: dict) -> dict[str, str]:
+    """What an error answer to `erase` does, per error kind: the retry still
+    goes out whatever the provider said about forgetting the credential."""
+    return {kind: rules["erase"] for kind, rules in policy["errors"].items()}
 
 
 def rust_timeouts(policy: dict) -> list[str]:

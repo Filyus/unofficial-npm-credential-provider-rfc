@@ -11,6 +11,7 @@ from tests.generated_policy import (
     ALLOWED_CONFIG_SOURCES,
     DEFAULT_CACHE_POLICY,
     DEFAULT_GRANULARITY,
+    ERASE_ERROR_OUTCOMES,
     ERROR_KINDS,
     EXPIRY_MARGIN_SECONDS,
     IDENTIFIER_PATTERN,
@@ -365,6 +366,10 @@ class CredentialClientModel:
             not isinstance(caused_by, list) or not all(isinstance(item, str) for item in caused_by)
         ):
             raise ProtocolViolation("Err.causedBy must be string[]")
+        if request.get("kind") == "erase":
+            # the cache already dropped the credential; whatever the provider
+            # says about forgetting it, the retry still goes out
+            return ERASE_ERROR_OUTCOMES[kind]
         if kind == "url-not-supported":
             return "try-next-provider"
         if kind == "not-found":
@@ -857,7 +862,12 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
         elif actor == "provider":
             if last_request is None:
                 raise ProtocolViolation("provider response without client request")
-            client.handle_response(last_request, event.get("message"))
+            try:
+                client.handle_response(last_request, event.get("message"))
+            except ProviderFailure:
+                # that registry request fails and the session goes on; a
+                # protocol violation is never caught
+                pass
             last_request = None
         else:
             raise ProtocolViolation(f"unsupported transcript event: {event!r}")

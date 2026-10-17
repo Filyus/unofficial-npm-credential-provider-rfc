@@ -27,3 +27,4 @@ PACKAGE_BOUND_WHEN_PRESENT = True
 LINE_SIZE_MINIMUM = 1048576
 TIMEOUT_KILLS_BEFORE_NO_RESTART = 2
 SENTINEL_ARGUMENT = '--npm-credential-provider'
+ERASE_ERROR_OUTCOMES = {'url-not-supported': 'ignore-and-retry', 'not-found': 'ignore-and-retry', 'operation-not-supported': 'ignore-and-retry', 'other': 'warn-and-retry'}

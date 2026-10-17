@@ -30,6 +30,10 @@ class RegistryMatchingTests(unittest.TestCase):
         ("https://xn--bcher-kva.example/", "https://bücher.example/p", True),
         ("https://gitlab.example.com/", "https://gitlab.example.com.evil.test/p", False),
         ("https://gitlab.example.com/", "https://evil.test/gitlab.example.com/p", False),
+        # an empty segment is part of the path: npm's key walk never yields `//host//`
+        ("//gitlab.example.com//", "https://gitlab.example.com/@s%2fp", False),
+        ("//gitlab.example.com//", "https://gitlab.example.com//@s%2fp", True),
+        ("https://gitlab.example.com//", "https://gitlab.example.com/", False),
     ]
 
     def test_cases(self) -> None:

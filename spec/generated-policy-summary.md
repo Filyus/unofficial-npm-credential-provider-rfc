@@ -46,9 +46,13 @@ Source: `spec/policy-v1.json`.
 | Error kind | Context | Outcome |
 | --- | --- | --- |
 | `url-not-supported` | `default` | `try-next-provider` |
+| `url-not-supported` | `erase` | `ignore-and-retry` |
 | `not-found` | `default` | `try-next-provider-not-found` |
+| `not-found` | `erase` | `ignore-and-retry` |
 | `operation-not-supported` | `default` | `fail` |
+| `operation-not-supported` | `erase` | `ignore-and-retry` |
 | `other` | `default` | `fail` |
+| `other` | `erase` | `warn-and-retry` |
 
 ## Fallback
 

@@ -1,6 +1,7 @@
 use credential_provider_protocol::{
     ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderResponse, Request,
-    RequestKind, generated::SENTINEL_ARGUMENT, negotiate, read_json_line, write_json_line,
+    RequestKind, generated, generated::SENTINEL_ARGUMENT, negotiate, read_json_line,
+    write_json_line,
 };
 use std::fmt;
 use std::io::{BufReader, Read};
@@ -153,6 +154,8 @@ impl ProviderSession {
     }
 
     /// Closes stdin, the end-of-session signal, and requires a clean exit.
+    /// A test harness waits to check the exit; npm need not wait for the
+    /// provider at all, so a provider cannot count on work after this.
     pub fn close(mut self) -> Result<(), ExchangeError> {
         drop(self.stdin.take());
         let mut stderr = String::new();
@@ -196,7 +199,7 @@ pub fn run_exchange(
         });
     }
     let response = session.request(&request)?;
-    let outcome = summarize(&response)?;
+    let outcome = summarize(&request.kind, &response)?;
     let selected_version = session.version;
     session.close()?;
 
@@ -284,7 +287,12 @@ fn request_for(scenario: ClientScenario) -> Request {
     }
 }
 
-fn summarize(response: &ProviderResponse) -> Result<String, ExchangeError> {
+fn summarize(request: &RequestKind, response: &ProviderResponse) -> Result<String, ExchangeError> {
+    if let (RequestKind::Erase, ProviderResponse::Err(err)) = (request, response) {
+        // the cache already dropped the credential; whatever the provider says
+        // about forgetting it, the retry still goes out
+        return Ok(erase_error_outcome(&err.kind).into());
+    }
     match response {
         ProviderResponse::Ok(ok) => {
             if matches!(
@@ -308,6 +316,20 @@ fn summarize(response: &ProviderResponse) -> Result<String, ExchangeError> {
     }
 }
 
+fn erase_error_outcome(kind: &ErrorKind) -> &'static str {
+    let name = match kind {
+        ErrorKind::UrlNotSupported => "url-not-supported",
+        ErrorKind::NotFound => "not-found",
+        ErrorKind::OperationNotSupported => "operation-not-supported",
+        ErrorKind::Other => "other",
+    };
+    generated::ERASE_ERROR_OUTCOMES
+        .iter()
+        .find(|(error, _)| *error == name)
+        .map(|(_, outcome)| *outcome)
+        .expect("the policy names an erase outcome for every error kind")
+}
+
 fn kind_name(kind: &RequestKind) -> &'static str {
     match kind {
         RequestKind::Login => "login",
@@ -315,5 +337,37 @@ fn kind_name(kind: &RequestKind) -> &'static str {
         RequestKind::Get => "get",
         RequestKind::Erase => "erase",
         RequestKind::Unsupported => "unsupported",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use credential_provider_protocol::ProviderErr;
+
+    fn err(kind: ErrorKind) -> ProviderResponse {
+        ProviderResponse::Err(ProviderErr {
+            kind,
+            message: Some("boom".into()),
+            caused_by: None,
+        })
+    }
+
+    #[test]
+    fn an_error_answer_to_erase_still_lets_the_retry_go_out() {
+        for (kind, outcome) in [
+            (ErrorKind::UrlNotSupported, "ignore-and-retry"),
+            (ErrorKind::NotFound, "ignore-and-retry"),
+            (ErrorKind::OperationNotSupported, "ignore-and-retry"),
+            (ErrorKind::Other, "warn-and-retry"),
+        ] {
+            assert_eq!(summarize(&RequestKind::Erase, &err(kind)).unwrap(), outcome);
+        }
+    }
+
+    #[test]
+    fn an_error_answer_to_get_keeps_failing() {
+        assert!(summarize(&RequestKind::Get, &err(ErrorKind::Other)).is_err());
+        assert!(summarize(&RequestKind::Get, &err(ErrorKind::OperationNotSupported)).is_err());
     }
 }

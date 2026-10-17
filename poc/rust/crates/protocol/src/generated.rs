@@ -76,6 +76,7 @@ pub const EXPIRY_MARGIN_SECONDS: u64 = 60;
 pub const LINE_SIZE_MINIMUM: usize = 1048576;
 pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = 2;
 pub const SENTINEL_ARGUMENT: &str = "--npm-credential-provider";
+pub const ERASE_ERROR_OUTCOMES: &[(&str, &str)] = &[("url-not-supported", "ignore-and-retry"), ("not-found", "ignore-and-retry"), ("operation-not-supported", "ignore-and-retry"), ("other", "warn-and-retry")];
 pub const HELLO_TIMEOUT_SECONDS: u64 = 10;
 pub const GET_TIMEOUT_SECONDS: u64 = 30;
 pub const GET_INTERACTIVE_TIMEOUT_SECONDS: u64 = 300;

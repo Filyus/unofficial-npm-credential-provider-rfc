@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 
 from tests.protocol_model import (
@@ -100,6 +101,31 @@ class TranscriptTests(unittest.TestCase):
             entry = client.lookup(registry, "@scope", package)
             self.assertEqual(entry.auth["token"], "registry-token-2")
         self.assertEqual(client.lookup(registry, "@scope").auth["token"], "registry-token-2")
+
+    def test_a_retry_answered_other_fails_that_request_and_the_session_goes_on(self) -> None:
+        client = validate_transcript(str(TRANSCRIPTS / "retry-after-403-nothing-else.jsonl"))
+
+        self.assertEqual(client.state, ClientState.CLOSED)
+
+    def test_an_erase_answered_other_is_followed_by_the_retry(self) -> None:
+        client = validate_transcript(str(TRANSCRIPTS / "erase-other-then-retry.jsonl"))
+
+        self.assertEqual(
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
+            "token-2",
+        )
+
+    def test_a_malformed_error_answer_is_still_a_protocol_violation(self) -> None:
+        lines = (TRANSCRIPTS / "retry-after-403-nothing-else.jsonl").read_text(encoding="utf-8").splitlines()
+        for bad in ('{"kind":"permission-denied"}', '{"kind":"other","message":7}'):
+            with self.subTest(err=bad), tempfile.TemporaryDirectory() as scratch:
+                path = Path(scratch) / "t.jsonl"
+                path.write_text(
+                    "\n".join(lines[:4] + ['{"from":"provider","message":{"Err":' + bad + "}}"] + lines[5:]) + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ProtocolViolation):
+                    validate_transcript(str(path))
 
     def test_not_found_leaves_the_session_usable_for_the_chain(self) -> None:
         client = validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))
