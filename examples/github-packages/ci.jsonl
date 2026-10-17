@@ -1,0 +1,8 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"ci","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.2","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@other-org","package":"private-lib","operation":"read","command":"ci","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"not-found"}}}
+{"from":"client","event":"close"}

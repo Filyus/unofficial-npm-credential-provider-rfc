@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.1.0","operation":"unpublish","command":"unpublish","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"basic","username":"VssSessionToken","password":"example-manage-token-1"},"cache":"never","operationIndependent":false,"granularity":"package"}}}
+{"from":"client","event":"close"}

@@ -1,0 +1,12 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-revoked"},"cache":"expires","expiresAt":1792197000,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","granularity":"scope","authChallenges":["Bearer realm=\"https://npm.corp.example.com/\", error=\"invalid_token\""]}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":401,"authChallenges":["Bearer realm=\"https://npm.corp.example.com/\", error=\"invalid_token\""]}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-reminted"},"cache":"expires","expiresAt":1792197100,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp-secure","package":"vault-client","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-secure-old-groups"},"cache":"expires","expiresAt":1792197110,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp-secure","package":"vault-client","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403,"authChallenges":["Bearer realm=\"https://npm.corp.example.com/\", error=\"insufficient_scope\""]}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-secure-new-groups"},"cache":"expires","expiresAt":1792197120,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","event":"close"}

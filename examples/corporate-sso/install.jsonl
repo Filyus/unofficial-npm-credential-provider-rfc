@@ -1,0 +1,12 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-corp"},"cache":"expires","expiresAt":1792197000,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","package":"left-pad","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-unscoped"},"cache":"expires","expiresAt":1792197010,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp-data","package":"models","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-corp-data"},"cache":"expires","expiresAt":1792197020,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm-eu.corp.example.com/","scope":"@corp-eu","package":"maps","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-corp-eu"},"cache":"expires","expiresAt":1792197030,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"charts","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-corp-later"},"cache":"expires","expiresAt":1792199000,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","event":"close"}

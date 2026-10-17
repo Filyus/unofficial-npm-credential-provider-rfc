@@ -1,0 +1,260 @@
+# GitHub Packages
+
+A hypothetical `npm-credential-provider-github` for the GitHub Packages npm registry. GitHub Packages issues no short-lived tokens of its own and no token narrower than an owner: what a provider hands out is a personal access token, a `gh` token or, in Actions, the job's `GITHUB_TOKEN`. The provider here keeps two accounts (a work and a personal one) in the OS keychain, maps each package owner to one of them, and keeps a read token and a write token apart. It shows how the protocol serves a registry where the only gains are not leaving a token in `~/.npmrc`, telling tokens apart by owner and operation, and gating the write token on user presence; `erase` cannot replace a token here, it can only report that one was refused.
+
+The provider and its behaviour are hypothetical and follow the [Phase 2 protocol](../phase-2-credential-provider.md). The facts about GitHub are from the sources linked below; where a fact is recalled or unverified, the text says so. The GitHub examples use the real host `npm.pkg.github.com` and made-up tokens.
+
+## Registry and credentials
+
+**URL shapes the provider must match.**
+
+| Registry | Registry URL | Source |
+|---|---|---|
+| github.com | `https://npm.pkg.github.com/`. One host for every owner; the owner is the package scope (`@OWNER/name`, lowercase), not part of the URL. | [npm registry docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry) |
+| GitHub Enterprise Server, subdomain isolation on | `https://npm.HOSTNAME/` | [GHES 3.14 docs](https://docs.github.com/en/enterprise-server@3.14/packages/working-with-a-github-packages-registry/working-with-the-npm-registry) |
+| GitHub Enterprise Server, subdomain isolation off | `https://HOSTNAME/_registry/npm/`. The same host as the GHES web UI and API. | [GHES 3.14 docs](https://docs.github.com/en/enterprise-server@3.14/packages/working-with-a-github-packages-registry/working-with-the-npm-registry) |
+| GHE.com (data residency) | `https://npm.SUBDOMAIN.ghe.com/`. By analogy with the documented `containers.SUBDOMAIN.ghe.com`; the npm form itself is not documented. | [data residency overview](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/feature-overview-for-github-enterprise-cloud-with-data-residency) |
+
+An older per-owner form, `https://npm.pkg.github.com/OWNER/`, is not in the current docs. An anonymous request to it was refused with a 403, so whether it works is unknown. If a user configures it, a hello entry for `https://npm.pkg.github.com/` still covers it by path prefix, but npm then sends `registry` as that longer URL and caches under it.
+
+**Credentials.**
+
+| Credential | Lifetime | What it can do | Source |
+|---|---|---|---|
+| Personal access token (classic), `ghp_…`, made in the web UI | Chosen at creation: a preset, a date or none; an organization or enterprise policy can cap it. | `read:packages` installs, `write:packages` publishes, `delete:packages` deletes (and needs `read:packages`). User-wide, not tied to an owner. An organization's resources need the token authorized for SAML SSO, and an organization can block classic tokens, which gives a 403. | [package permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages), [personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens), [OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) |
+| Fine-grained personal access token, `github_pat_…` | 1 to 366 days or none | Not supported for Packages. The token docs list it as a limitation; [roadmap issue 558](https://github.com/github/roadmap/issues/558) is open without a date. | [personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) |
+| `GITHUB_TOKEN` in Actions | Ends with the job: at most 6 hours on GitHub-hosted runners, up to 24 hours on self-hosted ones. | Limited to the workflow's repository, by the job's `permissions: packages: read` or `write`. It publishes packages associated with that repository and installs a private package only if the package grants the repository access. Other owners' packages need a classic token. It reaches an npm process only if the workflow exports it. | [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token), [package permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages) |
+| `gh` OAuth token, `gho_…`, from `gh auth token` | Until revoked | Always carries `repo`, `read:org` and `gist`, which cannot be removed; `repo` is full read and write on every repository the user can reach. Package scopes are added with `gh auth refresh -s read:packages`. The docs say Packages takes only classic tokens; that `gho_` tokens work against `npm.pkg.github.com` is widely relied on (Phase 1 relies on it) but not documented. | [gh auth login](https://cli.github.com/manual/gh_auth_login), [gh auth refresh](https://cli.github.com/manual/gh_auth_refresh), [gh auth token](https://cli.github.com/manual/gh_auth_token) |
+| The provider's own OAuth App token, `gho_…`, from the device flow | Long-lived by default; an app can opt in to 8-hour tokens with a refresh token valid 6 months unused. | Whatever scopes were requested, for example `read:packages` alone. **Unverified:** whether `npm.pkg.github.com` accepts the expiring form. | [authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) |
+
+The provider in this example uses classic tokens, which GitHub documents for Packages: per account, one with `read:packages` only and one with `write:packages`.
+
+Two behaviours matter to a provider. First, Packages needs a token even for public packages. Second, with `registry=https://npm.pkg.github.com/` as the default registry, GitHub serves npmjs.org packages through it with the same token ([npm registry docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)), so the provider is asked about the whole dependency tree.
+
+## Configuration
+
+```ini
+# ~/.npmrc, the user's own file
+//npm.pkg.github.com/:credentialProvider[]=npm-credential-provider-github
+```
+
+```ini
+# the project's .npmrc: registries may be set here, a provider may not
+@acme:registry=https://npm.pkg.github.com/
+@octocat:registry=https://npm.pkg.github.com/
+```
+
+The per-registry form is the one to use. The provider does not start for any other registry, and it does not need a `--instance` argument for github.com. The owner-to-account map lives in the provider's own settings, not in npm config.
+
+A global chain also works, because the hello lists the registry:
+
+```ini
+credentialProvider[]=npm-credential-provider-github
+credentialProvider[]=npm:token
+```
+
+The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Listing `npm:token` last keeps the stored credential for registries the provider does not serve, without the warning the implicit entry draws. The cost against the per-registry form is that a request to `npm.pkg.github.com` this provider cannot answer falls to `npm:token`, which may hold a standing token: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
+
+On GHES the line names the instance's own registry URL, and the provider takes the host from an argument, `--host HOSTNAME`, because it has to map the npm host to the host of the GitHub API:
+
+```ini
+//npm.ghes.example.com/:credentialProvider[]=npm-credential-provider-github --host ghes.example.com
+# subdomain isolation off:
+//ghes.example.com/_registry/npm/:credentialProvider[]=npm-credential-provider-github --host ghes.example.com
+```
+
+GitHub's GHES page prints the token key with a double slash, `//npm.HOSTNAME//:_authToken` ([GHES 3.14 docs](https://docs.github.com/en/enterprise-server@3.14/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)). Do not copy that form into a `credentialProvider` key; see [What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc).
+
+## Hello
+
+```json
+{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}
+```
+
+- `v`: protocol version 1.
+- `registries`: the one github.com host. npm matches requests against it itself and sends the provider nothing about other registries. On GHES the entry is the instance's registry URL, taken from `--host`: `https://npm.HOSTNAME/` or `https://HOSTNAME/_registry/npm/`, never the bare `https://HOSTNAME/`, which is the web UI and API host. List both forms only if the instance really serves both.
+- `login`, `logout`: the provider stores a pasted token or runs its own device flow, and removes both on logout.
+- `erase`: the provider wants to hear about rejections. It cannot replace a stored token, but it drops a copy it holds and reports the rejection.
+- `retry-context`: the provider reads `retry` and `httpStatus`.
+- No `auth-challenges`: GitHub sends no `WWW-Authenticate` header on a 401 (probed anonymously on 2026-10-17: an existing package without a token gave a 401 with a JSON body and no such header), so there is nothing to read.
+
+## Install
+
+[install.jsonl](github-packages/install.jsonl)
+
+The developer runs `npm install` in a terminal, in a project whose `.npmrc` maps `@acme` and `@octocat` to GitHub Packages. The provider maps `@acme` to the work account and `@octocat` to the personal one; an unscoped package, which GitHub proxies from npmjs.org, goes to the work account as the default.
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}
+```
+
+- `granularity: "scope"`, because the answer depends on the owner, not because the token is narrower: a classic token is user-wide. The provider answers `scope` to every request on this registry, unscoped ones included. The unscoped request below carries no `scope`, and its answer is cached under "scope absent".
+- `operationIndependent: false`, because the provider holds a stronger token for `publish`. Left at the default `true`, a cached read token would be found by the later `publish` lookup (see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong)).
+- `cache: "session"`: a classic token carries no expiry the provider knows of. A `GITHUB_TOKEN` also gets `session`: a command is shorter than the job.
+
+The second request, for `@octocat/hello-world`, gets the personal account's token under its own `scope` cache key. The third, for an unscoped package, carries no `scope` and is answered with the work account's token.
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","package":"lodash","operation":"read","command":"install","interactive":true}
+```
+
+Every other `@acme/*` package is a cache hit.
+
+## Publish
+
+[publish.jsonl](github-packages/publish.jsonl)
+
+GitHub Packages supports `npm publish`, with `write:packages` or, in Actions, a `GITHUB_TOKEN` with `packages: write` for a package associated with the workflow's repository ([package permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)). The `repository` field of `package.json` links the package to a repository and so decides what access it inherits.
+
+Every request `npm publish` makes carries `operation: "publish"`, the packument fetch before the upload included ([Operations](../phase-2-credential-provider.md#4-operations)), so one `get` serves the command:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":true}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-write-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}
+```
+
+Before it answers, the provider asks for user presence on the controlling terminal, naming `@acme/widgets` and `2.4.1`. It binds the write token to that package and operation with `granularity: "package"` and `operationIndependent: false`. GitHub itself cannot bind a token to a package or version, so this binding is the provider's policy; the registry gives no narrowing ([roadmap issue 558](https://github.com/github/roadmap/issues/558)).
+
+**Other write operations.** The research found these gaps; the provider answers `operation-not-supported` for the ones the registry has no endpoint for:
+
+| Operation | What GitHub does | Provider |
+|---|---|---|
+| `deprecate` | `npm deprecate` fails with a 400, `version.ID cannot be empty`, and GitHub said in February 2024 that it was not on the roadmap ([discussion 63811](https://github.com/orgs/community/discussions/63811)). | `operation-not-supported` |
+| `unpublish` | Documented deletion is the web UI or the REST `DELETE` on the package or version, which needs `read:packages` and `delete:packages`, admin on the package, and refuses a public package or version with more than 5,000 downloads ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package), [REST](https://docs.github.com/en/rest/packages/packages)). **Unverified:** whether `npm unpublish` itself works on `npm.pkg.github.com`. | The provider here answers `operation-not-supported`. The alternative is a `delete:packages` token behind a presence prompt. |
+| `dist-tag` | **Unverified:** the docs say nothing either way. | The provider would map it to the write token; it is not shown. |
+| `stage`, `stage-read`, `stage-reject` | No `/-/stage` endpoints (recalled, not documented). | `operation-not-supported` |
+| `owner`, `access`, `trust`, `account` | Not implemented; the RFC says so for `access` and `trust`, the rest is recalled. | `operation-not-supported` |
+
+An answer to `deprecate` is not in the transcript, because the test model ends a request at an error that is not `not-found` or `url-not-supported`:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.0","operation":"deprecate","command":"deprecate","interactive":true}
+{"Err":{"kind":"operation-not-supported"}}
+```
+
+A deleted version can be published again: GitHub restores a deleted version within 30 days only if its name and version were not reused ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package)), so reuse is possible, unlike on npmjs.org. A provider's audit log keyed on name and version can see the same version twice.
+
+## Rejection
+
+[rejection.jsonl](github-packages/rejection.jsonl)
+
+What a rejection looks like, from anonymous probes made on 2026-10-17: an existing package without a token gives a 401 with the body `{"error":"authentication token not provided"}` and no `WWW-Authenticate` header; a package that does not exist gives a 404 before any authentication, so existence leaks; `/-/whoami` without a token gives a 403. How GitHub answers an invalid or revoked token (the status, the headers) is **unverified**: no request with a token was made. SSO-unauthorized tokens and missing scopes give a 403 (recalled, not verified), an organization that blocks classic tokens gives a 403 ([API docs](https://docs.github.com/en/rest/packages/packages)), and a token without access to a private package may see a 404 instead (recalled).
+
+**401.** npm drops the token from its cache and sends `erase` with the context of the `get` and its `granularity`. An anonymous 401 from GitHub carries no challenge, and none is assumed for a rejected token, so `authChallenges` is absent.
+
+```json
+{"v":1,"kind":"erase","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}
+{"Ok":{"kind":"erase"}}
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}
+```
+
+The stored token is the one the provider hands out, so erase has nothing to replace. It keeps the token, as the RFC says a provider whose stored credential is the credential it hands out does, and does not run a login flow on a 401 alone. The URL may be one a lockfile chose. The provider checks the token itself with `GET https://api.github.com/user` (on GHES, `https://HOSTNAME/api/v3/user`). The transcript shows the case where the check passes: the token is valid, and the provider answers the retry with it. If the registry refuses it again, npm erases and reports, with no second retry.
+
+If the check fails, the token is dead. The retry is answered with an error, and the request fails, naming the provider:
+
+```json
+{"Err":{"kind":"other","message":"GitHub rejected the stored token for the work account. Run npm logout and npm login for https://npm.pkg.github.com/."}}
+```
+
+That answer is not in the transcript: the test model ends a request at it, as it ends one at any error that is not `not-found` or `url-not-supported`.
+
+A provider backed by `gh` never runs `gh auth logout` or touches `gh`'s store on a rejection. That token belongs to `gh`.
+
+**403.** npm sends no erase and retries once with `httpStatus: 403`:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}
+{"Err":{"kind":"other","message":"GitHub refused the work account's token for @acme. The organization may require SSO authorization of the token or may block classic personal access tokens. Authorize it at github.com/settings/tokens, then run npm install again."}}
+```
+
+A more privileged token would not help: the same token has to be SSO-authorized, and a write token would be a widening a 403 can send for free. The RFC forbids moving a `read` retry to a credential that can write. The provider answers `other` with a reason instead of returning the same token again. That the SSO hint comes from the `X-GitHub-SSO` header of an API call is recalled, not verified.
+
+A 404 on a token that lacks access to a private package gets no retry and no erase. Under `scope` granularity a wrong-account answer therefore shows as "not found".
+
+## Login and logout
+
+[login.jsonl](github-packages/login.jsonl) holds the two logins and the logout below in one session, to keep the fixture short; npm runs each command with its own session.
+
+`npm login --registry https://npm.pkg.github.com/` goes to the provider. There are two ways in.
+
+```json
+{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}
+{"Ok":{"kind":"login"}}
+```
+
+- **Without `token`:** the provider runs its own OAuth device flow, which needs no client secret and must be enabled for the app. It requests `read:packages` only, and asks again for `write:packages` the first time a publish needs it. The code and URL go to the controlling terminal, never to stdout or stdin. The code expires after 15 minutes, and `slow_down` adds 5 seconds to the polling interval ([authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)).
+- **With `token`:** a classic token the user pasted. GitHub has no documented API to create one, so this is the usual path. The provider validates it with `GET /user`, reads the `X-OAuth-Scopes` response header (see [authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)), warns or refuses if `read:packages` is missing or `repo` is present, and stores it in the keychain.
+
+```json
+{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true,"token":"example-pasted-token"}
+{"Ok":{"kind":"login"}}
+```
+
+A provider that delegates to `gh auth refresh -h HOST -s read:packages,write:packages` must hand `gh` the controlling terminal for stdin and stdout, not the provider's own pipes.
+
+```json
+{"v":1,"kind":"logout","registry":"https://npm.pkg.github.com/"}
+{"Ok":{"kind":"logout"}}
+```
+
+Logout deletes the keychain entries. As a best effort it also revokes a token it was given with `POST https://api.github.com/credentials/revoke`, which takes `ghp_`, `gho_` and `github_pat_` tokens, is unauthenticated (an authenticated call gets a 403), allows 60 requests an hour and notifies the token's owner ([REST](https://docs.github.com/en/rest/credentials/revoke)). Whether GHES has the endpoint is **unverified**. It never revokes `gh`'s token or `GITHUB_TOKEN`. If revocation fails, logout still answers `Ok` and warns on stderr.
+
+## CI
+
+[ci.jsonl](github-packages/ci.jsonl) strings an install, a publish and a read of another owner's package onto one session, to keep the fixture short; in a job each is its own npm command with its own session.
+
+In a GitHub Actions job the provider runs with `interactive: false`: no device flow, no presence prompt. It serves `GITHUB_TOKEN` if the workflow exported it into the environment (for example through `env:` or `setup-node`; Phase 1's environment rules keep it), and otherwise a stored token.
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"ci","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.2","operation":"publish","command":"publish","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}
+```
+
+- The `read` answer carries `operationIndependent: false` although one token serves both operations here: the provider marks every `read` answer so, because outside Actions it holds a stronger token for `publish`, and a default `true` would let the cached read entry answer the `publish` lookup with no `get`.
+- The job's token covers only the workflow's repository, so the provider answers `@acme` (the workflow's owner) and has nothing for another owner. For `@other-org` it answers `not-found`, not `other`: nothing is stored, and the user's chain then decides what comes next.
+- Withholding `GITHUB_TOKEN` would gain nothing: every lifecycle script in the step already sees the same variable. The provider's value in CI is consistency with other environments, not secrecy. It removes no standing secret from the runner, and a stored classic token for cross-owner reads is still one.
+- OIDC trusted publishing does not exist for GitHub Packages (recalled), so the RFC's precedence for an exchanged token never applies here.
+
+## Where it is easy to go wrong
+
+1. **Treating one host as one tenant.** Every owner shares `https://npm.pkg.github.com/`. A provider cannot use `registry` to say "I serve `@acme` but not `@someone-else`": `url-not-supported` is decided from `registry` alone and remembered for the registry. An owner allowlist has to look at `scope`, and the available answers all have a cost: `not-found` lets a listed or implicit `npm:token` send a stored token; `other` fails the install, and Packages wants a token even for public packages. Any project can add `@anyowner:registry=https://npm.pkg.github.com/` and have the user's token sent for that owner's packages. The token goes only to GitHub, but the repository picks whose code is fetched with the user's identity, and that owner sees the download.
+2. **Answering `registry` where one account is not the only one.** People hold a work and a personal account; in Actions `GITHUB_TOKEN` covers the workflow's repository and other owners need a classic token. Once a provider answers `scope` for any request on a registry, it must never answer `registry` there, and must answer `scope` for unscoped requests too. A `registry`-level answer is found by the registry step of the cache lookup for every scope with no entry of its own, and sends account A's token for `@owner-b`, which gives a 404 or a 403.
+3. **Leaving `operationIndependent` at its default on a read answer.** The lookup tries an operation-bound entry and then an operation-independent one at each level. A read token cached as independent is found for the `publish` request, goes out on the `PUT`, gets a 403, and the publish's single retry is spent on recovering. The [GitLab](gitlab.md) page omits the field, and an author copying it from there will hit this when the provider has a stronger token.
+4. **Building on `gh auth token` for least privilege.** `gh`'s token always carries `repo`, `read:org` and `gist`. A provider, or a Phase 1 helper, that hands it out gives npm, and any install script that runs the provider, a token that can push code, not only read packages. Phase 1's Vendor CLIs row for GitHub Packages does not say this.
+5. **Letting `GH_TOKEN` choose the identity.** The provider's environment keeps `GH_TOKEN` and `GITHUB_TOKEN`, since only npm's own variables are removed, and `gh` documents that they override stored credentials for github.com and ghe.com; GHES uses `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` ([environment](https://cli.github.com/manual/gh_help_environment)). `gh` recommends `GH_TOKEN` for fine-grained tokens, which Packages does not support. A `gh`-backed provider run in a shell with `GH_TOKEN` set returns a token the registry rejects or one for another identity, and the 401 or 403 looks like a provider bug.
+6. **Letting a child process inherit the protocol's pipes.** `gh auth refresh` and `gh auth login` prompt and print device codes. A child that inherits the provider's stdin reads protocol bytes or blocks, and one that inherits stdout corrupts the JSON stream. Give it the controlling terminal (`/dev/tty`, or `CONIN$` and `CONOUT$`) or capture its output. `gh auth token` with captured stdout is the only plain subprocess that is safe.
+7. **Expecting `erase` to replace a token.** Classic tokens, `gh` tokens and default OAuth tokens are long-lived and are the stored credential itself. Nothing can mint a narrower token from them, unlike on [GitLab](gitlab.md). Erase reports and keeps. Only an OAuth app that opted in to expiring tokens can drop one and refresh it, and whether the registry accepts those is unverified.
+8. **Starting a login on a 401.** Check with `GET /user` first, and use `cache: "session"` rather than inventing an `expiresAt` the provider does not know. A classic token with an expiry date may show it in a `GitHub-Authentication-Token-Expiration` response header (recalled), which is the one case where `expires` would be honest.
+9. **Mapping `unpublish` or `deprecate` blindly.** A provider that maps `unpublish` to a `delete:packages` token prompts the user to release the most dangerous scope for a request that may fail with a 404 or 405. A provider that answers `deprecate` with a write token hands over a token for a request that fails with a 400. Answering `operation-not-supported` avoids both, but hard-codes today's registry and blocks the day GitHub adds support.
+10. **Reading nothing into a 404.** Package existence leaks before authentication, an unscoped package without a token gets a 404 (`/lodash`), and a token without access may see a 404. npm never retries a 404, so a wrong-account answer looks like "not found". Do not widen a later answer because of one.
+11. **GHES keys and hosts.** Without subdomain isolation the registry shares a host with the web UI and API. The hello entry and any per-registry key carry `/_registry/npm/`, because a bare `//HOSTNAME/` key would also cover API traffic if npm ever asked about it. The provider maps the npm host to the API host (`npm.HOSTNAME` and `HOSTNAME/_registry/npm` to `HOSTNAME`, API at `HOSTNAME/api/v3`; `npm.pkg.github.com` to `github.com`, API at `api.github.com`) and reads `GH_ENTERPRISE_TOKEN`, not `GH_TOKEN`, there.
+12. **A default registry that proxies npmjs.org.** With `registry=https://npm.pkg.github.com/`, the provider is asked about `@types` and every other scope in the tree, and the audit request, and must return a token: anonymous requests are refused, and `/lodash` without a token gives a 404. A provider that picks accounts by owner needs a default account for scopes it does not know.
+13. **Revoking what it does not own.** Logout may revoke a token the provider was given. It must not revoke `gh`'s token (that breaks `gh` everywhere) or `GITHUB_TOKEN`.
+14. **Expecting a security gain in Actions.** The provider removes no standing secret there. The token is in the environment only if the workflow put it there, and then every script in the step has it already.
+
+## What this registry asks of the RFC
+
+1. **A multi-tenant host, where the tenant is the scope** ([Provider chaining](../phase-2-credential-provider.md#error-response), [Registry matching](../phase-2-credential-provider.md#registry-matching)). The RFC decides `url-not-supported` from `registry` alone and remembers it per registry, which has no answer for a host like `npm.pkg.github.com`, where the same URL serves every owner and the provider's decision depends on `scope`. The text should say which error a provider that serves some owners and not others uses (`not-found` lets `npm:token` or the legacy-fallback opt-in send a stored token behind it; `other` fails the install), and that a listed `npm:token` behind such a provider is how the stored token gets sent for an owner the provider declined. Possible RFC gap.
+2. **A key with an empty path segment** ([Registry matching](../phase-2-credential-provider.md#registry-matching)). GitHub's GHES documentation prints the token key as `//npm.HOSTNAME//:_authToken`. Under the RFC's byte-wise comparison at a segment boundary, a `credentialProvider` key written the same way has the path `//` and does not cover `/@scope/pkg`, so the list silently never applies and the global chain or a stored token is used instead. The RFC does not say what `//host//` matches. npm's stored-token lookup tolerates the form today (recalled), so the text should say whether provider keys do too. Possible RFC gap.
+3. **Guidance for a provider that answers `scope`** ([Caching](../phase-2-credential-provider.md#5-caching)). Once a provider answers `scope` for any request on a registry, it should answer `scope` for every request there, unscoped ones included: a `registry`-level answer shadows the scope-level entries for every owner that has none yet. The text says only that a provider that issues finer tokens says so in `granularity`. Guidance, not a defect.
+4. **`operationIndependent` on a read answer** ([Success response](../phase-2-credential-provider.md#success-response-provider--client)). A provider with a stronger token for another operation must set `false` on the read answer, or the cached read token is found for the write. The RFC says this for stage-only tokens only. Guidance; the [GitLab](gitlab.md) page omits the field.
+5. **A 403 retry with nothing better** ([`erase`](../phase-2-credential-provider.md#erase-a-credential-was-rejected)). The RFC says a retry may move to another credential the provider would release and any answer but `Ok` fails the request. It does not say what a provider with no other credential does after a 403: here it answers `other` with a reason (SSO authorization, a blocked classic token) rather than resend the same token. Guidance.
+6. **Child processes inherit the protocol's pipes** ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). The RFC forbids the provider to read stdin and tells it to open the controlling terminal for a prompt. It does not say that a child process the provider spawns (here `gh`) inherits the pipes and must be given the terminal or captured. Guidance.
+7. **An error answer ends the test model's request** (`tests/protocol_model.py`, `validate_transcript`). This is not an RFC text issue. The model raises `ProviderFailure` for `other` and `operation-not-supported`, so no transcript can show a failing retry, a refused `deprecate` or a refused presence prompt, which are the rejection and unsupported-operation cases this registry exercises. The page shows those answers inline.
+8. **Phase 1's Vendor CLIs row for GitHub Packages** ([phase-1-token-helper.md](../phase-1-token-helper.md#vendor-clis)): `gh auth token` hands out a token carrying `repo`, and the docs say Packages accepts only classic tokens. The row could say so. Outside this RFC's text; mentioned for the Phase 1 page.
+
+Nothing here changes the protocol; items 1 and 2 are where the text is silent for this registry.
+
+## Sources
+
+- [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry), and the [GHES 3.14 version](https://docs.github.com/en/enterprise-server@3.14/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
+- [About permissions for GitHub Packages](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)
+- [Deleting and restoring a package](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package), [REST: packages](https://docs.github.com/en/rest/packages/packages), [REST: revoke credentials](https://docs.github.com/en/rest/credentials/revoke)
+- [Managing your personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens), [OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps), [authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)
+- [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token)
+- [gh auth login](https://cli.github.com/manual/gh_auth_login), [gh auth token](https://cli.github.com/manual/gh_auth_token), [gh auth refresh](https://cli.github.com/manual/gh_auth_refresh), [gh environment](https://cli.github.com/manual/gh_help_environment)
+- [Roadmap issue 558](https://github.com/github/roadmap/issues/558), [community discussion 63811](https://github.com/orgs/community/discussions/63811)
+- Anonymous requests to `https://npm.pkg.github.com/` made on 2026-10-17: an existing package gave a 401 without `WWW-Authenticate`, a missing scoped package and `/lodash` gave 404, `/-/whoami` and the per-owner path form gave 403.

@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","operation":"stage-read","command":"stage","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-stage-read-token"},"cache":"session","operationIndependent":false,"granularity":"registry"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"stage","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-publish-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}}
+{"from":"client","event":"close"}
