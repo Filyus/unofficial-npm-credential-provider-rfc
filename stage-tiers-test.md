@@ -55,6 +55,27 @@ For each token and request, record the status, the item count or error body, and
 - **T5:** provided Q has no staged versions, expected an empty list and 404, confirming that a token selected to other packages fails as 404 or an empty list, not 403.
 - **T6:** record the outcome. **T3b** against T3: expected the same.
 
+## Result, 2026-10-17
+
+Run once with npm 11.19.0 against a scoped package the account maintains, whose versions are published by trusted publishing, with T1–T5 (T6 and T3b skipped, and the publishing-access setting left as it was). T3 staged `0.0.0-tokentest.1` without asking for a one-time password.
+
+| Token | R1 list | R2 list, `package=` | R3 record | R4 tarball |
+|---|---|---|---|---|
+| none | 401 | 401 | 401 | 401 |
+| T1 session | 200, S listed | 200, S listed | 200 | 200 |
+| T2 read-only, P | 200, S listed | 200, S listed | 200 | 200 |
+| T3 stage only, P | 200, S listed | 200, S listed | 200 | 200 |
+| T4 publish and stage, P | 200, S listed | 200, S listed | 200 | 200 |
+| T5 read-only, Q only | 200, S listed | 200, S listed | 404 | 404 |
+
+No response carried `WWW-Authenticate`, and none was a one-time-password challenge.
+
+- **A read-only token serves the reads**, so a provider answers `stage-read` on npmjs.com with a separate read-only token, with no presence check, and `stage list`, `view` and `download` work in CI.
+- **The list is filtered by the account, not by the token:** T5, selected only to Q, still listed P's staged version, while the record and the tarball honoured its selection with 404.
+- **The dist-tag in `publishConfig` was not used:** `npm stage publish` reported staging "with tag latest", so approving this version would have moved `latest`.
+
+Afterwards the version was rejected under T1, which npm confirmed through the browser (its web one-time-password flow); `npm stage list` then showed no staged versions, T1 was logged out and T2–T5 revoked.
+
 ## Cleanup
 
 `npm stage reject S` under T1 or T4 with a one-time password (do not approve it); revoke T2–T6 and T3b; `npm logout` for T1; delete `hdr.txt` and the throwaway userconfig.

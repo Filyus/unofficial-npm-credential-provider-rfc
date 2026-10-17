@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 25
+> Revision: 26
 > Date: 2026-10-15
 
 > A draft proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It lets npm obtain registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment.
@@ -536,7 +536,7 @@ How some registries split these:
 
 | Registry | Credential tiers relevant to npm |
 |---|---|
-| npmjs.com | Read-only; read and write, either publish-and-stage or stage-only, which keeps dist-tag and deprecate ([changelog](https://github.blog/changelog/2026-09-18-stage-only-npm-tokens-for-safer-automation)). Changes to tokens, package access, maintainers, trusted publishers and org or team membership need an interactive 2FA challenge even with a bypass-2FA token ([changelog](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/)), as do `npm stage approve` and `reject` ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)). Its API lists granular tokens as the security of every `/-/stage` path (list, record, tarball, stage, approve, delete) without naming a tier, and documents no 403 on the three reads ([API](https://api-docs.npmjs.com/)); short-lived trusted-publishing tokens can run `npm stage publish` but no other `npm stage` subcommand ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)). With no 403 to escalate on, a provider there picks the `stage-read` tier up front. Until a read-only token is shown to serve the reads ([test plan](stage-tiers-test.md)), the likeliest to work, though unverified, is a stage-only token without bypass-2FA, under write policy; it can still stage versions (gated by approve's 2FA) and change dist-tags and deprecations on the packages it selects, and, if visibility follows the token, which the test plan checks, those packages bound what `stage list` shows. |
+| npmjs.com | Read-only; read and write, either publish-and-stage or stage-only, which keeps dist-tag and deprecate ([changelog](https://github.blog/changelog/2026-09-18-stage-only-npm-tokens-for-safer-automation)). Changes to tokens, package access, maintainers, trusted publishers and org or team membership need an interactive 2FA challenge even with a bypass-2FA token ([changelog](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/)), as do `npm stage approve` and `reject` ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)). Its API lists granular tokens as the security of every `/-/stage` path (list, record, tarball, stage, approve, delete) without naming a tier, and documents no 403 on the three reads ([API](https://api-docs.npmjs.com/)); short-lived trusted-publishing tokens can run `npm stage publish` but no other `npm stage` subcommand ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)). A live test on 2026-10-17 ([stage-tiers-test.md](stage-tiers-test.md)) found that a read-only token selected to the package serves all three reads, as do stage-only, publish-and-stage and session tokens, so a provider there answers `stage-read` with a separate read-only token, with no presence check, and the reads work in CI. The record and the tarball honour the token's package selection, a read-only token selected to another package getting 404, but the list does not: it showed the staged version to that token too, filtered by the account rather than the token. |
 | GitHub Packages | `read:packages`, `write:packages`, `delete:packages` ([docs](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)). |
 | Azure Artifacts | Packaging read; read and write; read, write and manage, the last required to delete ([scopes](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/oauth)). |
 | Cargo (prior art) | Operations `read`, `publish`, `yank`, `unyank`, `owners`, plus an `Unknown` fallback for forward compatibility. |
@@ -798,7 +798,7 @@ No phase changes behavior for anyone who has not configured a helper or provider
 
 ## Unresolved Questions
 
-None blocks a phase. Whether a read-only npmjs.com token serves the `/-/stage` reads decides a provider's default there, not the protocol ([Operations](#4-operations), [test plan](stage-tiers-test.md)).
+None. The last one, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test: a read-only token does ([stage-tiers-test.md](stage-tiers-test.md)).
 
 ## Future possibilities
 
