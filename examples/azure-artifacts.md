@@ -2,7 +2,7 @@
 
 A hypothetical `npm-credential-provider-azure-artifacts` for the npm feeds of Azure Artifacts in Azure DevOps Services. Nothing here exists: the provider and its behaviour follow the [Phase 2 protocol](../phase-2-credential-provider.md); what the registry does (URLs, tokens, scopes, errors) is Microsoft's documented behaviour, with the source beside each fact. A fact the research could only recall, not verify, says so. The example shows a credential that is organization-wide and a key that sits at the organization prefix to match, a read that needs a write-capable token, a 403 that is a version conflict, and a token source (`az`) that answers the retry with the rejected token.
 
-Every exchange below has a transcript in [azure-artifacts/](azure-artifacts/), checked by `tests/test_examples.py` against the executable model. The model treats a provider error as the end of a request, so the two error answers shown inline (a 403 on publish, a retry after a 401 with an Entra token) have no transcript of their own. All tokens, organizations and URLs are fake.
+Every exchange below has a transcript in [azure-artifacts/](azure-artifacts/), checked by `tests/test_examples.py` against the executable model. The error answers (a refused operation, a 403 on publish, a retry after a 401 with an Entra token) are transcripts too: the model fails that request and goes on. All tokens, organizations and URLs are fake.
 
 ## Registry and credentials
 
@@ -102,7 +102,7 @@ The provider answers from its own per-organization cache, the same session token
 {"Ok":{"kind":"get","auth":{"type":"basic","username":"VssSessionToken","password":"example-manage-token-1"},"cache":"never","operationIndependent":false,"granularity":"package"}}
 ```
 
-The manage token is bound to the package and never reused. The unpublished version goes to the Recycle Bin and its number stays reserved ([delete and recover](https://learn.microsoft.com/en-us/azure/devops/artifacts/how-to/delete-and-recover-packages?view=azure-devops)). `stage`, `stage-read` and `stage-reject`, and `owner`, `access`, `trust` and `account`, are answered `operation-not-supported`, so the user sees npm's unsupported-operation error and not a 404 after a write-capable token was released for nothing:
+The manage token is bound to the package and never reused. The unpublished version goes to the Recycle Bin and its number stays reserved ([delete and recover](https://learn.microsoft.com/en-us/azure/devops/artifacts/how-to/delete-and-recover-packages?view=azure-devops)). `stage`, `stage-read` and `stage-reject`, and `owner`, `access`, `trust` and `account`, are answered `operation-not-supported`, so the user sees npm's unsupported-operation error and not a 404 after a write-capable token was released for nothing ([unsupported-operation.jsonl](azure-artifacts/unsupported-operation.jsonl)):
 
 ```json
 {"Err":{"kind":"operation-not-supported"}}
@@ -120,13 +120,13 @@ The manage token is bound to the package and never reused. The unpublished versi
 
 Erase drops the session token the provider minted, from memory and from its own per-organization cache, so the retry mints a new one. It keeps the Entra refresh token: that is `login`'s, removed only by `logout`. A user's static PAT stored by `login --token` is also kept: the provider reports the rejection and names `npm logout` and `npm login`. The retry answers with a new token and a later `expiresAt`.
 
-**A 401 with a token that has not expired.** With `az account get-access-token` as the token source, the retry gets the same token again, because `az` serves its cached token until it is near expiry. The provider must not answer with it. A 401 on an unexpired Entra token can mean an identity not added to the organization (`TF401444`, [service principals](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops)); the az subscription must also belong to the tenant connected to the organization ([Entra tokens](https://learn.microsoft.com/en-us/azure/devops/cli/entra-tokens?view=azure-devops)). That a wrong tenant or a conditional-access rule gives a 401 is recalled, not verified. Refreshing fixes none of them. It answers the retry with a diagnosis:
+**A 401 with a token that has not expired.** With `az account get-access-token` as the token source, the retry gets the same token again, because `az` serves its cached token until it is near expiry. The provider must not answer with it. A 401 on an unexpired Entra token can mean an identity not added to the organization (`TF401444`, [service principals](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops)); the az subscription must also belong to the tenant connected to the organization ([Entra tokens](https://learn.microsoft.com/en-us/azure/devops/cli/entra-tokens?view=azure-devops)). That a wrong tenant or a conditional-access rule gives a 401 is recalled, not verified. Refreshing fixes none of them. It answers the retry with a diagnosis ([rejection-unchanged-token.jsonl](azure-artifacts/rejection-unchanged-token.jsonl)):
 
 ```json
 {"Err":{"kind":"other","message":"Azure Artifacts rejected an Entra token that has not expired. The token source returns the same token again. Check that the signed-in tenant is the one connected to the contoso organization and that the identity is a member of it, then run npm login."}}
 ```
 
-**A 403 on publish.** A 403 on a publish usually means the version exists or once existed in the feed, and an upstream that holds the version blocks it too; versions are immutable and permanently reserved ([publish](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/publish?view=azure-devops), [upstream sources](https://learn.microsoft.com/en-us/azure/devops/artifacts/concepts/upstream-sources?view=azure-devops)). npm sends no erase, only a retry:
+**A 403 on publish.** [publish-version-conflict.jsonl](azure-artifacts/publish-version-conflict.jsonl). A 403 on a publish usually means the version exists or once existed in the feed, and an upstream that holds the version blocks it too; versions are immutable and permanently reserved ([publish](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/publish?view=azure-devops), [upstream sources](https://learn.microsoft.com/en-us/azure/devops/artifacts/concepts/upstream-sources?view=azure-devops)). npm sends no erase, only a retry:
 
 ```json
 {"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.2.0","operation":"publish","command":"publish","interactive":true,"retry":true,"httpStatus":403}

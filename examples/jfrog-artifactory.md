@@ -85,7 +85,7 @@ The provider holds a long-lived login in the OS keychain: a refresh token or an 
 
 Artifactory serves publish, `dist-tag`, `deprecate` and `unpublish` from the same user-scope token. A publish needs Deploy on the target repository (through a virtual repository, on its Default Deployment Repository); an unpublish also needs Delete. All of this is from memory and not verified against the current documentation. The transcript also shows a `dist-tag` request, answered with the same token.
 
-The provider answers the operations Artifactory has no npm endpoint for with `operation-not-supported` ([Request kinds](../phase-2-credential-provider.md#3-request-kinds)): `stage`, `stage-read`, `stage-reject`, `owner`, `access`, `trust` and `account` (unverified, from memory). A failing answer ends a transcript in the executable model, so these are shown here and not as a file:
+The provider answers the operations Artifactory has no npm endpoint for with `operation-not-supported` ([Request kinds](../phase-2-credential-provider.md#3-request-kinds)): `stage`, `stage-read`, `stage-reject`, `owner`, `access`, `trust` and `account` (unverified, from memory). The answer is [stage-unsupported.jsonl](jfrog-artifactory/stage-unsupported.jsonl):
 
 ```json
 {"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.5.0","operation":"stage","command":"stage","interactive":true}
@@ -115,7 +115,7 @@ A publish to a virtual repository that has no Default Deployment Repository fail
 - **The retry** mints a fresh token with the stored login. A 401 does not prove the login is dead: the URL may be one a lockfile chose. If the mint itself is refused with 401, the login is dead, and the provider answers `other`, naming `npm login`. It starts no browser flow, in this request or any other that is not `login` ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)).
 - If the rejected credential is the stored identity token itself, handed out as it is, erase keeps it and the rejection is reported, naming `npm logout` and `npm login`.
 
-**403.** Without permission an authenticated user gets 403 ([security configuration](https://docs.jfrog.com/administration/docs/security-configuration)). npm sends no erase and retries once with `httpStatus: 403`. A provider with one identity has nothing wider to move to, and answering with the same token wastes the retry. It answers `other`, and npm shows the message and fails the request. As above, this ends a transcript in the model, so it is shown here:
+**403.** Without permission an authenticated user gets 403 ([security configuration](https://docs.jfrog.com/administration/docs/security-configuration)). npm sends no erase and retries once with `httpStatus: 403`. A provider with one identity has nothing wider to move to, and answering with the same token wastes the retry. It answers `other`, and npm shows the message and fails the request. It is [publish-403.jsonl](jfrog-artifactory/publish-403.jsonl):
 
 ```json
 {"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.4.0","operation":"publish","command":"publish","interactive":true,"retry":true,"httpStatus":403}

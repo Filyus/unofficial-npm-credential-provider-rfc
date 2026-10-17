@@ -126,7 +126,7 @@ Before it answers, the provider asks for user presence on the controlling termin
 | `stage`, `stage-read`, `stage-reject` | No `/-/stage` endpoints (recalled, not documented). | `operation-not-supported` |
 | `owner`, `access`, `trust`, `account` | Not implemented; the RFC says so for `access` and `trust`, the rest is recalled. | `operation-not-supported` |
 
-An answer to `deprecate` is not in the transcript, because the test model ends a request at an error that is not `not-found` or `url-not-supported`:
+[deprecate-unsupported.jsonl](github-packages/deprecate-unsupported.jsonl). The answer to `deprecate`:
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.0","operation":"deprecate","command":"deprecate","interactive":true}
@@ -157,11 +157,11 @@ If the check fails, the token is dead. The retry is answered with an error, and 
 {"Err":{"kind":"other","message":"GitHub rejected the stored token for the work account. Run npm logout and npm login for https://npm.pkg.github.com/."}}
 ```
 
-That answer is not in the transcript: the test model ends a request at it, as it ends one at any error that is not `not-found` or `url-not-supported`.
+That exchange is [rejection-dead-token.jsonl](github-packages/rejection-dead-token.jsonl): the request fails and the session goes on.
 
 A provider backed by `gh` never runs `gh auth logout` or touches `gh`'s store on a rejection. That token belongs to `gh`.
 
-**403.** npm sends no erase and retries once with `httpStatus: 403`:
+**403.** [rejection-403.jsonl](github-packages/rejection-403.jsonl). npm sends no erase and retries once with `httpStatus: 403`:
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}

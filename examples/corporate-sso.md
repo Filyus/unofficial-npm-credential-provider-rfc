@@ -2,7 +2,7 @@
 
 A company runs a private npm registry behind an SSO gateway. Developers sign in to the company identity provider (IdP) with an OIDC device-code login, and the gateway accepts only short-lived tokens that a provider mints for each request scope. This page describes a hypothetical `corp-npm-credential-provider` for it. The gateway, the IdP, their endpoints and every number below (token lifetimes, windows, role names) are invented for the example: they are one company's policy, not facts about a product. Only the device flow is taken from a standard, [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628). The page shows a global provider chain whose hello lists the company's registries, prompts on the controlling terminal, a publish credential gated on user presence, a refusal (`other`, not `not-found`) where presence would be needed but `interactive` is `false`, and CI with a non-interactive service identity.
 
-Every exchange below is a transcript in [corporate-sso/](corporate-sso/) that the repository's model accepts (`python -m unittest tests.test_examples`). The model cannot replay an `other` answer, so those are shown inline only ([What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc)).
+Every exchange below is a transcript in [corporate-sso/](corporate-sso/) that the repository's model accepts (`python -m unittest tests.test_examples`). The `other` answers are transcripts too: the model fails that request and goes on ([What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc)).
 
 ## Registry and credentials
 
@@ -74,7 +74,7 @@ The chain ends with the implicit `npm:token`. A user with a stored token for a c
 - `cache` is `expires` with a Unix time in seconds, 15 minutes ahead. npm stops using the entry 60 seconds early. The last pair in the file is a `get` for another `@corp` package well after that time: the install outlived the token, and the provider mints a new one.
 - `operationIndependent` is `false`: the token reads and nothing else. npm binds an answer for an operation other than `read` to its operation anyway, but not a `read` answer, so `true` here would let a later `publish` lookup find the read token ([What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc)).
 - If the IdP session is gone, an interactive `get` starts a device flow on the terminal, exactly as `login` does ([Login and logout](#login-and-logout)). The 5-minute budget of an interactive `get` applies.
-- If the session is gone and `interactive` is `false`, the provider held a session once and cannot renew it without the user. It answers `other`, not `not-found`, so a stored token behind it in the chain does not stand in for the company's login ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)):
+- If the session is gone and `interactive` is `false`, the provider held a session once and cannot renew it without the user ([session-expired.jsonl](corporate-sso/session-expired.jsonl)). It answers `other`, not `not-found`, so a stored token behind it in the chain does not stand in for the company's login ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)):
 
 ```json
 {"Err":{"kind":"other","message":"The corporate SSO session has expired. Run 'npm login --registry https://npm.corp.example.com/' in a terminal."}}
@@ -97,7 +97,7 @@ The provider's policy for `publish`:
 2. It then asks on the controlling terminal: `Publish @corp/ui-kit@2.4.1 to npm.corp.example.com? [y/N]`. The prompt names the package and the version, which only a `publish` request carries.
 3. It mints a token for that package and version, valid for 5 minutes, and answers with `granularity: "package"`.
 
-The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so it shows only the `[y/N]` prompt. npm caches publish answers per operation and package, so each package in a workspace publish asks again; the provider asks the user once per package and the device flow once per five minutes. With `interactive: false` and no service identity, a publish gets:
+The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so it shows only the `[y/N]` prompt. npm caches publish answers per operation and package, so each package in a workspace publish asks again; the provider asks the user once per package and the device flow once per five minutes. With `interactive: false` and no service identity, a publish gets ([publish-no-terminal.jsonl](corporate-sso/publish-no-terminal.jsonl)):
 
 ```json
 {"Err":{"kind":"other","message":"Publishing @corp/ui-kit@2.4.1 needs a device-code confirmation, and no terminal is available. Run npm publish from a terminal, or from the release runner."}}
@@ -190,7 +190,7 @@ Nothing breaks the text. Three points are ambiguous or strained, and one concern
 
 1. **`operationIndependent` defaults to `true`** ([Success response](../phase-2-credential-provider.md#success-response-provider--client)). A token that reads only is not independent of the operation, and a provider that leaves the field out says it is. For `read` that is not harmless: npm binds only the answers for other operations to their operation, and a `read` answer kept as operation-independent at registry level is the entry a later `publish` lookup finds first ([Caching](../phase-2-credential-provider.md#5-caching); the repository's model returns it for a `publish` lookup). A provider that omits the field on a read-only token would see its token sent with a publish. The default describes almost no real provider.
 2. **"A check of its own against the registry"** ([`erase`](../phase-2-credential-provider.md#erase-a-credential-was-rejected)). Before a provider starts a login after a 401, the RFC asks for a check against the registry. Here the login lives at the IdP, which answers a refresh with `invalid_grant`; the gateway is not asked at all. The rule's purpose, that a lockfile URL cannot start a login, is met by a check against whoever holds the login, and the text could say so.
-3. **The model cannot replay `other`** (the repository's `tests/protocol_model.py`, not the RFC text). `validate_transcript` raises on any `other` answer, as it ends the session, so the central answer of this registry (`other` for presence needed but `interactive` false) cannot be a checked transcript. The examples show it inline. A transcript that ends at an `other`, as a session does, would let the model check the rest.
+3. **The model cannot replay `other`** (the repository's `tests/protocol_model.py`, not the RFC text). `validate_transcript` raises on any `other` answer, as it ends the session, so the central answer of this registry (`other` for presence needed but `interactive` false) cannot be a checked transcript. The examples show it inline. A transcript that ends at an `other`, as a session does, would let the model check the rest. **Settled:** the model now fails that request and goes on, so these exchanges are checked transcripts.
 
 The points below look like gaps and are answered by the RFC as it stands:
 

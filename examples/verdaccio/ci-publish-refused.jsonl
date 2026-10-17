@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","version":"2.4.1","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"publish to https://npm.example.test/verdaccio/ needs a full Verdaccio token and a user to approve it; none is available in CI"}}}
+{"from":"client","event":"close"}

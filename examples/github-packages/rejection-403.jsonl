@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"GitHub refused the work account's token for @acme. The organization may require SSO authorization of the token or may block classic personal access tokens. Authorize it at github.com/settings/tokens, then run npm install again."}}}
+{"from":"client","event":"close"}

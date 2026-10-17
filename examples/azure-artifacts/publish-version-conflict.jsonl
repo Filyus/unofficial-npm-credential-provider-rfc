@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.2.0","operation":"publish","command":"publish","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"basic","username":"VssSessionToken","password":"example-session-token-1"},"cache":"expires","expiresAt":1792213200,"operationIndependent":true,"granularity":"registry"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.2.0","operation":"publish","command":"publish","interactive":true,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Azure Artifacts refused the publish of @contoso/ui 3.2.0 with 403. For a publish this usually means the version already exists, or once existed, in the feed or in an upstream, and versions are never reused. No other credential is released for this request. Publish a new version.","causedBy":["Azure Artifacts answers 403 for a duplicate or deleted version"]}}}
+{"from":"client","event":"close"}

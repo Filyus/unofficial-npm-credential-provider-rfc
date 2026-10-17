@@ -86,7 +86,7 @@ Operations CodeArtifact does not serve get a clear refusal, not the read token:
 {"Err":{"kind":"operation-not-supported"}}
 ```
 
-for `unpublish`, `owner`, `access`, `account`, `trust`, `stage`, `stage-read` and `stage-reject`. `npm stage approve` and `reject` then stop at the `stage-read` lookup ([Staged versions](../phase-2-credential-provider.md#4-operations)). The transcript model rejects a session that ends in a failure, so these answers are shown here only.
+for `unpublish`, `owner`, `access`, `account`, `trust`, `stage`, `stage-read` and `stage-reject`. `npm stage approve` and `reject` then stop at the `stage-read` lookup ([Staged versions](../phase-2-credential-provider.md#4-operations)). The refusal is [unsupported-operation.jsonl](aws-codeartifact/unsupported-operation.jsonl).
 
 ## Rejection
 
@@ -101,7 +101,7 @@ for `unpublish`, `owner`, `access`, `account`, `trust`, `stage`, `stage-read` an
 
 The erase carries no `authChallenges`, since CodeArtifact's header is not documented. The provider drops its cached domain token, never `~/.aws/sso/cache`, and cannot revoke on the server, since tokens have no revocation. The retry mints again. If the AWS session itself has expired and `interactive` is `false`, the retry answers `other` ("run aws sso login"); with `interactive: true` it starts an SSO login only after a check of its own (`sts:GetCallerIdentity` fails), not because of the 401.
 
-A 403 is different. An authenticated identity that lacks the permission presumably gets 403 (unverified in AWS's documents), and the token is an identity snapshot, so a re-minted token from the same identity is refused the same way. npm sends no erase and one retry with `httpStatus: 403`. A provider with only one identity answers it `other` and does not call `GetAuthorizationToken` again:
+A 403 is different. An authenticated identity that lacks the permission presumably gets 403 (unverified in AWS's documents), and the token is an identity snapshot, so a re-minted token from the same identity is refused the same way. npm sends no erase and one retry with `httpStatus: 403`. A provider with only one identity answers it `other` and does not call `GetAuthorizationToken` again ([publish-forbidden.jsonl](aws-codeartifact/publish-forbidden.jsonl)):
 
 ```json
 {"Err":{"kind":"other","message":"The publish identity is denied PublishPackageVersion for this package. A new token would be refused the same way.","causedBy":["registry answered 403"]}}
@@ -160,4 +160,4 @@ For `publish` the example provider's trusted config (an argument such as `--ci-p
 - **A credential wider than the cache key** ([Caching](../phase-2-credential-provider.md#5-caching), [erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)). The token is domain-wide, and the `registry` granularity is one URL. The extra `get` per repository and an erase that clears only one URL's cache entry work, but the RFC does not say that a provider may answer several URLs with one credential, or that an erase for one leaves the others in npm's cache.
 - **Global chain with hello `registries`** ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Entries are prefixes, so a provider for "any CodeArtifact host" cannot list its registries and must parse `registry` itself. The per-registry form is the advice here; the text could say that a provider whose hosts are a pattern belongs there.
 - **`logout` and `login` for a registry with no revocation and no long-lived credential** ([login](../phase-2-credential-provider.md#login-authenticate-with-a-registry), [logout](../phase-2-credential-provider.md#logout-remove-stored-credentials)). `logout` has nothing to revoke, and `login` has no static token to store; both fit the existing text (`Ok` with a warning, `operation-not-supported` or `other`), so nothing new, only an example.
-- **Test material.** The transcript model raises on any terminal error (`other`, `operation-not-supported`), so a transcript cannot show a refused operation or a 403 that ends in `other`; this page shows them inline.
+- **Test material.** The transcript model raises on any terminal error (`other`, `operation-not-supported`), so a transcript cannot show a refused operation or a 403 that ends in `other`; this page shows them inline. **Settled:** the model now fails that request and goes on, so these exchanges are checked transcripts.

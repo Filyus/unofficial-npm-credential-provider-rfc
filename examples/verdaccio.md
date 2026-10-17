@@ -103,7 +103,7 @@ A 401 is the less common rejection here. An expired or badly signed JWT does not
 On the erase the provider drops its in-memory copy and keeps the tokens in its keychain, since they are what it hands out and only `logout` removes them. Its check for a dead login is a `GET /-/whoami` with the token against the configured base (never a realm or a lockfile URL), and it runs while answering the retry `get`, not the erase, which has a 10-second budget meant for local cleanup ([timeouts](../phase-2-credential-provider.md#session-lifecycle)):
 
 - 200: the token is alive and the 401 was specific to the request or the node. The provider answers the retry with the same token, as in the transcript. If the registry rejects it again, npm erases it and reports the rejection, with no second retry.
-- 401: the token is expired or invalid. The provider starts no login on the strength of that alone ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)) and answers the retry with an error that names the cure:
+- 401: the token is expired or invalid. The provider starts no login on the strength of that alone ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)) and answers the retry with an error that names the cure ([rejection-dead-token.jsonl](verdaccio/rejection-dead-token.jsonl)):
 
 ```json
 {"Err":{"kind":"other","message":"The Verdaccio token for https://npm.example.test/verdaccio/ was rejected. Run npm logout, then npm login."}}
@@ -161,7 +161,7 @@ The provider revokes both generated tokens with `DELETE /-/npm/v1/tokens/token/<
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-stage-token"},"cache":"session","granularity":"package","operationIndependent":false}}
 ```
 
-No one is present, so by default the provider holds or is given only the read-only token and releases it for installs. A write is answered `other`, naming what was needed ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)):
+No one is present, so by default the provider holds or is given only the read-only token and releases it for installs. A write is answered `other`, naming what was needed ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior), [ci-publish-refused.jsonl](verdaccio/ci-publish-refused.jsonl)):
 
 ```json
 {"Err":{"kind":"other","message":"publish to https://npm.example.test/verdaccio/ needs a full Verdaccio token and a user to approve it; none is available in CI"}}
