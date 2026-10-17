@@ -1,4 +1,4 @@
-From fd648dcb3fedf7d0b64cb97302bd1bfcc91742b3 Mon Sep 17 00:00:00 2001
+From 194f1b56ef3e0d68171131096ede05de1e47f6e6 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -44,7 +44,7 @@ for the credential provider RFC discussed in npm/rfcs#850.
  lib/commands/unpublish.js                  |   4 +-
  lib/utils/error-message.js                 |   4 +-
  lib/utils/get-identity.js                  |   2 +-
- lib/utils/oidc.js                          |  23 +
+ lib/utils/oidc.js                          |  38 ++
  lib/utils/publish-config.js                |  24 +
  test/fixtures/token-helper/helper          |   2 +
  test/fixtures/token-helper/helper.cmd      |   1 +
@@ -57,14 +57,14 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/lib/commands/unpublish.js             |  29 +
  test/lib/commands/whoami.js                |  11 +
  test/lib/utils/error-message.js            |  10 +
- test/lib/utils/oidc.js                     |  39 ++
+ test/lib/utils/oidc.js                     |  42 ++
  test/lib/utils/publish-config.js           |  26 +
- workspaces/config/lib/definitions/index.js |   1 +
+ workspaces/config/lib/definitions/index.js |   7 +
  workspaces/config/lib/index.js             | 265 ++++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 604 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 608 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1283 insertions(+), 21 deletions(-)
+ 29 files changed, 1311 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -297,41 +297,53 @@ index a523a7c..036fb1d 100644
      if (typeof registryData?.username === 'string') {
        return registryData.username
 diff --git a/lib/utils/oidc.js b/lib/utils/oidc.js
-index 7f18170..8cd3914 100644
+index 7f18170..cbc3b0b 100644
 --- a/lib/utils/oidc.js
 +++ b/lib/utils/oidc.js
-@@ -13,7 +13,13 @@ const libaccess = require('libnpmaccess')
+@@ -13,7 +13,25 @@ const libaccess = require('libnpmaccess')
   */
  let activeExchangeRecord
  
 +// A configured tokenHelper takes precedence over a stored _authToken, so while
 +// an OIDC token is in use the helper for the same registry is masked with an
-+// empty value; trusted publishing must win over a long-lived credential.
++// empty value; trusted publishing must win over a long-lived credential. The
++// mask goes into config, which commands ask about credentials, and into the
++// request options' tokenHelpers, which is where npm-registry-fetch looks.
 +const helperKeyFor = authTokenKey => authTokenKey.replace(/:_authToken$/, ':tokenHelper')
++const regKeyFor = authTokenKey => authTokenKey.replace(/:_authToken$/, '')
++const withHelper = (helpers, regKey, value) => {
++  const next = { ...helpers }
++  if (value === undefined) {
++    delete next[regKey]
++  } else {
++    next[regKey] = value
++  }
++  return next
++}
 +
  const setOidcToken = ({ config, opts, authTokenKey, token }) => {
 +  const helperKey = helperKeyFor(authTokenKey)
    activeExchangeRecord = {
      config,
      authTokenKey,
-@@ -21,9 +27,12 @@ const setOidcToken = ({ config, opts, authTokenKey, token }) => {
+@@ -21,9 +39,12 @@ const setOidcToken = ({ config, opts, authTokenKey, token }) => {
      previousCliToken: config.get(authTokenKey, 'cli'),
      opts,
      previousOptsToken: opts[authTokenKey],
-+    previousOptsHelper: opts[helperKey],
++    previousOptsHelpers: opts.tokenHelpers,
    }
    opts[authTokenKey] = token
-+  opts[helperKey] = ''
++  opts.tokenHelpers = withHelper(opts.tokenHelpers, regKeyFor(authTokenKey), '')
    config.set(authTokenKey, token, 'cli')
 +  config.set(helperKey, '', 'cli')
    log.verbose('oidc', 'Successfully retrieved and set token')
  }
  
-@@ -39,13 +48,18 @@ const clearOidcToken = ({ config, opts }) => {
+@@ -39,13 +60,18 @@ const clearOidcToken = ({ config, opts }) => {
      previousCliToken,
      opts: previousOpts,
      previousOptsToken,
-+    previousOptsHelper,
++    previousOptsHelpers,
    } = activeExchangeRecord
 +  const helperKey = helperKeyFor(authTokenKey)
    if (previousConfig.get(authTokenKey, 'cli') === token) {
@@ -346,26 +358,29 @@ index 7f18170..8cd3914 100644
    }
    for (const requestOpts of new Set([previousOpts, opts])) {
      if (requestOpts[authTokenKey] === token) {
-@@ -55,6 +69,14 @@ const clearOidcToken = ({ config, opts }) => {
+@@ -55,6 +81,17 @@ const clearOidcToken = ({ config, opts }) => {
        } else {
          requestOpts[authTokenKey] = fallback
        }
-+      const helperFallback = requestOpts === previousOpts
-+        ? previousOptsHelper
-+        : config.get(helperKey)
-+      if (helperFallback === undefined) {
-+        delete requestOpts[helperKey]
++      if (requestOpts === previousOpts) {
++        if (previousOptsHelpers === undefined) {
++          delete requestOpts.tokenHelpers
++        } else {
++          requestOpts.tokenHelpers = previousOptsHelpers
++        }
 +      } else {
-+        requestOpts[helperKey] = helperFallback
++        const configured = config.get(helperKey)
++        const regKey = regKeyFor(authTokenKey)
++        requestOpts.tokenHelpers = withHelper(requestOpts.tokenHelpers, regKey, configured)
 +      }
      }
    }
    activeExchangeRecord = undefined
-@@ -193,6 +215,7 @@ async function oidc ({
+@@ -193,6 +230,7 @@ async function oidc ({
        response = await npmFetch.json(new URL(`/-/npm/v1/oidc/token/exchange/package/${escapedPackageName}`, registry), {
          ...opts,
          [authTokenKey]: idToken, // Use the idToken as the auth token for the request
-+        [helperKeyFor(authTokenKey)]: '', // not a configured helper's credential
++        tokenHelpers: withHelper(opts.tokenHelpers, regKey, ''), // not a configured helper's credential
          method: 'POST',
        })
      } catch (error) {
@@ -691,16 +706,17 @@ index 44a57ec..b0f4954 100644
 +  t.same(causes(wrapped), [['cause', 'inner reason']])
 +})
 diff --git a/test/lib/utils/oidc.js b/test/lib/utils/oidc.js
-index 72f7726..fc7ae75 100644
+index 72f7726..35d36b8 100644
 --- a/test/lib/utils/oidc.js
 +++ b/test/lib/utils/oidc.js
-@@ -237,3 +237,42 @@ t.test('does not copy package-specific fallback options into the next package',
+@@ -237,3 +237,45 @@ t.test('does not copy package-specific fallback options into the next package',
    t.equal(firstOpts[authTokenKey], 'package-specific-token')
    t.equal(nextOpts[authTokenKey], fallbackToken)
  })
 +
 +t.test('a configured tokenHelper is masked while the OIDC token is in use', async t => {
 +  const helperKey = '//registry.npmjs.org/:tokenHelper'
++  const regKey = '//registry.npmjs.org/'
 +  const helper = '/usr/local/bin/token'
 +  const { npm, responses, run } = await setup(t)
 +  npm.config.set(helperKey, helper, 'user')
@@ -711,31 +727,33 @@ index 72f7726..fc7ae75 100644
 +  }
 +
 +  const opts = await run()
-+  t.equal(exchangeOpts[helperKey], '', 'the exchange request does not use the helper')
-+  t.equal(opts[helperKey], '', 'nor does the publish that follows')
++  t.equal(exchangeOpts.tokenHelpers[regKey], '', 'the exchange request does not use the helper')
++  t.equal(opts.tokenHelpers[regKey], '', 'nor does the publish that follows')
 +  t.equal(opts[authTokenKey], exchangeToken)
 +  t.equal(npm.config.get(helperKey), '', 'config reports no helper while the token is active')
 +  t.equal(npm.config.get(helperKey, 'user'), helper, 'user config is never overwritten')
 +
 +  responses.push({})
 +  const nextOpts = await run(opts)
-+  t.equal(nextOpts[helperKey], helper, 'the helper is back once the exchange token is cleared')
++  t.equal(nextOpts.tokenHelpers[regKey], helper, 'the helper is back once the exchange token is cleared')
 +  t.equal(npm.config.get(helperKey, 'cli'), undefined, 'the runtime mask is removed')
-+  t.equal(npm.flatOptions[helperKey], helper)
++  t.equal(npm.flatOptions.tokenHelpers[regKey], helper)
 +})
 +
 +t.test('a copy of the exchange options gets the configured helper back, not a package-specific one', async t => {
 +  const helperKey = '//registry.npmjs.org/:tokenHelper'
++  const regKey = '//registry.npmjs.org/'
 +  const helper = '/usr/local/bin/token'
 +  const { npm, responses, run } = await setup(t)
 +  npm.config.set(helperKey, helper, 'user')
-+  const firstOpts = await run({ ...npm.flatOptions, [helperKey]: '/opt/package-specific' })
-+  t.equal(firstOpts[helperKey], '', 'masked during the exchange')
++  const packageSpecific = { [regKey]: '/opt/package-specific' }
++  const firstOpts = await run({ ...npm.flatOptions, tokenHelpers: packageSpecific })
++  t.equal(firstOpts.tokenHelpers[regKey], '', 'masked during the exchange')
 +
 +  responses.push({})
 +  const copy = await run({ ...firstOpts })
-+  t.equal(copy[helperKey], helper, 'restored from config')
-+  t.equal(firstOpts[helperKey], '/opt/package-specific', 'the original options get their own value back')
++  t.equal(copy.tokenHelpers[regKey], helper, 'restored from config')
++  t.equal(firstOpts.tokenHelpers, packageSpecific, 'the original options get their own value back')
 +})
 diff --git a/test/lib/utils/publish-config.js b/test/lib/utils/publish-config.js
 new file mode 100644
@@ -770,10 +788,23 @@ index 0000000..23452aa
 +  t.same(logs, [], 'no warning when asked not to')
 +})
 diff --git a/workspaces/config/lib/definitions/index.js b/workspaces/config/lib/definitions/index.js
-index b5b63bf..41d6ba1 100644
+index b5b63bf..e54d685 100644
 --- a/workspaces/config/lib/definitions/index.js
 +++ b/workspaces/config/lib/definitions/index.js
-@@ -68,6 +68,7 @@ const nerfDarts = [
+@@ -14,6 +14,12 @@ const flatten = (obj, flat = {}) => {
+     const def = definitions[key]
+     if (def && def.flatten) {
+       def.flatten(key, obj, flat)
++    } else if (/^\/\/.*\/:tokenHelper$/.test(key)) {
++      // A helper is a program npm runs, so npm-registry-fetch takes it only
++      // from this map and never from the config-key namespace, which other
++      // tools fill with every .npmrc key they read, a project's included.
++      // Only trusted files can hold the key by the time it gets here.
++      flat.tokenHelpers = { ...flat.tokenHelpers, [key.slice(0, -':tokenHelper'.length)]: val }
+     } else if (/@.*:registry$/i.test(key) || /^\/\//.test(key)) {
+       flat[key] = val
+     }
+@@ -68,6 +74,7 @@ const nerfDarts = [
    'certfile', // Does not have a config
    'email', // Does not have a config
    'keyfile', // Does not have a config
@@ -1141,7 +1172,7 @@ index 12719b5..e9be8d3 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..67742d8 100644
+index 9f83d98..c4bbb30 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,7 +2,7 @@ const t = require('tap')
@@ -1153,7 +1184,17 @@ index 9f83d98..67742d8 100644
  const { resolve, join, dirname } = require('node:path')
  
  // when running with `npm test` it adds environment variables that
-@@ -36,8 +36,18 @@ const throwIfExternalNpmrc = path => {
+@@ -18,6 +18,9 @@ const createDef = (key, value) => ({ [key]: new Definition(key, { key, ...value
+ 
+ const typeDefs = require('../lib/type-defs.js')
+ 
++// helpers reach npm-registry-fetch as flat.tokenHelpers, keyed by registry
++const helperIn = (flat, key) => flat.tokenHelpers?.[key.replace(/:tokenHelper$/, '')]
++
+ const nodePrefix = process.platform === 'win32'
+   ? dirname(process.execPath)
+   : dirname(dirname(process.execPath))
+@@ -36,8 +39,18 @@ const throwIfExternalNpmrc = path => {
    }
  }
  
@@ -1172,7 +1213,7 @@ index 9f83d98..67742d8 100644
    readFileSync: (path, ...args) => {
      throwIfExternalNpmrc(path)
      if (path.includes('WEIRD-ERROR')) {
-@@ -2468,3 +2478,595 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2481,596 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -1239,10 +1280,11 @@ index 9f83d98..67742d8 100644
 +  await config.load()
 +  config.logWarnings()
 +
-+  t.equal(config.flat[key], helper, 'user config reaches the registry client')
-+  t.equal(config.flat['//global.registry/:tokenHelper'], helper, 'so does global config')
++  t.equal(helperIn(config.flat, key), helper, 'user config reaches the registry client')
++  t.notOk(Object.hasOwn(config.flat, key), 'as tokenHelpers, never as the config key, which npm-registry-fetch ignores')
++  t.equal(helperIn(config.flat, '//global.registry/:tokenHelper'), helper, 'so does global config')
 +  for (const where of ['project', 'env', 'cli']) {
-+    t.notOk(config.flat[`//${where}.registry/:tokenHelper`], `${where} config is dropped`)
++    t.notOk(helperIn(config.flat, `//${where}.registry/:tokenHelper`), `${where} config is dropped`)
 +    t.ok(
 +      logs.some(l => l[0] === 'warn' && l.join(' ').includes(`Ignoring ${where} config "//${where}.registry/:tokenHelper"`)),
 +      `${where} config is reported`
@@ -1303,14 +1345,14 @@ index 9f83d98..67742d8 100644
 +  t.test('userconfig set in the project', async t => {
 +    const { config, warned } = await loadWith(t, 'userconfig=<path>/project/repo-user.npmrc\n')
 +    t.match(config.get('userconfig'), /repo-user\.npmrc$/, 'the redirect itself still applies')
-+    t.notOk(config.flat[key], 'but its helper is dropped')
++    t.notOk(helperIn(config.flat, key), 'but its helper is dropped')
 +    t.ok(warned, 'and reported')
 +  })
 +
 +  t.test('globalconfig set in the project', async t => {
 +    const { config, warned } = await loadWith(t, 'globalconfig=<path>/project/repo-user.npmrc\n',
 +      ['--userconfig=<path>/home/.npmrc'])
-+    t.notOk(config.flat[key], 'helper from the redirected global file is dropped')
++    t.notOk(helperIn(config.flat, key), 'helper from the redirected global file is dropped')
 +    t.ok(warned, 'and reported')
 +  })
 +
@@ -1324,7 +1366,7 @@ index 9f83d98..67742d8 100644
 +    t.test(`globalconfig set in the project over one from ${via}`, async t => {
 +      const { config, warned } = await loadWith(t, 'globalconfig=<path>/project/repo-user.npmrc\n', argv, {}, env)
 +      t.match(config.get('globalconfig'), /repo-user\.npmrc$/, 'the project value is in effect')
-+      t.notOk(config.flat[key], 'so its helper is dropped')
++      t.notOk(helperIn(config.flat, key), 'so its helper is dropped')
 +      t.ok(warned, 'and reported')
 +    })
 +  }
@@ -1341,7 +1383,7 @@ index 9f83d98..67742d8 100644
 +          'home.npmrc': 'globalconfig=<path>/home/user-g.npmrc\n',
 +        }, env)
 +      t.match(config.get('globalconfig'), /repo-user\.npmrc$/, 'the project value is in effect')
-+      t.notOk(config.flat[key], 'so its helper is dropped')
++      t.notOk(helperIn(config.flat, key), 'so its helper is dropped')
 +      t.ok(warned, 'and reported')
 +    })
 +  }
@@ -1353,13 +1395,13 @@ index 9f83d98..67742d8 100644
 +        '../home/g.npmrc': `${key}=${helper}\n`,
 +      })
 +    t.equal(config.get('globalconfig'), join(path, 'home', 'g.npmrc'), 'the user value is in effect')
-+    t.equal(config.flat[key], helper, 'and the file it chose is trusted')
++    t.equal(helperIn(config.flat, key), helper, 'and the file it chose is trusted')
 +  })
 +
 +  t.test('prefix set in the project moves the default global file', async t => {
 +    const { config, warned } = await loadWith(t, 'prefix=<path>/project/repo-prefix\n',
 +      ['--userconfig=<path>/home/.npmrc'])
-+    t.notOk(config.flat[key], 'helper from <prefix>/etc/npmrc is dropped')
++    t.notOk(helperIn(config.flat, key), 'helper from <prefix>/etc/npmrc is dropped')
 +    t.ok(warned, 'and reported')
 +  })
 +
@@ -1373,7 +1415,7 @@ index 9f83d98..67742d8 100644
 +    t.test(`a key that expands to a selecting setting: ${line.trim()}`, async t => {
 +      const argv = line.startsWith('user') ? [] : ['--userconfig=<path>/home/.npmrc']
 +      const { config, warned } = await loadWith(t, line, argv)
-+      t.notOk(config.flat[key], 'helper from the selected file is dropped')
++      t.notOk(helperIn(config.flat, key), 'helper from the selected file is dropped')
 +      t.ok(warned, 'and reported')
 +    })
 +  }
@@ -1383,7 +1425,7 @@ index 9f83d98..67742d8 100644
 +      'chain.npmrc': 'globalconfig=<path>/project/repo-user.npmrc\n',
 +    })
 +    t.match(config.get('globalconfig'), /repo-user\.npmrc$/, 'the global file is moved')
-+    t.notOk(config.flat[key], 'but its helper is dropped')
++    t.notOk(helperIn(config.flat, key), 'but its helper is dropped')
 +    t.same(config.tokenHelperUntrusted, ['user', 'global'], 'and both files are passed on as untrusted')
 +  })
 +
@@ -1391,7 +1433,7 @@ index 9f83d98..67742d8 100644
 +    const { config, warned } = await loadWith(t, '', ['--userconfig=<path>/home/cli.npmrc'], {
 +      '../home/cli.npmrc': `${key}=${helper}\n`,
 +    })
-+    t.equal(config.flat[key], helper)
++    t.equal(helperIn(config.flat, key), helper)
 +    t.notOk(warned)
 +  })
 +
@@ -1404,7 +1446,7 @@ index 9f83d98..67742d8 100644
 +  ]) {
 +    t.test(`a file inside the project chosen by ${what} is not trusted`, async t => {
 +      const { config, logs } = await loadWith(t, '', argv, {}, env)
-+      t.notOk(config.flat[key], 'its helper is dropped')
++      t.notOk(helperIn(config.flat, key), 'its helper is dropped')
 +      t.ok(logs.some(l => l[0] === 'warn' && l.join(' ').includes('is inside the project')), 'and reported')
 +    })
 +  }
@@ -1420,7 +1462,7 @@ index 9f83d98..67742d8 100644
 +        ['--userconfig=<path>/home/.npmrc', '--prefix=<path>/gprefix', ...argv], {
 +          '../gprefix/etc/npmrc': `${key}=${helper}\n`,
 +        })
-+      t.equal(config.flat[key], trusted ? helper : undefined)
++      t.equal(helperIn(config.flat, key), trusted ? helper : undefined)
 +    })
 +  }
 +
@@ -1431,7 +1473,7 @@ index 9f83d98..67742d8 100644
 +        '../gprefix/etc/npmrc': `${key}=${helper}\n`,
 +        '../gprefix/.npmrc': line,
 +      })
-+      t.notOk(config.flat[key])
++      t.notOk(helperIn(config.flat, key))
 +      t.ok(logs.some(l => l.join(' ').includes('is inside the project')))
 +    })
 +  }
@@ -1442,7 +1484,7 @@ index 9f83d98..67742d8 100644
 +      'apps/web/package.json': '{}',
 +    }, {}, 'apps/web')
 +    t.equal(config.localPrefix, join(dirname(config.get('userconfig')), 'apps', 'web'), 'the nearest project is apps/web')
-+    t.notOk(config.flat[key])
++    t.notOk(helperIn(config.flat, key))
 +    t.ok(logs.some(l => l.join(' ').includes('is inside the project')))
 +  })
 +
@@ -1457,7 +1499,7 @@ index 9f83d98..67742d8 100644
 +      const { config, logs } = await loadWith(t, '', [`--userconfig=${file}`], {
 +        '..ci.npmrc': `${key}=${helper}\n`,
 +      })
-+      t.notOk(config.flat[key])
++      t.notOk(helperIn(config.flat, key))
 +      t.ok(logs.some(l => l.join(' ').includes('is inside the project')))
 +    })
 +  }
@@ -1470,7 +1512,7 @@ index 9f83d98..67742d8 100644
 +    if (!/~/.test(short)) {
 +      return t.skip('short names are disabled on this volume')
 +    }
-+    t.notOk(config.flat[key], `${short} is the project's repo-user.npmrc`)
++    t.notOk(helperIn(config.flat, key), `${short} is the project's repo-user.npmrc`)
 +    t.ok(logs.some(l => l.join(' ').includes('is inside the project')))
 +  })
 +
@@ -1494,7 +1536,7 @@ index 9f83d98..67742d8 100644
 +    for (const exists of [true, false]) {
 +      const { config } = await loadWith(t, '', ['--userconfig=<path>/project/..\\evil/npmrc'],
 +        exists ? { '..\\evil/npmrc': `${key}=${helper}\n` } : {})
-+      t.notOk(config.flat[key], `${exists ? 'existing' : 'missing'}: no helper from it`)
++      t.notOk(helperIn(config.flat, key), `${exists ? 'existing' : 'missing'}: no helper from it`)
 +      t.same(config.tokenHelperUntrusted, ['user'], 'and it is not trusted')
 +    }
 +  })
@@ -1526,18 +1568,18 @@ index 9f83d98..67742d8 100644
 +      zeroInodes = false
 +    })
 +    const inside = await loadWith(t, '', ['--userconfig=<path>/project/repo-user.npmrc'])
-+    t.notOk(inside.config.flat[key], 'a file in the project is still refused')
++    t.notOk(helperIn(inside.config.flat, key), 'a file in the project is still refused')
 +    const outside = await loadWith(t, '', ['--userconfig=<path>/home/cli.npmrc'], {
 +      '../home/cli.npmrc': `${key}=${helper}\n`,
 +    })
-+    t.equal(outside.config.flat[key], helper, 'and one outside it still trusted')
++    t.equal(helperIn(outside.config.flat, key), helper, 'and one outside it still trusted')
 +  })
 +
 +  t.test('a project .npmrc that names the default user file changes nothing', async t => {
 +    const { config, warned } = await loadWith(t, 'userconfig=<path>/home/.npmrc\n', [], {
 +      '../home/.npmrc': `${key}=${helper}\n`,
 +    })
-+    t.equal(config.flat[key], helper)
++    t.equal(helperIn(config.flat, key), helper)
 +    t.notOk(warned)
 +  })
 +
@@ -1558,7 +1600,7 @@ index 9f83d98..67742d8 100644
 +    })
 +    await config.load()
 +    t.equal(config.localPrefix, join(path, 'home'), 'home is the project')
-+    t.equal(config.flat[key], helper, 'and ~/.npmrc keeps its helper')
++    t.equal(helperIn(config.flat, key), helper, 'and ~/.npmrc keeps its helper')
 +  })
 +
 +  // the user's own files under a home directory that is a project, such as
@@ -1583,7 +1625,7 @@ index 9f83d98..67742d8 100644
 +      flatten,
 +    })
 +    await config.load()
-+    t.equal(config.flat[key], helper)
++    t.equal(helperIn(config.flat, key), helper)
 +  })
 +
 +  t.test('a trusted user file may move the global file', async t => {
@@ -1605,7 +1647,7 @@ index 9f83d98..67742d8 100644
 +      flatten,
 +    })
 +    await config.load()
-+    t.equal(config.flat[key], helper)
++    t.equal(helperIn(config.flat, key), helper)
 +  })
 +})
 +
@@ -1662,22 +1704,22 @@ index 9f83d98..67742d8 100644
 +  const inherited = { npm_config_userconfig: `${path}/home/.npmrc` }
 +
 +  const trusting = await load(inherited)
-+  t.equal(trusting.flat[key], helper, 'an env userconfig is trusted on its own')
++  t.equal(helperIn(trusting.flat, key), helper, 'an env userconfig is trusted on its own')
 +  t.same(trusting.tokenHelperUntrusted, [], 'and nothing is passed on as untrusted')
 +
 +  const child = await load({ ...inherited, npm_config_token_helper_untrusted: 'user' })
-+  t.notOk(child.flat[key], 'but not when the parent marked the user file untrusted')
++  t.notOk(helperIn(child.flat, key), 'but not when the parent marked the user file untrusted')
 +  t.same(child.tokenHelperUntrusted, ['user'], 'and the marker is passed on again')
 +  t.same(child.getUnknownConfigs('env'), [], 'the marker is not unknown config')
 +
 +  const globalFile = { npm_config_globalconfig: `${path}/home/.npmrc`, npm_config_userconfig: `${path}/none` }
-+  t.equal((await load(globalFile)).flat[key], helper, 'an env globalconfig is trusted on its own')
++  t.equal(helperIn((await load(globalFile)).flat, key), helper, 'an env globalconfig is trusted on its own')
 +  const globalChild = await load({ ...globalFile, npm_config_token_helper_untrusted: 'global' })
-+  t.notOk(globalChild.flat[key], 'but not when the parent marked the global file untrusted')
++  t.notOk(helperIn(globalChild.flat, key), 'but not when the parent marked the global file untrusted')
 +  t.same(globalChild.tokenHelperUntrusted, ['global'], 'and that marker is passed on again')
 +
 +  const both = await load({ ...inherited, npm_config_token_helper_untrusted: 'user,global' })
-+  t.notOk(both.flat[key], 'a marker naming both files is split')
++  t.notOk(helperIn(both.flat, key), 'a marker naming both files is split')
 +  t.same(both.tokenHelperUntrusted, ['user', 'global'])
 +})
 +

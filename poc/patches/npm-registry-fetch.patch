@@ -1,4 +1,4 @@
-From e331f38a476aabeac1a8ed0db66816a730440c5c Mon Sep 17 00:00:00 2001
+From 9ec9b386a34009e706e22181f2332b5fbed8d547 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -24,29 +24,29 @@ refused.
 
 Prototype for the credential provider RFC discussed in npm/rfcs#850.
 ---
- README.md            |   58 +++
- lib/auth.js          |   13 +-
+ README.md            |   64 +++
+ lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  378 +++++++++++++++
- test/token-helper.js | 1104 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1604 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  378 ++++++++++++++
+ test/token-helper.js | 1126 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1644 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
 diff --git a/README.md b/README.md
-index f474cdc..b80b48b 100644
+index f474cdc..0175b88 100644
 --- a/README.md
 +++ b/README.md
-@@ -589,6 +589,64 @@ Can be scoped to a registry by using a "nerf dart" for that registry. That is:
+@@ -589,6 +589,70 @@ Can be scoped to a registry by using a "nerf dart" for that registry. That is:
  }
  ```
  
-+##### <a name="opts-tokenhelper"></a> `opts['//<registry>/:tokenHelper']`
++##### <a name="opts-tokenhelpers"></a> `opts.tokenHelpers`
 +
-+* Type: String (absolute path)
++* Type: Object, registry key (`//<registry>/`) to absolute path
 +* Default: null
 +
-+An executable that prints a registry credential to stdout, mapped to a header
++For each registry key, an executable that prints a registry credential to stdout, mapped to a header
 +as pnpm's `tokenHelper` does. Unlike pnpm, which splits the value on
 +whitespace into a command and arguments, the value is one absolute path,
 +which may contain spaces. It runs at most once per registry per process, the first
@@ -90,12 +90,18 @@ index f474cdc..b80b48b 100644
 +On Windows, `.cmd` and `.bat` helpers are run through `cmd.exe`, in their own
 +directory; a path that contains `"` or `%` is refused.
 +
-+Callers must only pass this option from trusted (user or global) config:
-+the helper is executed.
++Callers fill this option only from config they trust (npm: the user and
++global files): the helper is executed. It is deliberately not read from the
++config-key namespace: a `//<registry>/:tokenHelper` key among the options does
++nothing, because callers commonly merge every `.npmrc` key they load, a
++project's included, into the options they pass, and those keys have only ever
++been data.
 +
 +```
 +{
-+  '//npm.corp.example.com/:tokenHelper': '/usr/local/bin/corp-registry-token'
++  tokenHelpers: {
++    '//npm.corp.example.com/': '/usr/local/bin/corp-registry-token'
++  }
 +}
 +```
 +
@@ -103,27 +109,43 @@ index f474cdc..b80b48b 100644
  
  * Type: String
 diff --git a/lib/auth.js b/lib/auth.js
-index 9270025..8249398 100644
+index 9270025..c37bf33 100644
 --- a/lib/auth.js
 +++ b/lib/auth.js
-@@ -32,6 +32,11 @@ const regFromURI = (uri, opts) => {
+@@ -27,11 +27,28 @@ const regFromURI = (uri, opts) => {
+   return { regKey: false, authKey: null }
+ }
+ 
++// A helper is a program to execute, so it is never read from the config-key
++// namespace: callers fill opts with every .npmrc key they load, project files
++// included, and until helpers existed those keys were only data. It comes from
++// `opts.tokenHelpers`, a map from registry key to path that the caller fills
++// from config it trusts; a `//<registry>/:tokenHelper` key in opts is inert.
++const helperFor = (regKey, opts) => {
++  const helpers = opts.tokenHelpers
++  return helpers && Object.hasOwn(helpers, regKey) && typeof helpers[regKey] === 'string'
++    ? helpers[regKey]
++    : null
++}
++
+ // Not only do we want to know if there is auth, but if we are calling `npm
+ // logout` we want to know what config value specifically provided it.  This is
  // so we can look up where the config came from to delete it (i.e. user vs
  // project)
  const hasAuth = (regKey, opts) => {
 +  // a configured helper wins over any token stored next to it, so a stale
 +  // _authToken cannot shadow the helper the user set up to replace it
-+  if (opts[`${regKey}:tokenHelper`]) {
++  if (helperFor(regKey, opts)) {
 +    return 'tokenHelper'
 +  }
    if (opts[`${regKey}:_authToken`]) {
      return '_authToken'
    }
-@@ -120,12 +125,14 @@ const getAuth = (uri, opts = {}) => {
-     [`${regKey}:_auth`]: auth,
+@@ -121,11 +138,13 @@ const getAuth = (uri, opts = {}) => {
      [`${regKey}:certfile`]: certfile,
      [`${regKey}:keyfile`]: keyfile,
-+    [`${regKey}:tokenHelper`]: tokenHelper,
    } = opts
++  const tokenHelper = helperFor(regKey, opts)
  
    return new Auth({
      scopeAuthKey: null,
@@ -133,7 +155,7 @@ index 9270025..8249398 100644
      token,
      auth,
      username,
-@@ -146,6 +153,7 @@ class Auth {
+@@ -146,6 +165,7 @@ class Auth {
      keyfile,
      regKey,
      authKey,
@@ -141,7 +163,7 @@ index 9270025..8249398 100644
    }) {
      // same as regKey but only present for scoped auth. Should have been named scopeRegKey
      this.scopeAuthKey = scopeAuthKey
-@@ -157,7 +165,10 @@ class Auth {
+@@ -157,7 +177,10 @@ class Auth {
      this.isBasicAuth = false
      this.cert = null
      this.key = null
@@ -623,10 +645,10 @@ index 0000000..e22fb4a
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..b81b36a
+index 0000000..d6131e1
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1104 @@
+@@ -0,0 +1,1126 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -818,7 +840,7 @@ index 0000000..b81b36a
 +t.test('getAuth reports the helper and lets it win over a stored token', async t => {
 +  const auth = getAuth(REGISTRY, {
 +    registry: REGISTRY,
-+    [`${REG_KEY}:tokenHelper`]: '/usr/local/bin/helper',
++    tokenHelpers: { [REG_KEY]: '/usr/local/bin/helper' },
 +    [`${REG_KEY}:_authToken`]: 'stale',
 +  })
 +
@@ -828,6 +850,28 @@ index 0000000..b81b36a
 +  t.equal(auth.token, null, 'the stored token is not used')
 +})
 +
++t.test('a tokenHelper key among the options runs nothing: only opts.tokenHelpers names a helper', async t => {
++  // callers such as npm-check-updates merge project .npmrc files into the
++  // options they pass, so a key from the config namespace must stay data
++  const fromConfig = getAuth(REGISTRY, {
++    registry: REGISTRY,
++    [`${REG_KEY}:tokenHelper`]: '/repo/evil-helper',
++    [`${REG_KEY}:_authToken`]: 'stored',
++  })
++  t.equal(fromConfig.authKey, '_authToken', 'the key is not auth at all')
++  t.equal(fromConfig.tokenHelper, undefined)
++  t.equal(fromConfig.token, 'stored')
++
++  const onlyKey = getAuth(REGISTRY, { registry: REGISTRY, [`${REG_KEY}:tokenHelper`]: '/repo/evil-helper' })
++  t.equal(onlyKey.authKey, null)
++  t.equal(onlyKey.tokenHelper, undefined)
++
++  const inherited = getAuth(REGISTRY, { registry: REGISTRY, tokenHelpers: Object.create({ [REG_KEY]: '/proto/helper' }) })
++  t.equal(inherited.tokenHelper, undefined, 'an inherited entry is not a configured helper')
++  const notAString = getAuth(REGISTRY, { registry: REGISTRY, tokenHelpers: { [REG_KEY]: ['/usr/local/bin/helper'] } })
++  t.equal(notAString.tokenHelper, undefined)
++})
++
 +t.test('a raw token is sent as a Bearer token', async t => {
 +  const helper = makeHelper(t, print('s3cret\n'))
 +  tnock(t, 'https://helper.registry')
@@ -835,7 +879,7 @@ index 0000000..b81b36a
 +    .get('/npm/pkg')
 +    .reply(200, { ok: true })
 +
-+  const res = await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper })
++  const res = await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } })
 +  t.same(res, { ok: true })
 +})
 +
@@ -846,7 +890,7 @@ index 0000000..b81b36a
 +    .get('/npm/pkg')
 +    .reply(200, { ok: true })
 +
-+  await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper })
++  await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } })
 +})
 +
 +t.test('a request with a JSON body and an abort signal gets the header', async t => {
@@ -858,7 +902,7 @@ index 0000000..b81b36a
 +  const { signal } = new AbortController()
 +
 +  const res = await fetch.json('/pkg', {
-+    ...OPTS, method: 'PUT', body: { a: 1 }, signal, [`${REG_KEY}:tokenHelper`]: helper,
++    ...OPTS, method: 'PUT', body: { a: 1 }, signal, tokenHelpers: { [REG_KEY]: helper },
 +  })
 +  t.same(res, { ok: true })
 +  t.equal(require('events').getEventListeners(signal, 'abort').length, 0, 'no listener left on the signal')
@@ -875,7 +919,7 @@ index 0000000..b81b36a
 +  setImmediate(() => body.end('{"a":1}'))
 +
 +  const res = await fetch.json('/pkg', {
-+    ...OPTS, method: 'PUT', body, gzip: true, [`${REG_KEY}:tokenHelper`]: helper,
++    ...OPTS, method: 'PUT', body, gzip: true, tokenHelpers: { [REG_KEY]: helper },
 +  })
 +  t.same(res, { ok: true })
 +})
@@ -891,7 +935,7 @@ index 0000000..b81b36a
 +    .get('/npm/a').reply(200, {})
 +    .get('/npm/b').reply(200, {})
 +
-+  const opts = { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }
++  const opts = { ...OPTS, tokenHelpers: { [REG_KEY]: helper } }
 +  await Promise.all([fetch.json('/a', opts), fetch.json('/b', opts)])
 +  t.equal(runs.count(), 1)
 +})
@@ -1122,7 +1166,7 @@ index 0000000..b81b36a
 +  const helper = makeHelper(t, print('  \n'))
 +
 +  await t.rejects(
-+    fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }),
++    fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } }),
 +    { code: 'ETOKENHELPER', message: /printed an empty token/ }
 +  )
 +})
@@ -1152,7 +1196,7 @@ index 0000000..b81b36a
 +  `)
 +  const logs = logsOf(t)
 +
-+  const error = await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:tokenHelper`]: helper }).catch(er => er)
++  const error = await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } }).catch(er => er)
 +  t.same(error.cause, { code: 3, signal: null }, 'the cause is only a code and a signal')
 +  t.match(error, { code: 'ETOKENHELPER', message: /exited with status 3/ })
 +  const texts = [error.message, error.stack, JSON.stringify(error), JSON.stringify(error.cause),
@@ -1664,7 +1708,7 @@ index 0000000..b81b36a
 +
 +  const start = Date.now()
 +  await t.rejects(
-+    fetch('/pkg', { ...OPTS, method: 'PUT', body, [`${REG_KEY}:tokenHelper`]: helper }),
++    fetch('/pkg', { ...OPTS, method: 'PUT', body, tokenHelpers: { [REG_KEY]: helper } }),
 +    failure
 +  )
 +  t.ok(Date.now() - start < 2000, 'without waiting for the helper')
@@ -1682,7 +1726,7 @@ index 0000000..b81b36a
 +
 +    const start = Date.now()
 +    await t.rejects(
-+      fetch('/pkg', { ...OPTS, method: 'PUT', body, gzip, [`${REG_KEY}:tokenHelper`]: helper }),
++      fetch('/pkg', { ...OPTS, method: 'PUT', body, gzip, tokenHelpers: { [REG_KEY]: helper } }),
 +      failure
 +    )
 +    t.ok(Date.now() - start < 2000, 'without waiting for the helper')
@@ -1697,7 +1741,7 @@ index 0000000..b81b36a
 +
 +  const start = Date.now()
 +  await t.rejects(
-+    fetch('/pkg', { ...OPTS, signal: controller.signal, [`${REG_KEY}:tokenHelper`]: helper }),
++    fetch('/pkg', { ...OPTS, signal: controller.signal, tokenHelpers: { [REG_KEY]: helper } }),
 +    { name: 'AbortError' }
 +  )
 +  t.ok(Date.now() - start < 2000, 'without waiting for the helper')
@@ -1711,7 +1755,7 @@ index 0000000..b81b36a
 +  const stop = new Error('stop')
 +
 +  await t.rejects(
-+    fetch('/pkg', { ...OPTS, signal: AbortSignal.abort(stop), [`${REG_KEY}:tokenHelper`]: helper }),
++    fetch('/pkg', { ...OPTS, signal: AbortSignal.abort(stop), tokenHelpers: { [REG_KEY]: helper } }),
 +    stop
 +  )
 +  t.equal(runs.count(), 0)
@@ -1721,7 +1765,7 @@ index 0000000..b81b36a
 +  const runs = countRuns(t)
 +  const helper = makeHelper(t, `${runs.record}; process.exit(3)`)
 +  const cache = file(t, '_cacache')
-+  const opts = { ...OPTS, cache, [`${REG_KEY}:tokenHelper`]: helper }
++  const opts = { ...OPTS, cache, tokenHelpers: { [REG_KEY]: helper } }
 +
 +  // nothing cached: the failure is the cache's
 +  await t.rejects(fetch('/pkg', { ...opts, offline: true }), { code: 'ENOTCACHED' })

@@ -1,7 +1,7 @@
 # RFC: Credential Provider Protocol
 
 > Status: Draft
-> Revision: 26
+> Revision: 27
 > Date: 2026-10-15
 
 > A draft proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It lets npm obtain registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment.
@@ -565,7 +565,7 @@ Install scripts are chosen by package authors and the dependency graph; helpers 
 
 **What the design guarantees:**
 
-- **Configuration** comes only from user and global files that are the user's own ([Trust](#trust)); project files, `publishConfig`, the environment and the command line cannot set either key.
+- **Configuration** comes only from user and global files that are the user's own ([Trust](#trust)); project files, `publishConfig`, the environment and the command line cannot set either key, and npm-registry-fetch takes neither from the config keys a caller passes, only from an option npm fills from those files.
 - **Resolution** never searches the current directory or project `node_modules`, local packages cannot shadow global providers, and ambiguous names fail closed.
 - **The provider's process** starts in its own directory, without the environment variables that carry a project's config.
 - **Input** is the protocol fields only: no environment variables or file paths. Stdin is not an interactive channel.
@@ -588,6 +588,7 @@ Install scripts are chosen by package authors and the dependency graph; helpers 
 | Downgrade by URL variant | A project points `@scope:registry=` at a URL form on the user's own host that a strict global provider declines, so a leftover long-lived stored token for that host replaces the provider's short-lived one. | npm warns whenever it uses a stored credential after a global chain declined the registry; listing `npm:token`, or a per-registry list, removes the fallback. |
 | A global provider sees all traffic | A provider in the global chain is asked about every registry a command touches, with a scope and package. | A provider that lists its registries in hello is sent nothing about any other; otherwise `url-not-supported` is remembered per provider and registry. The per-registry form keeps a provider from even starting for registries it does not serve. |
 | Project config reaches the helper's process | A project's `node-options`, exported as `NODE_OPTIONS`, loads code into a node-based helper; a committed `node.cmd` is found by a cmd-shim's bare `node`. | The helper starts in its own directory, without `NODE_OPTIONS` and `npm_config_*`. |
+| Another tool passes project config to npm-registry-fetch | A tool that reads a repository's `.npmrc` and hands its keys to npm-registry-fetch, as npm-check-updates does, would run a helper the repository names. | The library ignores helper and provider config keys and takes them only from a dedicated option that npm fills from trusted files. |
 | Project-local binary shadowing | A dependency puts a provider-like binary in `node_modules/.bin`. | Project `node_modules` and the current directory are never searched. |
 | PATH poisoning | Shell startup files, `.env` tooling or CI setup redirect a provider name. | Absolute paths or trusted npm locations only; neither key is read from the environment. |
 | Typosquatting | Lookalike `npm-credential-provider-*` packages. | npm never discovers, suggests, installs or runs a provider it was not configured with; a name resolves only in npm-managed global bin directories, after the user wrote it into user or global config. |
@@ -736,7 +737,8 @@ This section is informative: it describes one way to meet the requirements above
 - **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`. `trust`, `access list collaborators` and `access get status` pass no `spec` today, so their package reaches the provider through the credential-context option, never as `spec`, and their requests keep going to the default registry even for a scoped package whose scope names another registry, as they do today. The tab completion of `deprecate` and `unpublish` lists packages through the access endpoints under its command's operation; a provider that does not serve it only costs the suggestions.
 - **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket.
 - **Config.** `@npmcli/config` gains the per-registry `tokenHelper` key and the `credentialProvider` keys, filtered by source as [Trust](#trust) requires.
-- **Phase 1 prototype.** About 440 lines in npm-registry-fetch and 370 in npm/cli, with tests at both repositories' 100% coverage, published as [patches](poc/patches) and run by CI on macOS, Linux and Windows. [prototype.md](prototype.md) describes the code, the checks (end-to-end runs with a real npm, a 2048-combination config matrix, fuzzers, platform probes, every npm/cli suite) and the eight audit rounds that shaped it; [claims.md](claims.md) maps each statement in this document to its evidence.
+- **Where trust is enforced.** npm-registry-fetch never takes a helper or provider from the config-key namespace: tools other than npm (npm-check-updates among them) merge every `.npmrc` key they read, a project's included, into the options they pass, and until now those keys were only data. npm passes helpers in an option of their own, `tokenHelpers` (registry key to path), which @npmcli/config fills from trusted files only; a `//<registry>/:tokenHelper` key among the options does nothing, and providers will reach the library the same way. The prototype does this, with a test that the config key runs nothing.
+- **Phase 1 prototype.** About 440 lines in npm-registry-fetch and 370 in npm/cli, with tests at both repositories' 100% coverage, published as [patches](poc/patches) and run by CI on macOS, Linux and Windows. [prototype.md](prototype.md) describes the code, the checks (end-to-end runs with a real npm, a 2048-combination config matrix, fuzzers, platform probes, every npm/cli suite) and the automated review rounds that shaped it; [claims.md](claims.md) maps each statement in this document to its evidence.
 - **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so npm and third-party providers can be tested against the same cases.
 
 ### Configuration

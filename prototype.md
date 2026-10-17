@@ -31,7 +31,7 @@ What the macOS runs confirmed about the platform: APFS is case-insensitive and r
 
 ## Audit history
 
-Eight rounds by independent reviewers, then targeted test work. Each finding below is fixed and pinned by a test.
+Rounds of automated review, then targeted test work. Each finding below is fixed and pinned by a test.
 
 | Round | Method | Found |
 |---|---|---|
@@ -44,3 +44,4 @@ Eight rounds by independent reviewers, then targeted test work. Each finding bel
 | 7 | fuzzing | a project `.npmrc` with `location=global` switched the inside-project test off; a nested project hid the outer one; `\\?\`, 8.3 and `..ci.npmrc` spellings slipped through; a home directory that is a project cost users their own helper; a helper in a directory deeper than Windows can start a program in crashed npm; a token was lost when a helper left a background process holding stdout; the output limit counted decoded bytes; `EDITOR` and `NODE_ENV` reached the helper |
 | 8 | fuzzing on Linux | on POSIX a directory named `..\evil` read as a way out of the checkout, and on a case-insensitive mount another letter case did the same; both closed by comparing directories by device and inode |
 | CI | macOS | a path that does not exist yet under the `/var` → `/private/var` link was resolved inconsistently |
+| Final | review of the whole proposal | npm-registry-fetch ran a helper named by any `//<registry>/:tokenHelper` key in its options, and other tools (npm-check-updates) pass a project's `.npmrc` keys there; helpers now arrive only in `opts.tokenHelpers`, which @npmcli/config fills from trusted files |
