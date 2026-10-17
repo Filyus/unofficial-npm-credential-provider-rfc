@@ -6,6 +6,8 @@ itself, so a case cannot drift from the reference."""
 
 from __future__ import annotations
 
+import re
+
 import copy
 import json
 from pathlib import Path
@@ -43,8 +45,10 @@ def run_model(message: object) -> None:
         client.receive_hello({"v": [1]})
         ok = message.get("Ok")
         kind = ok.get("kind") if isinstance(ok, dict) and isinstance(ok.get("kind"), str) else "get"
+        # an Ok answers the request of the same kind, known or not: Ok.kind is
+        # open, and the pairing is what rejects a bogus one
         request = {**GET, "kind": kind}
-        if kind not in KINDS:
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", kind):
             request["kind"] = "get"
         try:
             client.handle_response(request, message)
@@ -99,6 +103,10 @@ def rejected_cases() -> list[tuple[str, object]]:
         ("query", ["https://x.test/?a"]),
         ("duplicate", ["https://x.test/", "https://x.test/"]),
         ("not-string", [1]),
+        ("fragment", ["https://x.test/#a"]),
+        ("uppercase-scheme", ["HTTPS://x.test/"]),
+        ("userinfo", ["https://u@x.test/"]),
+        ("backslash", ["https://gitlab.example.com\\@evil.test/"]),
     ):
         cases.append((f"hello-registries-{name}", {"v": [1], "registries": registries}))
     # request fields, on every kind
@@ -114,8 +122,7 @@ def rejected_cases() -> list[tuple[str, object]]:
         cases.append((f"request-{kind}-interactive-string", {**base, "interactive": "yes"}))
         cases.append((f"request-{kind}-interactive-null", {**base, "interactive": None}))
         cases.append((f"request-{kind}-token-empty", {**base, "token": ""}))
-        cases.append((f"request-{kind}-login-url-not-string", {**base, "loginUrl": 1}))
-        for scope in ("@", "scope", "@a/b", "@scope\n/x", 1):
+        for scope in ("@", "scope", "@a/b", "@scope\n/x", 1, None):
             cases.append((f"request-{kind}-scope-{scope!r}", {**base, "scope": scope}))
     for kind in ("", "Get", "1get", "get_batch", 1):
         cases.append((f"request-kind-{kind!r}", {**GET, "kind": kind}))
@@ -132,7 +139,11 @@ def rejected_cases() -> list[tuple[str, object]]:
         cases.append((f"ok-{kind}-bearer-token-empty", ok_response(kind, auth={"type": "bearer", "token": ""})))
         cases.append((f"ok-{kind}-auth-type-unknown", ok_response(kind, auth={"type": "digest"})))
     cases.append(("ok-get-missing-auth", {"Ok": {"kind": "get"}}))
-    cases.append(("ok-unknown-kind", {"Ok": {"kind": "refresh"}}))
+    cases.append(("ok-kind-not-an-identifier", {"Ok": {"kind": "Get"}}))
+    cases.append(("request-erase-without-granularity", {"v": 1, "kind": "erase", "registry": REGISTRY, "operation": "read"}))
+    cases.append(("request-erase-without-operation", {"v": 1, "kind": "erase", "registry": REGISTRY, "granularity": "scope"}))
+    cases.append(("request-erase-publish-without-version", {
+        "v": 1, "kind": "erase", "registry": REGISTRY, "operation": "publish", "granularity": "package"}))
     for name, auth in (
         ("basic-username-empty", {"type": "basic", "username": "", "password": "p"}),
         ("basic-password-empty", {"type": "basic", "username": "u", "password": ""}),
@@ -150,9 +161,12 @@ def accepted_cases() -> list[tuple[str, object]]:
         ("hello-v-many", {"v": [1, 2, 7]}),
         ("hello-registries", {"v": [1], "registries": ["https://gitlab.example.com/", "http://10.0.0.1:4873/npm"]}),
         ("hello-registries-empty", {"v": [1], "registries": []}),
-        ("request-login-token-and-login-url", {
-            "v": 1, "kind": "login", "registry": REGISTRY, "token": "t", "loginUrl": "https://x.test/login",
+        ("request-login-token", {"v": 1, "kind": "login", "registry": REGISTRY, "token": "t"}),
+        ("request-erase-publish-with-version", {
+            "v": 1, "kind": "erase", "registry": REGISTRY, "scope": "@scope", "package": "pkg",
+            "version": "1.0.0", "operation": "publish", "granularity": "package",
         }),
+        ("ok-unknown-kind", {"Ok": {"kind": "refresh"}}),
         ("request-unknown-kind", {**GET, "kind": "store"}),
         ("request-unknown-kind-with-dash-and-digit", {**GET, "kind": "get-batch2"}),
         ("request-unknown-operation", {**GET, "operation": "yank"}),
@@ -160,7 +174,6 @@ def accepted_cases() -> list[tuple[str, object]]:
             "v": 1, "kind": "erase", "registry": REGISTRY, "scope": "@scope", "package": "pkg",
             "operation": "read", "granularity": "package",
         }),
-        ("request-scope-null", {**GET, "scope": None}),
         ("request-scope-ok", {**GET, "scope": "@scope"}),
         ("request-logout-with-operation", {**GET, "kind": "logout", "operation": "publish", "version": "1.0.0"}),
         ("err-full", {"Err": {"kind": "other", "message": "m", "causedBy": ["a"]}}),

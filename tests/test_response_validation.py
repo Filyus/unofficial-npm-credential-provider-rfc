@@ -84,12 +84,14 @@ class ResponseValidationTests(unittest.TestCase):
 
         self.assertEqual(outcome, "ok")
 
-    def test_ok_for_a_removed_kind_is_rejected(self) -> None:
+    def test_ok_kind_must_match_the_request(self) -> None:
+        # Ok.kind is open (a newer client may add kinds), so the pairing rejects a bogus answer
         with self.assertRaises(ProtocolViolation):
             self.client.handle_response(
-                {**REQUEST, "kind": "refresh"},
+                REQUEST,
                 {"Ok": {"kind": "refresh", "auth": {"type": "bearer", "token": "token"}}},
             )
+        self.assertEqual(self.client.handle_response({**REQUEST, "kind": "refresh"}, {"Ok": {"kind": "refresh"}}), "refresh")
 
     def test_package_granularity_is_keyed_per_package(self) -> None:
         for package in ("api-client", "ui"):

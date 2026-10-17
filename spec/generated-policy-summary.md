@@ -85,6 +85,7 @@ Source: `spec/policy-v1.json`.
 | `interactiveFalseAllowsPrompts` | `false` |
 | `ciRequiresPreconfiguredTrust` | `true` |
 | `missingCredentialBehavior` | `fail` |
+| `interactiveRule` | `stdin and stdout are TTYs and no CI is detected` |
 
 ## Limits
 
@@ -92,6 +93,7 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | `lineSize` | `implementation-defined` |
 | `oversizeBehavior` | `fail` |
+| `lineSizeMinimum` | `1048576` |
 
 ## Forward Compatibility
 

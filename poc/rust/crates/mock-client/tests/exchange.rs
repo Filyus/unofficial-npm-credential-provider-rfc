@@ -1,5 +1,7 @@
 use credential_provider_protocol::{Auth, ErrorKind, ProviderResponse, Request, RequestKind};
-use mock_client::{ChainKind, ClientScenario, ProviderSession, run_exchange, run_provider_chain};
+use mock_client::{
+    ChainKind, ClientScenario, ProviderCommand, ProviderSession, run_exchange, run_provider_chain,
+};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -302,7 +304,7 @@ fn client_rejects_missing_expiration() {
     );
 }
 
-fn provider_command(scenario: &str) -> Command {
+fn provider_command(scenario: &str) -> ProviderCommand {
     let mut command = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     command
         .arg("run")
@@ -311,10 +313,31 @@ fn provider_command(scenario: &str) -> Command {
         .arg(workspace_manifest())
         .arg("-p")
         .arg("mock-provider")
-        .arg("--")
-        .arg("--scenario")
-        .arg(scenario);
-    command
+        .arg("--");
+    // the session puts the sentinel after `--` and before these
+    ProviderCommand::new(command, vec!["--scenario".into(), scenario.into()])
+}
+
+#[test]
+fn provider_outside_its_hello_registries_is_not_asked() {
+    let summary = run_exchange(
+        provider_command("serves-elsewhere"),
+        ClientScenario::InstallGet,
+    )
+    .expect("a provider that lists other registries is skipped");
+
+    assert_eq!(summary.outcome, "try-next-provider");
+}
+
+#[test]
+fn a_provider_started_without_the_sentinel_does_not_speak_the_protocol() {
+    let ProviderCommand { mut program, .. } = provider_command("get-success");
+    let output = program
+        .args(["--scenario", "get-success"])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "no hello without the sentinel");
 }
 
 fn workspace_manifest() -> PathBuf {

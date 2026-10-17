@@ -77,7 +77,11 @@ def render_python(policy: dict) -> str:
             f"IDENTIFIER_PATTERN = {policy['forwardCompatibility']['identifierPattern']!r}",
             f"TIMEOUT_SECONDS = {policy['credentialProvider']['timeoutSeconds']!r}",
             f"STORED_CREDENTIAL_ENTRY = {policy['chain']['storedCredentialEntry']!r}",
-            f"OPERATION_BOUND_REGARDLESS = frozenset({cache['operationBoundRegardless']!r})",
+            f"OPERATION_BOUND_EXCEPT = frozenset({cache['operationBoundExcept']!r})",
+            f"PACKAGE_BOUND_WHEN_PRESENT = {cache['packageBoundWhenPresent']!r}",
+            f"LINE_SIZE_MINIMUM = {policy['limits']['lineSizeMinimum']!r}",
+            f"TIMEOUT_KILLS_BEFORE_NO_RESTART = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']!r}",
+            f"SENTINEL_ARGUMENT = {policy['credentialProvider']['sentinelArgument']!r}",
             "",
         ]
     )
@@ -108,6 +112,9 @@ def render_rust(policy: dict) -> str:
             f"pub const DEFAULT_GRANULARITY: &str = {json.dumps(cache['defaultGranularity'])};",
             f"pub const OPERATION_INDEPENDENT_DEFAULT: bool = {str(cache['operationIndependentDefault']).lower()};",
             f"pub const EXPIRY_MARGIN_SECONDS: u64 = {cache['expiryMarginSeconds']};",
+            f"pub const LINE_SIZE_MINIMUM: usize = {policy['limits']['lineSizeMinimum']};",
+            f"pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']};",
+            f"pub const SENTINEL_ARGUMENT: &str = {json.dumps(policy['credentialProvider']['sentinelArgument'])};",
             *rust_timeouts(policy),
             "",
         ]
@@ -273,7 +280,21 @@ def render_vectors(policy: dict) -> str:
         },
         {
             "name": "request-erase",
-            "message": {"v": version, "kind": "erase", "registry": registry},
+            "message": {"v": version, "kind": "erase", "registry": registry, "operation": "read", "granularity": "registry"},
+        },
+        {
+            "name": "request-erase-publish-with-version",
+            "message": {
+                "v": version, "kind": "erase", "registry": registry, "scope": "@scope", "package": "pkg",
+                "version": "1.0.0", "operation": "publish", "granularity": "package",
+            },
+        },
+        {
+            "name": "request-get-retry-after-403",
+            "message": {
+                "v": version, "kind": "get", "registry": registry, "operation": "read", "interactive": False,
+                "retry": True, "httpStatus": 403,
+            },
         },
         {
             "name": "request-get-read-install",
@@ -487,6 +508,14 @@ def render_vectors(policy: dict) -> str:
         {
             "name": "request-erase-granularity-unknown",
             "message": {"v": version, "kind": "erase", "registry": registry, "granularity": "host"},
+        },
+        {
+            "name": "request-erase-without-granularity",
+            "message": {"v": version, "kind": "erase", "registry": registry, "operation": "read"},
+        },
+        {
+            "name": "request-scope-null",
+            "message": {"v": version, "kind": "get", "registry": registry, "scope": None, "operation": "read", "interactive": False},
         },
         {
             "name": "request-stage-reject-missing-version",

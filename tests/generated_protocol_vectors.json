@@ -47,7 +47,34 @@
       "message": {
         "v": 1,
         "kind": "erase",
-        "registry": "https://registry.example.test/"
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "granularity": "registry"
+      }
+    },
+    {
+      "name": "request-erase-publish-with-version",
+      "message": {
+        "v": 1,
+        "kind": "erase",
+        "registry": "https://registry.example.test/",
+        "scope": "@scope",
+        "package": "pkg",
+        "version": "1.0.0",
+        "operation": "publish",
+        "granularity": "package"
+      }
+    },
+    {
+      "name": "request-get-retry-after-403",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "operation": "read",
+        "interactive": false,
+        "retry": true,
+        "httpStatus": 403
       }
     },
     {
@@ -327,6 +354,26 @@
         "kind": "erase",
         "registry": "https://registry.example.test/",
         "granularity": "host"
+      }
+    },
+    {
+      "name": "request-erase-without-granularity",
+      "message": {
+        "v": 1,
+        "kind": "erase",
+        "registry": "https://registry.example.test/",
+        "operation": "read"
+      }
+    },
+    {
+      "name": "request-scope-null",
+      "message": {
+        "v": 1,
+        "kind": "get",
+        "registry": "https://registry.example.test/",
+        "scope": null,
+        "operation": "read",
+        "interactive": false
       }
     },
     {

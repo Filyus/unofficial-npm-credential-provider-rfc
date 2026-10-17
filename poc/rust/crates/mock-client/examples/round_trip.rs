@@ -9,7 +9,7 @@
 //! commit ab3ad81 also timed a `get-batch`, the measurement behind dropping it.
 
 use credential_provider_protocol::Request;
-use mock_client::ProviderSession;
+use mock_client::{ProviderCommand, ProviderSession};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -41,10 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn command(provider: &str, scenario: &str) -> Command {
-    let mut command = Command::new(provider);
-    command.args(["--scenario", scenario]);
-    command
+fn command(provider: &str, scenario: &str) -> ProviderCommand {
+    ProviderCommand::new(
+        Command::new(provider),
+        vec!["--scenario".into(), scenario.into()],
+    )
 }
 
 /// Spawn and hello are outside the timed span: this is the steady-state cost

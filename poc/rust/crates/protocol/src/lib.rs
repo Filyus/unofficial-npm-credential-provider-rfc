@@ -8,18 +8,56 @@ pub mod generated;
 pub use generated::PROTOCOL_VERSION;
 
 /// Upper bound on one protocol line, newline included. The draft leaves the
-/// exact value implementation-defined; what it fixes is that an oversized line
-/// is rejected whole instead of being buffered without limit.
-pub const MAX_LINE_BYTES: usize = 1024 * 1024;
+/// value to each peer above a floor every peer accepts (`LINE_SIZE_MINIMUM`,
+/// 1 MiB); this build uses the floor. An oversized line is rejected whole
+/// instead of being buffered without limit.
+pub const MAX_LINE_BYTES: usize = generated::LINE_SIZE_MINIMUM;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub v: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<Vec<String>>,
+    /// The registries the provider serves. npm treats any other registry as
+    /// `url-not-supported` and sends the provider nothing about it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registries: Option<Vec<String>>,
 }
 
 impl Hello {
+    /// The schema's rules for `registries`: unique absolute `http:`/`https:`
+    /// URLs, lowercase scheme, no user info, backslash, query or fragment.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let Some(registries) = &self.registries else {
+            return Ok(());
+        };
+        for (index, entry) in registries.iter().enumerate() {
+            require(
+                served_registry_is_well_formed(entry),
+                "hello registries must be absolute http(s) URLs without user info, backslash, query or fragment",
+            )?;
+            require(
+                !registries[..index].contains(entry),
+                "hello registries must be unique",
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether this provider serves `registry`: always without a list;
+    /// otherwise a listed URL with the same scheme, host and port whose path
+    /// is a prefix of the registry's at a segment boundary. Both sides are
+    /// taken as already canonical; canonicalization is pinned elsewhere.
+    pub fn serves(&self, registry: &str) -> bool {
+        let Some(registries) = &self.registries else {
+            return true;
+        };
+        registries.iter().any(|served| {
+            let served = served.strip_suffix('/').unwrap_or(served);
+            registry == served || registry.starts_with(&format!("{served}/"))
+        })
+    }
+
     pub fn v1() -> Self {
         Self {
             v: vec![PROTOCOL_VERSION],
@@ -29,8 +67,26 @@ impl Hello {
                     .map(|capability| (*capability).to_string())
                     .collect(),
             ),
+            registries: None,
         }
     }
+}
+
+fn served_registry_is_well_formed(entry: &str) -> bool {
+    let Some(rest) = entry
+        .strip_prefix("https://")
+        .or_else(|| entry.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    !authority.is_empty()
+        && !authority
+            .chars()
+            .any(|c| matches!(c, '/' | '?' | '#' | '@' | '\\') || c.is_whitespace())
+        && !path
+            .chars()
+            .any(|c| matches!(c, '?' | '#' | '\\') || c.is_whitespace())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,9 +195,6 @@ pub struct Request {
     /// `login` only: a token the user already holds, kept out of `Debug`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<Secret>,
-    /// `login` only: the URL the provider may open or print for the user.
-    #[serde(rename = "loginUrl", skip_serializing_if = "Option::is_none")]
-    pub login_url: Option<String>,
     #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
     pub auth_challenges: Option<Vec<String>>,
 }
@@ -163,7 +216,6 @@ impl Request {
             retry: None,
             http_status: None,
             token: None,
-            login_url: None,
             auth_challenges: None,
         }
     }
@@ -205,7 +257,13 @@ impl Request {
                 require(self.operation.is_some(), "get requires operation")?;
                 require(self.interactive.is_some(), "get requires interactive")?;
             }
-            RequestKind::Login | RequestKind::Logout | RequestKind::Erase => {}
+            RequestKind::Erase => {
+                require(
+                    self.operation.is_some() && self.granularity.is_some(),
+                    "erase carries the get's operation and the response's granularity",
+                )?;
+            }
+            RequestKind::Login | RequestKind::Logout => {}
             RequestKind::Unsupported => {
                 return Err(ProtocolError::InvalidMessage(
                     "a client must not send an unknown request kind".into(),
@@ -425,6 +483,7 @@ impl From<serde_json::Error> for ProtocolError {
 }
 
 pub fn negotiate(hello: &Hello) -> Result<u32, ProtocolError> {
+    hello.validate()?;
     if hello.v.contains(&PROTOCOL_VERSION) {
         Ok(PROTOCOL_VERSION)
     } else {
@@ -491,6 +550,7 @@ mod tests {
         let error = negotiate(&Hello {
             v: vec![2],
             capabilities: None,
+            registries: None,
         })
         .unwrap_err();
 
@@ -696,15 +756,75 @@ mod tests {
     }
 
     #[test]
-    fn login_request_with_token_and_login_url_round_trips_and_hides_the_token() {
-        let line = r#"{"v":1,"kind":"login","registry":"https://registry.example.test/","interactive":true,"token":"login-secret","loginUrl":"https://registry.example.test/login"}"#;
+    fn hello_registries_follow_the_schema() {
+        let hello = |registries: &[&str]| Hello {
+            v: vec![1],
+            capabilities: None,
+            registries: Some(registries.iter().map(|r| (*r).to_string()).collect()),
+        };
+        assert!(
+            hello(&["https://gitlab.example.com/", "http://10.0.0.1:4873/npm"])
+                .validate()
+                .is_ok()
+        );
+        assert!(hello(&[]).validate().is_ok());
+        for bad in [
+            "/npm/",
+            "ftp://x.test/",
+            "HTTPS://x.test/",
+            "https://u@x.test/",
+            "https://gitlab.example.com\\@evil.test/",
+            "https://x.test/?a",
+            "https://x.test/#a",
+            "https://x.test/a b",
+        ] {
+            assert!(hello(&[bad]).validate().is_err(), "{bad}");
+            assert!(negotiate(&hello(&[bad])).is_err(), "{bad}");
+        }
+        assert!(
+            hello(&["https://x.test/", "https://x.test/"])
+                .validate()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn hello_registries_decide_what_the_provider_is_asked() {
+        let hello = Hello {
+            v: vec![1],
+            capabilities: None,
+            registries: Some(vec!["https://gitlab.example.com/api/".into()]),
+        };
+        assert!(hello.serves("https://gitlab.example.com/api/v4/"));
+        assert!(hello.serves("https://gitlab.example.com/api/"));
+        assert!(!hello.serves("https://gitlab.example.com/apix/"));
+        assert!(!hello.serves("http://gitlab.example.com/api/v4/"));
+        assert!(!hello.serves("https://registry.npmjs.org/"));
+        assert!(Hello::v1().serves("https://registry.npmjs.org/"));
+    }
+
+    #[test]
+    fn erase_carries_operation_granularity_and_the_publish_version() {
+        let mut erase = Request {
+            operation: Some(Operation::Publish),
+            version: Some("1.0.0".into()),
+            granularity: Some(Granularity::Package),
+            ..Request::bare(RequestKind::Erase, "https://registry.example.test/")
+        };
+        erase.validate().unwrap();
+        erase.version = None;
+        assert!(erase.validate().is_err(), "publish keeps its version rule");
+        erase.version = Some("1.0.0".into());
+        erase.granularity = None;
+        assert!(erase.validate().is_err());
+    }
+
+    #[test]
+    fn login_request_with_token_round_trips_and_hides_the_token() {
+        let line = r#"{"v":1,"kind":"login","registry":"https://registry.example.test/","interactive":true,"token":"login-secret"}"#;
         let request: Request = serde_json::from_str(line).unwrap();
 
         assert_eq!(request.token.as_ref().unwrap().expose(), "login-secret");
-        assert_eq!(
-            request.login_url.as_deref(),
-            Some("https://registry.example.test/login")
-        );
         request.validate().unwrap();
         assert!(!format!("{request:?}").contains("login-secret"));
         let again: serde_json::Value = serde_json::to_value(&request).unwrap();

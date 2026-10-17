@@ -1,4 +1,4 @@
-From 9ec9b386a34009e706e22181f2332b5fbed8d547 Mon Sep 17 00:00:00 2001
+From 0ef43b651b08555eb8f34e400741e02880b49745 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -27,9 +27,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 +++
  lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  378 ++++++++++++++
- test/token-helper.js | 1126 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1644 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  384 ++++++++++++++
+ test/token-helper.js | 1141 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1665 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -261,10 +261,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..e22fb4a
+index 0000000..c237633
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,384 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -430,7 +430,9 @@ index 0000000..e22fb4a
 +    }
 +    return {
 +      file: comSpec || 'cmd.exe',
-+      args: ['/d', '/s', '/c', `""${helper}""`],
++      // /v:off: delayed expansion, which the registry can switch on for every
++      // cmd.exe, would otherwise eat a ! in the path
++      args: ['/d', '/v:off', '/s', '/c', `""${helper}""`],
 +      verbatim: true,
 +      cwd,
 +    }
@@ -520,8 +522,12 @@ index 0000000..e22fb4a
 +        // never logged. The helper's own token is hidden first, as it can be
 +        // anywhere in what a failing helper printed
 +        for (const line of scrub(stderr, stdout).split(/\r?\n/)) {
-+          if (line.trim()) {
-+            log.warn('token-helper', mask(line))
++          // control characters (C0 and C1 but tab) go first: a helper that
++          // relays a registry's text must not put escape sequences on the
++          // user's terminal
++          const shown = line.replace(/[^\t\x20-\x7e\xa0-\uffff]/g, '')
++          if (shown.trim()) {
++            log.warn('token-helper', mask(shown))
 +          }
 +        }
 +        if (err) {
@@ -645,10 +651,10 @@ index 0000000..e22fb4a
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..d6131e1
+index 0000000..ec7df73
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1126 @@
+@@ -0,0 +1,1141 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1004,6 +1010,21 @@ index 0000000..d6131e1
 +    ['warn', 'token-helper', 'refreshing session'],
 +    ['warn', 'token-helper', 'using cached login'],
 +  ])
++})
++
++t.test('control characters in stderr never reach the terminal', async t => {
++  const helper = makeHelper(t, `
++    process.stderr.write('\\x1b[2Jcleared\\n\\x1b]8;;https://evil.test\\x07click\\x1b]8;;\\x07\\n\\x9bmore\\tafter tab\\rback\\n')
++    ${print('s3cret')}
++  `)
++  const logs = logsOf(t)
++
++  t.equal(await getTokenHelperHeader(helper, REG_KEY), 'Bearer s3cret')
++  t.same(logs, [
++    ['warn', 'token-helper', '[2Jcleared'],
++    ['warn', 'token-helper', ']8;;https://evil.testclick]8;;'],
++    ['warn', 'token-helper', 'more\tafter tabback'],
++  ], 'escape, OSC, CSI and CR are removed; tab stays')
 +})
 +
 +t.test('credentials in stderr are masked', async t => {
@@ -1573,7 +1594,7 @@ index 0000000..d6131e1
 +t.test('batch files run through cmd.exe on Windows only', async t => {
 +  t.same(command('C:\\tools\\token.cmd', 'win32', 'C:\\Windows\\system32\\cmd.exe'), {
 +    file: 'C:\\Windows\\system32\\cmd.exe',
-+    args: ['/d', '/s', '/c', '""C:\\tools\\token.cmd""'],
++    args: ['/d', '/v:off', '/s', '/c', '""C:\\tools\\token.cmd""'],
 +    verbatim: true,
 +    cwd: 'C:\\tools',
 +  })

@@ -71,7 +71,8 @@ class CachePolicyTests(unittest.TestCase):
     def test_operation_dependent_token_includes_operation_in_key(self) -> None:
         self.client.handle_response(request("publish"), ok("scope", operationIndependent=False))
 
-        self.assertIn(CacheKey("scope", REGISTRY, "@scope", operation="publish"), self.client.cache)
+        # a non-read answer is also bound to the package the request names
+        self.assertIn(CacheKey("package", REGISTRY, "@scope", "pkg", operation="publish"), self.client.cache)
 
     def test_cache_never_does_not_store_token(self) -> None:
         self.client.handle_response(request(), ok("scope", cache="never"))
@@ -263,7 +264,7 @@ class RejectedCredentialTests(unittest.TestCase):
         erase = self.client.reject_credential(self.context())
 
         self.assertEqual(erase["kind"], "erase")
-        self.assertNotIn("granularity", erase)
+        self.assertEqual(erase["granularity"], "scope", "kept with the answer although it was never cached")
 
 
 if __name__ == "__main__":

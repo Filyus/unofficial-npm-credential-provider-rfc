@@ -22,7 +22,9 @@ from tests.generated_policy import (
     SUPPORTED_CAPABILITIES,
     SUPPORTED_GRANULARITY,
     SUPPORTED_OPERATIONS,
-    OPERATION_BOUND_REGARDLESS,
+    OPERATION_BOUND_EXCEPT,
+    PACKAGE_BOUND_WHEN_PRESENT,
+    TIMEOUT_KILLS_BEFORE_NO_RESTART,
     STORED_CREDENTIAL_ENTRY,
     SUPPORTED_REQUEST_KINDS,
     TIMEOUT_SECONDS,
@@ -79,6 +81,25 @@ class CacheEntry:
     operation: str | None = None
     expires_at: int | None = None
     operation_independent: bool = True
+    issuance: int | None = None
+
+
+@dataclass(frozen=True)
+class Issuance:
+    """One `get` answer: the credential npm sent with a registry request, the
+    context of the `get` that produced it and the response's granularity,
+    kept whether or not it was cached (`cache: "never"`). A registry request
+    is tied to the issuance it carried, so a late 401 or 403 on it is judged
+    against that answer, not against whatever the cache holds by then."""
+
+    id: int
+    auth: dict[str, Any]
+    granularity: str
+    registry: str
+    operation: str | None
+    scope: str | None = None
+    package: str | None = None
+    version: str | None = None
 
 
 class CacheKey(NamedTuple):
@@ -100,6 +121,30 @@ class CredentialClientModel:
     version: int | None = None
     capabilities: frozenset[str] = field(default_factory=frozenset)
     cache: dict[CacheKey, CacheEntry] = field(default_factory=dict)
+    issued: dict[int, Issuance] = field(default_factory=dict)
+    # erased by a 401, or replaced by the answer to a 403 retry
+    retired: set[int] = field(default_factory=set)
+    last_issuance: int | None = None
+    # hello `registries`: None when the provider did not list any
+    registries: list[str] | None = None
+
+    def serves(self, registry: str) -> bool:
+        """Registry matching against hello `registries`: a registry outside
+        the list counts as `url-not-supported`, and the provider is sent
+        nothing about it."""
+        if self.registries is None:
+            return True
+        return any(registry_matches(served, registry) for served in self.registries)
+
+    def request_or_decline(self, context: RequestContext, declined: DeclinedRegistries | None = None,
+                           provider: str = "provider") -> dict[str, Any] | str:
+        """The `get` npm sends, or `try-next-provider` without any message when
+        the provider's hello leaves this registry out."""
+        if not self.serves(context.registry):
+            if declined is not None:
+                declined.record(provider, context.registry, "try-next-provider")
+            return "try-next-provider"
+        return self.build_request(context)
 
     def receive_hello(self, message: dict[str, Any]) -> int:
         self._require_state(ClientState.SPAWNED)
@@ -115,6 +160,7 @@ class CredentialClientModel:
             return 0
         self.version = PROTOCOL_VERSION
         self.capabilities = frozenset(capability for capability in capabilities if capability in SUPPORTED_CAPABILITIES)
+        self.registries = message.get("registries")
         self.state = ClientState.READY
         return PROTOCOL_VERSION
 
@@ -148,14 +194,29 @@ class CredentialClientModel:
         if not isinstance(ok, dict):
             raise ProtocolViolation("Ok response must be an object")
         kind = ok.get("kind")
-        if not isinstance(kind, str) or kind not in SUPPORTED_REQUEST_KINDS:
-            raise ProtocolViolation(f"unsupported Ok kind: {kind!r}")
+        # open, as request kinds are: a newer client may add a kind within v1,
+        # and the pairing with the request is what rejects a bogus answer
+        if not _is_identifier(kind):
+            raise ProtocolViolation(f"Ok.kind must match {IDENTIFIER_PATTERN}: {kind!r}")
         if kind != request.get("kind"):
             raise ProtocolViolation("Ok.kind must match request kind")
         auth, cache, expires_at, granularity, operation_independent = validate_ok(ok)
         if kind != "get":
             return kind
-        self._store_token(request, auth, cache, expires_at, granularity, operation_independent)
+        granularity, operation_independent = self._binding(request, granularity, operation_independent)
+        issuance = Issuance(
+            id=len(self.issued) + 1,
+            auth=auth,
+            granularity=granularity,
+            registry=request["registry"],
+            operation=request.get("operation"),
+            scope=request.get("scope"),
+            package=request.get("package"),
+            version=request.get("version"),
+        )
+        self.issued[issuance.id] = issuance
+        self.last_issuance = issuance.id
+        self._store_token(request, auth, cache, expires_at, granularity, operation_independent, issuance.id)
         return "ok"
 
     def reject_credential(
@@ -163,34 +224,60 @@ class CredentialClientModel:
         context: RequestContext,
         auth_challenges: list[str] | None = None,
         now: int = 0,
+        issuance: int | None = None,
     ) -> dict[str, Any] | None:
-        """A 401 that leads to `erase`: first drop from this cache every entry
-        that served the rejected credential, at every granularity level, so a
-        later lookup cannot hand it out again; then build the `erase` request
-        with the context of the `get` that produced it (package, scope,
-        operation and the granularity of the response). Returns None when the
-        provider did not advertise `erase`: the eviction still happens, there is
-        just nobody to tell. The retry `get` follows the `erase`."""
+        """A 401 that leads to `erase`. `issuance` is the answer whose credential
+        the rejected request carried; without it, the one this context's lookup
+        serves now. An issuance already erased or replaced sends no erase: the
+        request goes again with what the cache now holds, and that counts as its
+        one retry. Otherwise every cache entry of that issuance is dropped, at
+        every level, and the erase carries the context of the `get` that produced
+        it (version included) and the response's granularity, cached or not.
+        Returns None when the provider did not advertise `erase`: the eviction
+        still happens, there is just nobody to tell."""
         self._require_state(ClientState.READY)
-        served = self._evict_served(context, now)
+        if issuance is None:
+            served = self.lookup(context.registry, context.scope, context.package, context.operation, now)
+            issuance = served.issuance if served is not None else self._latest_issuance(context)
+        if issuance is not None and issuance in self.retired:
+            return None
+        record = self.issued.get(issuance) if issuance is not None else None
+        if issuance is not None:
+            self._retire(issuance)
         if "erase" not in self.capabilities:
             return None
         request: dict[str, Any] = {
             "v": self.version,
             "kind": "erase",
             "registry": context.registry,
-            "operation": context.operation,
+            "operation": record.operation if record is not None else context.operation,
         }
-        if context.scope is not None:
-            request["scope"] = context.scope
-        if context.package is not None:
-            request["package"] = context.package
-        if served is not None:
-            request["granularity"] = served.granularity
+        scope = record.scope if record is not None else context.scope
+        package = record.package if record is not None else context.package
+        version = record.version if record is not None else context.version
+        if scope is not None:
+            request["scope"] = scope
+        if package is not None:
+            request["package"] = package
+        if version is not None:
+            request["version"] = version
+        request["granularity"] = record.granularity if record is not None else "registry"
         if auth_challenges:
             request["authChallenges"] = list(auth_challenges)
         validate_request(request)
         return request
+
+    def refused_by_403(self, issuance: int) -> bool:
+        """A 403 on a request that carried `issuance`. Returns whether a retry
+        `get` goes out: not for an issuance already erased or replaced (the
+        request goes again with what the cache holds). No erase either way."""
+        return issuance not in self.retired
+
+    def replace_after_403(self, issuance: int) -> None:
+        """The 403 retry was answered `Ok`: drop every entry of the refused
+        issuance, as an erase does but without sending one, so the retry's
+        credential is not shadowed by the refused one."""
+        self._retire(issuance)
 
     def evict_rejected(self, erase_request: dict[str, Any]) -> None:
         """Transcript replay of what the client did before it sent this `erase`:
@@ -201,18 +288,32 @@ class CredentialClientModel:
             scope=erase_request.get("scope"),
             package=erase_request.get("package"),
             operation=erase_request.get("operation", "read"),
+            version=erase_request.get("version"),
         )
-        self._evict_served(context)
+        served = self.lookup(context.registry, context.scope, context.package, context.operation)
+        if served is not None and served.issuance is not None:
+            self._retire(served.issuance)
 
-    def _evict_served(self, context: RequestContext, now: int = 0) -> CacheEntry | None:
-        """Removes every entry holding the credential that this context's lookup
-        serves, whatever its granularity or operation binding, and returns the
-        entry that served it."""
-        served = self.lookup(context.registry, context.scope, context.package, context.operation, now)
-        if served is not None:
-            for key in [key for key, entry in self.cache.items() if entry.auth == served.auth]:
+    def _latest_issuance(self, context: RequestContext) -> int | None:
+        """The answer a request with this context carried when the cache holds
+        none (`cache: "never"`): the latest one for the same registry, scope,
+        package and operation."""
+        for issuance in sorted(self.issued.values(), key=lambda record: record.id, reverse=True):
+            if (issuance.registry, issuance.scope, issuance.package) == (context.registry, context.scope, context.package) \
+                    and issuance.operation == context.operation:
+                return issuance.id
+        return None
+
+    def _retire(self, issuance: int) -> None:
+        """Drops every cache entry that serves this credential, at every level,
+        and retires each answer that carried it."""
+        auth = self.issued[issuance].auth if issuance in self.issued else None
+        self.retired.add(issuance)
+        for key, entry in list(self.cache.items()):
+            if entry.issuance == issuance or (auth is not None and entry.auth == auth):
+                if entry.issuance is not None:
+                    self.retired.add(entry.issuance)
                 del self.cache[key]
-        return served
 
     def lookup(
         self,
@@ -279,13 +380,10 @@ class CredentialClientModel:
         expires_at: int | None,
         granularity: str,
         operation_independent: bool,
+        issuance: int | None = None,
     ) -> None:
         if cache == "never":
             return
-        # a `stage-read` answer serves the lookup only: the write after it
-        # always gets a `get` of its own, with the record's package and version
-        if request.get("operation") in OPERATION_BOUND_REGARDLESS:
-            operation_independent = False
         entry = CacheEntry(
             auth=auth,
             granularity=granularity,
@@ -296,8 +394,21 @@ class CredentialClientModel:
             operation=None if operation_independent else request.get("operation"),
             expires_at=expires_at,
             operation_independent=operation_independent,
+            issuance=issuance,
         )
         self.cache[cache_key(entry)] = entry
+
+    @staticmethod
+    def _binding(request: dict[str, Any], granularity: str, operation_independent: bool) -> tuple[str, bool]:
+        """An answer for any operation but `read` serves that operation only and,
+        when the request names a package, that package only, whatever the
+        provider said: a workspace publish asks once per package, and a
+        `stage-read` answer never serves the write after it."""
+        if request.get("operation") in OPERATION_BOUND_EXCEPT:
+            return granularity, operation_independent
+        if PACKAGE_BOUND_WHEN_PRESENT and request.get("package") is not None:
+            granularity = "package"
+        return granularity, False
 
     def _require_state(self, expected: ClientState) -> None:
         if self.state != expected:
@@ -366,7 +477,7 @@ _SCOPE = re.compile(r"@[^/]+")
 # the schema's `kind` and `operation` pattern: new values may appear within v1
 _IDENTIFIER = re.compile(IDENTIFIER_PATTERN)
 # the schema's hello `registries` item pattern
-_SERVED_REGISTRY = re.compile(r"https?://[^/?#\s]+(/[^?#\s]*)?")
+_SERVED_REGISTRY = re.compile(r"https?://[^/?#\s@\\]+(/[^?#\s\\]*)?")
 
 
 def validate_hello(message: Any) -> tuple[list[int], list[str]]:
@@ -449,13 +560,11 @@ def validate_request(message: dict[str, Any]) -> None:
         raise ProtocolViolation("request requires registry string")
     if "scope" in message:
         scope = message["scope"]
-        if scope is not None and (not isinstance(scope, str) or not _SCOPE.fullmatch(scope)):
-            raise ProtocolViolation("scope must be null or match ^@[^/]+$")
+        if not isinstance(scope, str) or not _SCOPE.fullmatch(scope):
+            raise ProtocolViolation("scope must match ^@[^/]+$; it is absent for an unscoped package")
     for name in ("package", "version", "command", "token"):
         if name in message and not _is_nonempty_string(message[name]):
             raise ProtocolViolation(f"{name} must be a non-empty string")
-    if "loginUrl" in message and not isinstance(message["loginUrl"], str):
-        raise ProtocolViolation("loginUrl must be a string")
     if "interactive" in message and not isinstance(message["interactive"], bool):
         raise ProtocolViolation("interactive must be boolean")
     kind = message["kind"]
@@ -469,6 +578,9 @@ def validate_request(message: dict[str, Any]) -> None:
             raise ProtocolViolation("get requests require an operation")
         if "interactive" not in message:
             raise ProtocolViolation("get requests require interactive boolean")
+    if kind == "erase":
+        if "operation" not in message or "granularity" not in message:
+            raise ProtocolViolation("erase requests carry the get's operation and the response's granularity")
     if operation in OPERATIONS_REQUIRING_VERSION and "version" not in message:
         raise ProtocolViolation(f"{operation} requires version")
     retry = message.get("retry")
@@ -557,6 +669,8 @@ def resolve_chain(
     stored_credential: bool,
     legacy_fallback: bool = False,
     oidc_token: bool = False,
+    registry_host: str | None = None,
+    listed_hosts: frozenset[str] | None = None,
 ) -> ChainOutcome:
     """The end of a provider chain. `answers` holds, in chain order, either
     `STORED_CREDENTIAL_ENTRY` (`npm:token`) or one provider's outcome: `ok`,
@@ -605,6 +719,10 @@ def resolve_chain(
     if per_registry:
         return done("fail")
     if stored_credential and not listed:
+        # when every provider listed its registries, warn only where one of them
+        # lists this host: that is where a stored credential stands in for it
+        if listed_hosts is not None and registry_host not in listed_hosts:
+            return done("stored-credential")
         return done("stored-credential", None, "stored credential used after every global provider declined the registry")
     return done("anonymous")
 
@@ -655,6 +773,42 @@ def classify_401(www_authenticate: str | None, body: Any) -> str:
     return "otp" if asks_otp else "reject"
 
 
+def rejection_action(status: int, www_authenticate: str | None = None, body: Any = None,
+                     retried: bool = False) -> tuple[bool, bool, str]:
+    """What npm does when the registry answers a request made with a provider's
+    credential: (erase, retry, outcome). A 401 the OTP classification claims
+    keeps the credential; any other 401 erases it and retries once, and a 401
+    on the retry's credential erases it without retrying again; a 403 retries
+    once without erase.""" 
+    if status == 401:
+        kind = classify_401(www_authenticate, body)
+        if kind == "otp":
+            return False, False, "otp-prompt"
+        if kind == "eauthip":
+            return False, False, "eauthip"
+        return True, not retried, "rejected"
+    if status == 403:
+        return False, not retried, "forbidden"
+    return False, False, "other"
+
+
+@dataclass
+class ProviderRestarts:
+    """A provider killed for a timeout, at hello or during a request, ends its
+    session: the requests queued behind it fail, the cache stays; the next
+    request starts a new session, until it has been killed
+    TIMEOUT_KILLS_BEFORE_NO_RESTART times in one command."""
+
+    kills: int = 0
+
+    def on_timeout(self, queued: int) -> int:
+        self.kills += 1
+        return queued
+
+    def may_start(self) -> bool:
+        return self.kills < TIMEOUT_KILLS_BEFORE_NO_RESTART
+
+
 @dataclass
 class DeclinedRegistries:
     """`url-not-supported` depends on `registry` alone, so the client remembers
@@ -674,6 +828,10 @@ class DeclinedRegistries:
 def validate_transcript(path: str, config: ProviderConfig | None = None) -> CredentialClientModel:
     client = CredentialClientModel(config=config or ProviderConfig())
     last_request: dict[str, Any] | None = None
+    # since the last get that was not a retry: whether an erase went out, and
+    # whether a retry did; a 403 retry follows no erase, and a request gets one
+    erased_since_get = False
+    retried_since_get = False
     for event in load_transcript(path):
         actor = event.get("from")
         if actor == "provider" and client.state == ClientState.SPAWNED:
@@ -686,6 +844,15 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
             validate_request(message)
             if message["kind"] == "erase":
                 client.evict_rejected(message)
+                erased_since_get = True
+            elif message["kind"] == "get" and message.get("retry") is True:
+                if retried_since_get:
+                    raise ProtocolViolation("a registry request gets at most one provider retry")
+                if message.get("httpStatus") == 403 and erased_since_get:
+                    raise ProtocolViolation("a 403 retry follows no erase")
+                retried_since_get = True
+            elif message["kind"] == "get":
+                erased_since_get = retried_since_get = False
             last_request = message
         elif actor == "provider":
             if last_request is None:

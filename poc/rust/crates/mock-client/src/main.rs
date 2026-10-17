@@ -1,4 +1,4 @@
-use mock_client::{ClientScenario, run_exchange};
+use mock_client::{ClientScenario, ProviderCommand, run_exchange};
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,9 +31,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let provider = provider.ok_or("--provider is required")?;
-    let mut command = Command::new(provider);
-    command.args(provider_args);
-    let summary = run_exchange(command, scenario)?;
+    let summary = run_exchange(
+        ProviderCommand::new(Command::new(provider), provider_args),
+        scenario,
+    )?;
     println!(
         "version={} outcome={}",
         summary.selected_version, summary.outcome

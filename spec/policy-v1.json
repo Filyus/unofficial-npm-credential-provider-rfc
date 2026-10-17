@@ -143,7 +143,11 @@
       "erase": 10,
       "login": 300,
       "logout": 30
-    }
+    },
+    "timeoutKillsBeforeNoRestart": 2,
+    "queuedAfterTimeout": "fail",
+    "cacheAfterTimeout": "keep",
+    "sentinelArgument": "--npm-credential-provider"
   },
   "cache": {
     "defaultPolicy": "session",
@@ -160,17 +164,29 @@
     "doNotStorePolicies": [
       "never"
     ],
-    "operationBoundRegardless": [
-      "stage-read"
-    ]
+    "operationBoundExcept": [
+      "read"
+    ],
+    "packageBoundWhenPresent": true,
+    "schemeInKey": true
   },
   "nonInteractive": {
     "interactiveFalseAllowsPrompts": false,
     "ciRequiresPreconfiguredTrust": true,
-    "missingCredentialBehavior": "fail"
+    "missingCredentialBehavior": "fail",
+    "interactiveRule": "stdin and stdout are TTYs and no CI is detected"
   },
   "limits": {
     "lineSize": "implementation-defined",
-    "oversizeBehavior": "fail"
+    "oversizeBehavior": "fail",
+    "lineSizeMinimum": 1048576
+  },
+  "rejection": {
+    "401": "erase-and-retry",
+    "401-otp": "otp-prompt",
+    "401-ipaddress": "eauthip",
+    "403": "retry-without-erase",
+    "retriesPerRequest": 1,
+    "appliesTo": "provider credentials; npm:token and OIDC credentials get no erase and no provider retry"
   }
 }

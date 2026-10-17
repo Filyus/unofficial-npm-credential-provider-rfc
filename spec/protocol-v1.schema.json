@@ -28,7 +28,7 @@
         "registries": {
           "description": "The registries this provider serves. npm matches requests against them itself (scheme compared) and sends the provider nothing about any other registry. An empty list serves none.",
           "type": "array",
-          "items": { "type": "string", "pattern": "^https?://[^/?#\\s]+(/[^?#\\s]*)?$" },
+          "items": { "type": "string", "pattern": "^https?://[^/?#\\s@\\\\]+(/[^?#\\s\\\\]*)?$" },
           "uniqueItems": true
         }
       },
@@ -51,7 +51,8 @@
           "format": "uri"
         },
         "scope": {
-          "type": ["string", "null"],
+          "description": "The package's scope; absent for an unscoped package.",
+          "type": "string",
           "pattern": "^@[^/]+$"
         },
         "package": {
@@ -92,10 +93,6 @@
           "type": "string",
           "minLength": 1
         },
-        "loginUrl": {
-          "type": "string",
-          "format": "uri"
-        },
         "authChallenges": {
           "type": "array",
           "items": { "type": "string" }
@@ -109,6 +106,15 @@
           },
           "then": {
             "required": ["operation", "interactive"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "erase" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["operation", "granularity"]
           }
         },
         {
@@ -156,8 +162,10 @@
       "required": ["kind"],
       "properties": {
         "kind": {
+          "description": "Must equal the request's kind. Open, as request kinds are: a newer client may add a kind within v1.",
           "type": "string",
-          "enum": ["login", "logout", "get", "erase"]
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "examples": ["login", "logout", "get", "erase"]
         },
         "auth": { "$ref": "#/$defs/auth" },
         "cache": {

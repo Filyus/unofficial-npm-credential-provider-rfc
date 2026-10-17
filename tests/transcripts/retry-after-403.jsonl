@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","command":"install","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"narrow"},"cache":"session","granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.example.test/","scope":"@scope","package":"pkg","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"wider-read"},"cache":"session","granularity":"registry"}}}
+{"from":"client","event":"close"}

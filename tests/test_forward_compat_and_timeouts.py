@@ -52,7 +52,8 @@ class ForwardCompatibilityTests(unittest.TestCase):
 
     def test_known_requests_are_left_to_the_provider(self) -> None:
         self.assertIsNone(provider_reply_to_unsupported(GET))
-        self.assertIsNone(provider_reply_to_unsupported({"v": 1, "kind": "erase", "registry": REGISTRY}))
+        self.assertIsNone(provider_reply_to_unsupported(
+            {"v": 1, "kind": "erase", "registry": REGISTRY, "operation": "read", "granularity": "registry"}))
 
     def test_provider_keeps_serving_after_an_unsupported_request(self) -> None:
         refused = provider_reply_to_unsupported({"v": 1, "kind": "store", "registry": REGISTRY})

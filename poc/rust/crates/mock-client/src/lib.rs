@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
-    ErrorKind, Hello, ProtocolError, ProviderResponse, Request, RequestKind, negotiate,
-    read_json_line, write_json_line,
+    ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderResponse, Request,
+    RequestKind, generated::SENTINEL_ARGUMENT, negotiate, read_json_line, write_json_line,
 };
 use std::fmt;
 use std::io::{BufReader, Read};
@@ -49,6 +49,20 @@ impl From<ProtocolError> for ExchangeError {
     }
 }
 
+/// What to start for a provider: the program, and the arguments configured for
+/// it. npm puts the sentinel `--npm-credential-provider` between them, so a
+/// provider can tell protocol mode from a standalone run.
+pub struct ProviderCommand {
+    pub program: Command,
+    pub args: Vec<String>,
+}
+
+impl ProviderCommand {
+    pub fn new(program: Command, args: Vec<String>) -> Self {
+        Self { program, args }
+    }
+}
+
 /// One provider process for the lifetime of an npm command: spawned once,
 /// asked any number of strictly sequential requests, ended by closing stdin.
 /// Dropping a session without `close` kills the process.
@@ -58,11 +72,18 @@ pub struct ProviderSession {
     reader: BufReader<ChildStdout>,
     pub version: u32,
     pub capabilities: Vec<String>,
+    pub hello: Option<Hello>,
 }
 
 impl ProviderSession {
-    pub fn spawn(mut command: Command) -> Result<Self, ExchangeError> {
+    pub fn spawn(provider: ProviderCommand) -> Result<Self, ExchangeError> {
+        let ProviderCommand {
+            program: mut command,
+            args,
+        } = provider;
         command
+            .arg(SENTINEL_ARGUMENT)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -83,13 +104,23 @@ impl ProviderSession {
             reader: BufReader::new(stdout),
             version: 0,
             capabilities: Vec::new(),
+            hello: None,
         };
 
         let hello = read_json_line::<Hello>(&mut session.reader)?
             .ok_or_else(|| ExchangeError::Provider("provider exited before hello".into()))?;
         session.version = negotiate(&hello)?;
-        session.capabilities = hello.capabilities.unwrap_or_default();
+        session.capabilities = hello.capabilities.clone().unwrap_or_default();
+        session.hello = Some(hello);
         Ok(session)
+    }
+
+    /// Whether the provider's hello leaves `registry` in; a registry it leaves
+    /// out counts as `url-not-supported`, and the provider is sent nothing.
+    pub fn serves(&self, registry: &str) -> bool {
+        self.hello
+            .as_ref()
+            .is_none_or(|hello| hello.serves(registry))
     }
 
     pub fn request(&mut self, request: &Request) -> Result<ProviderResponse, ExchangeError> {
@@ -150,11 +181,20 @@ impl Drop for ProviderSession {
 }
 
 pub fn run_exchange(
-    provider_command: Command,
+    provider_command: ProviderCommand,
     scenario: ClientScenario,
 ) -> Result<ExchangeSummary, ExchangeError> {
     let mut session = ProviderSession::spawn(provider_command)?;
     let request = request_for(scenario);
+    if !session.serves(&request.registry) {
+        let selected_version = session.version;
+        session.close()?;
+        return Ok(ExchangeSummary {
+            selected_version,
+            outcome: "try-next-provider".into(),
+            provider_index: 0,
+        });
+    }
     let response = session.request(&request)?;
     let outcome = summarize(&response)?;
     let selected_version = session.version;
@@ -182,7 +222,7 @@ pub enum ChainKind {
 /// same fails, and so does a chain in which someone answered `not-found`
 /// (the legacy opt-in is the model's business, not this mock's).
 pub fn run_provider_chain(
-    provider_commands: Vec<Command>,
+    provider_commands: Vec<ProviderCommand>,
     scenario: ClientScenario,
     kind: ChainKind,
 ) -> Result<ExchangeSummary, ExchangeError> {
@@ -235,6 +275,9 @@ fn request_for(scenario: ClientScenario) -> Request {
         ClientScenario::Logout => Request::bare(RequestKind::Logout, registry),
         ClientScenario::Erase => Request {
             scope: Some("@scope".into()),
+            package: Some("package".into()),
+            operation: Some(Operation::Read),
+            granularity: Some(Granularity::Scope),
             command: Some("install".into()),
             ..Request::bare(RequestKind::Erase, registry)
         },

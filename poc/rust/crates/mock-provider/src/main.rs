@@ -1,10 +1,16 @@
 use credential_provider_protocol::{
     ErrorKind, Granularity, Hello, Operation, ProviderErr, ProviderOk, ProviderResponse, Request,
-    RequestKind, read_json_line, write_json_line,
+    RequestKind, generated::SENTINEL_ARGUMENT, read_json_line, write_json_line,
 };
 use std::io::{self, BufReader};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // npm starts a provider with the sentinel first; anything else is a person
+    // running the program, who gets its standalone mode, not the protocol
+    if std::env::args().nth(1).as_deref() != Some(SENTINEL_ARGUMENT) {
+        eprintln!("mock-provider: run by npm with {SENTINEL_ARGUMENT}; no standalone mode");
+        std::process::exit(2);
+    }
     let scenario = parse_scenario();
 
     if scenario == "no-hello" {
@@ -17,12 +23,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &Hello {
                 v: vec![2],
                 capabilities: None,
+                registries: None,
             },
         )?;
         return Ok(());
     }
 
-    write_json_line(&mut io::stdout(), &Hello::v1())?;
+    if scenario == "serves-elsewhere" {
+        write_json_line(
+            &mut io::stdout(),
+            &Hello {
+                registries: Some(vec!["https://other.example.test/".into()]),
+                ..Hello::v1()
+            },
+        )?;
+    } else {
+        write_json_line(&mut io::stdout(), &Hello::v1())?;
+    }
 
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
@@ -100,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_scenario() -> String {
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(2);
     while let Some(arg) = args.next() {
         if arg == "--scenario" {
             return args.next().unwrap_or_else(|| "get-success".into());
