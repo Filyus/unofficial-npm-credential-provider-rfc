@@ -1,6 +1,6 @@
 # The Phase 1 prototype
 
-How the `tokenHelper` prototype described in [the RFC](rfc-credential-provider.md) is built and how it was checked. [claims.md](claims.md) maps each statement in the RFC to the test or source behind it.
+How the `tokenHelper` prototype described in [Phase 1](phase-1-token-helper.md) is built and how it was checked. [claims.md](claims.md) maps each statement in the RFC to the test or source behind it.
 
 ## Where the code is
 

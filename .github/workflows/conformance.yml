@@ -1,5 +1,5 @@
-# Runs the Phase 2 conformance material: the generated files are fresh
-# relative to spec/policy-v1.json, the Python model's tests (every policy
+# Checks the links between the documents and runs the Phase 2 conformance
+# material: the generated files are fresh relative to spec/policy-v1.json, the Python model's tests (every policy
 # value, the provider chain included) pass, and the Rust client and provider
 # pair builds, lints clean and passes its tests.
 name: conformance
@@ -11,6 +11,8 @@ on:
       - 'tests/**'
       - 'tools/**'
       - 'poc/rust/**'
+      - '**.md'
+      - 'examples/**'
       - '.github/workflows/conformance.yml'
   workflow_dispatch:
 
@@ -22,6 +24,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: links between the documents resolve
+        run: node tools/check-links.js
       - name: generated files are fresh
         run: python3 tools/generate_from_policy.py --check
       - name: python model

@@ -1,6 +1,6 @@
 # Which npmjs.com tokens read `/-/stage`
 
-A live test for the one question the RFC leaves to evidence: which token tiers npmjs.com accepts on the staged-publishing reads. The answer sets a provider's default `stage-read` mapping on npmjs.com ([Operations](rfc-credential-provider.md#4-operations)); it changes nothing in the protocol. The documentation names no tier: the API lists granular tokens on every `/-/stage` path and documents 401 as the only refusal on the list, and 401 and 404 on the record and the tarball ([API](https://api-docs.npmjs.com/)).
+A live test for the one question the RFC leaves to evidence: which token tiers npmjs.com accepts on the staged-publishing reads. The answer sets a provider's default `stage-read` mapping on npmjs.com ([Operations](phase-2-credential-provider.md#4-operations)); it changes nothing in the protocol. The documentation names no tier: the API lists granular tokens on every `/-/stage` path and documents 401 as the only refusal on the list, and 401 and 404 on the record and the tarball ([API](https://api-docs.npmjs.com/)).
 
 It needs an npmjs.com account and real tokens, so it is run by hand.
 
@@ -50,7 +50,7 @@ For each token and request, record the status, the item count or error body, and
   - 200 with S on R1–R4: providers map `stage-read` to a separate read-only token, with no presence check, and it works in CI.
   - 401 or 403: write-capable tokens only, and the RFC's write-policy rule applies. Note which of the two arrives; a 403 is what a provider may widen on.
   - 200 with an empty list, and 404 on R3 and R4: the visibility filter works by tier; same conclusion, and it confirms the RFC's "a 401, a 404 or an empty list".
-- **A 401 with `WWW-Authenticate: otp`** on any read is a one-time-password challenge, not a tier refusal ([erase table](rfc-credential-provider.md#erase-a-credential-was-rejected)), and changes how the T2 row reads.
+- **A 401 with `WWW-Authenticate: otp`** on any read is a one-time-password challenge, not a tier refusal ([erase table](phase-2-credential-provider.md#erase-a-credential-was-rejected)), and changes how the T2 row reads.
 - **T1:** 200 means session tokens work despite the API's security list; 401 means providers need a granular token.
 - **T5:** provided Q has no staged versions, expected an empty list and 404, confirming that a token selected to other packages fails as 404 or an empty list, not 403.
 - **T6:** record the outcome. **T3b** against T3: expected the same.

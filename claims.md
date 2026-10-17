@@ -1,6 +1,6 @@
 # Evidence for the RFC's claims
 
-Every checkable statement in [rfc-credential-provider.md](rfc-credential-provider.md), and what backs it. External facts were checked against the source on the date given. Statements about the prototype are pinned to a test or a check, written as `kind: text`; [`poc/claims/check.js`](poc/claims/check.js) confirms that each one still exists, so a renamed or deleted test fails CI instead of leaving a claim without evidence.
+Every checkable statement in [Phase 1](phase-1-token-helper.md) and [Phase 2](phase-2-credential-provider.md), and what backs it. External facts were checked against the source on the date given. Statements about the prototype are pinned to a test or a check, written as `kind: text`; [`poc/claims/check.js`](poc/claims/check.js) confirms that each one still exists, so a renamed or deleted test fails CI instead of leaving a claim without evidence.
 
 Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `config` a test title in npm-cli `workspaces/config/test/`; `cli` a test title in npm-cli `test/lib/`; `e2e` a check in [`poc/npm-e2e/run.js`](poc/npm-e2e/run.js); `probe` a check in [`poc/platform-probes/run.js`](poc/platform-probes/run.js); `spec` a key in [`spec/policy-v1.json`](spec/policy-v1.json); `py` a test module in [`tests/`](tests).
 
