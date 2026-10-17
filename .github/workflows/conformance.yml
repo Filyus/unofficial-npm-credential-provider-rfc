@@ -1,7 +1,8 @@
 # Checks the links between the documents and runs the Phase 2 conformance
-# material: the generated files are fresh relative to spec/policy-v1.json, the Python model's tests (every policy
-# value, the provider chain included) pass, and the Rust client and provider
-# pair builds, lints clean and passes its tests.
+# material: the generated files are fresh relative to spec/policy-v1.json,
+# the Python model's tests (every policy value, the provider chain and the
+# example transcripts included) pass, and the Rust client and provider pair
+# builds, lints clean and passes its tests.
 name: conformance
 
 on:

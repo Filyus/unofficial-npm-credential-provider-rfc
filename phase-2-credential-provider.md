@@ -12,7 +12,7 @@
 
 ## Motivation
 
-The motivation is [Phase 1's](phase-1-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1 lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
+Phase 2 shares the [motivation of Phase 1](phase-1-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1 lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
 
 ## Scope
 
