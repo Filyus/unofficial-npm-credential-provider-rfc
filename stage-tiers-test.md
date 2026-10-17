@@ -26,7 +26,7 @@ Bypass-2FA off unless stated:
 
 ## Stage one version
 
-In P, run `npm stage publish` with T3 through a throwaway userconfig, which gives a stage id S. Note whether it asks for a one-time password. Confirm S with `npm stage list` under T4.
+In P, run `npm stage publish` with T3 through a throwaway userconfig, which gives a stage id S. Note whether it asks for a one-time password. Confirm S with `npm stage list` under T4. The staged version need not be a real build: `node poc/stage-tiers/run.js pack <dir> <P> 0.0.0-tokentest.1` writes a package whose README says not to approve it, under the dist-tag `tokentest`. If P's publishing access disallows tokens, T3 cannot stage; stage under T1 and note it.
 
 ## Requests
 
@@ -40,6 +40,8 @@ Keep each token out of argv and shell history: put `Authorization: Bearer <token
 | R4 | `https://registry.npmjs.org/-/stage/S/tarball` (with `-o /dev/null`) |
 
 For each token and request, record the status, the item count or error body, and every `WWW-Authenticate` header. Control: R1–R4 with no `Authorization`, expected 401.
+
+`node poc/stage-tiers/run.js check <token-dir> S <P>` does all of this: it reads each token from its own file (`T2.txt`, or the `T1.npmrc` that `npm login --userconfig` writes), sends it only to registry.npmjs.org, follows no redirect, redacts it from every body, and writes the table to `results.json` in that directory.
 
 ## Reading the results
 
