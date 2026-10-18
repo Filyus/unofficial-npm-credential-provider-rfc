@@ -588,17 +588,18 @@ def validate_request(message: dict[str, Any]) -> None:
             raise ProtocolViolation("erase requests carry the get's operation and the response's granularity")
     if operation in OPERATIONS_REQUIRING_VERSION and "version" not in message:
         raise ProtocolViolation(f"{operation} requires version")
-    retry = message.get("retry")
-    if retry is not None and not isinstance(retry, bool):
+    # present means present: the schema gives these a type, and null is none
+    if "retry" in message and not isinstance(message["retry"], bool):
         raise ProtocolViolation("retry must be boolean")
-    http_status = message.get("httpStatus")
-    if http_status is not None and (not _is_int(http_status) or not 100 <= http_status <= 599):
+    if "httpStatus" in message and (
+        not _is_int(message["httpStatus"]) or not 100 <= message["httpStatus"] <= 599
+    ):
         raise ProtocolViolation("httpStatus must be an HTTP status code")
-    if retry is True and http_status is None:
+    if message.get("retry") is True and "httpStatus" not in message:
         raise ProtocolViolation("retry=true requires httpStatus")
-    auth_challenges = message.get("authChallenges")
-    if auth_challenges is not None and (
-        not isinstance(auth_challenges, list) or not all(isinstance(challenge, str) for challenge in auth_challenges)
+    if "authChallenges" in message and (
+        not isinstance(message["authChallenges"], list)
+        or not all(isinstance(challenge, str) for challenge in message["authChallenges"])
     ):
         raise ProtocolViolation("authChallenges must be string[]")
 

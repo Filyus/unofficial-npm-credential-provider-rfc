@@ -146,6 +146,14 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate_request({**BASE_GET, "authChallenges": ["challenge", 401]})
 
+    def test_a_field_that_is_present_has_its_type_even_when_it_is_null(self) -> None:
+        """The schema gives retry, httpStatus and authChallenges a type, and
+        null has none of them: absent is the only way to leave them out."""
+        for field in ("retry", "httpStatus", "authChallenges", "scope", "package", "version", "command", "operation",
+                      "interactive"):
+            with self.subTest(field=field), self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, field: None})
+
     def test_unknown_request_fields_are_ignored(self) -> None:
         validate_request({**BASE_GET, "futureField": {"nested": True}})
 

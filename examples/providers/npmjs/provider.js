@@ -137,7 +137,8 @@ const create = async (args) => {
   }
 
   const get = async (request) => {
-    const op = OPERATIONS[request.operation]
+    // own properties only: an operation named `constructor` is not a tier
+    const op = Object.hasOwn(OPERATIONS, request.operation) ? OPERATIONS[request.operation] : null
     if (!op) {
       return err('operation-not-supported')
     }
