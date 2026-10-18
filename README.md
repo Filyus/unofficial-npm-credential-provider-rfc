@@ -45,6 +45,14 @@ python -m tests.fuzz_providers --seconds 600   # random and hostile sessions aga
 python -m tests.fuzz_messages --seconds 600    # the schema, the Python model, the Rust crate and the JS providers against each other
 ```
 
+and, with a nightly toolchain and `cargo install cargo-fuzz`, the Rust parser by coverage (on Windows, with the directory of `clang_rt.asan_dynamic-x86_64.dll` from Visual Studio on `PATH`):
+
+```sh
+python tools/seed_fuzz_corpus.py poc/rust/fuzz/corpus/message
+cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz/message.dict
+cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
+```
+
 End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch on their `token-helper` branches (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
 
 ```sh

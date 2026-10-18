@@ -1,0 +1,92 @@
+# Fuzzing, for as long as a night allows: random and hostile sessions against
+# the reference providers, the schema, the Python model, the Rust crate and the
+# JavaScript providers against each other, and the Rust parser by coverage.
+# What breaks an invariant comes back as a shrunk repro in the run's artifacts;
+# `workflow_dispatch` runs it on demand, for as many seconds as asked.
+name: fuzz
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'seconds each job fuzzes'
+        default: '600'
+
+permissions:
+  contents: read
+
+env:
+  SECONDS_EACH: ${{ inputs.seconds || '600' }}
+
+jobs:
+  providers:
+    name: sessions against the reference providers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - run: python3 -c "import jsonschema"
+      - name: random and hostile sessions
+        run: python3 -m tests.fuzz_providers --seconds "$SECONDS_EACH" --out fuzz-findings
+      - name: the findings, if any
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-sessions-findings
+          path: fuzz-findings
+          if-no-files-found: ignore
+
+  messages:
+    name: the readers of the protocol against each other
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - run: python3 -c "import jsonschema"
+      - uses: actions/cache@v4
+        with:
+          path: poc/rust/target
+          key: rust-target-${{ runner.os }}-${{ hashFiles('poc/rust/Cargo.lock') }}
+      - name: schema, model, Rust crate and providers on mangled messages
+        run: python3 -m tests.fuzz_messages --seconds "$SECONDS_EACH" --out fuzz-findings
+      - name: the findings, if any
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: message-findings
+          path: fuzz-findings
+          if-no-files-found: ignore
+
+  parser:
+    name: the Rust parser, by coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install nightly --profile minimal
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-fuzz
+            poc/rust/fuzz/target
+          key: cargo-fuzz-${{ runner.os }}-0.13.2-${{ hashFiles('poc/rust/fuzz/Cargo.toml') }}
+      - run: command -v cargo-fuzz || cargo install cargo-fuzz --version 0.13.2 --locked
+      - run: python3 tools/seed_fuzz_corpus.py poc/rust/fuzz/corpus/message
+      - name: messages
+        working-directory: poc/rust
+        run: cargo +nightly fuzz run message -- -max_total_time="$SECONDS_EACH" -dict=fuzz/message.dict
+      - name: lines near the limit
+        working-directory: poc/rust
+        run: cargo +nightly fuzz run line_limit -- -max_total_time="$SECONDS_EACH" -max_len=64
+      - name: the crashes, if any
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-crashes
+          path: poc/rust/fuzz/artifacts
+          if-no-files-found: ignore
