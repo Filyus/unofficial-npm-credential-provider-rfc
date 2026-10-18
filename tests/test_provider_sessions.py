@@ -78,7 +78,8 @@ class Lines:
                 self.queue.put(line)
             self.queue.put(None)
 
-        threading.Thread(target=pump, daemon=True).start()
+        self.thread = threading.Thread(target=pump, daemon=True)
+        self.thread.start()
 
     def next(self, what: str) -> str:
         try:
@@ -293,6 +294,13 @@ class Session:
         for process in (self.provider, self.helper):
             if process.poll() is None:
                 process.kill()
+            process.wait(timeout=10)
+        for lines in (self.out, self.err, self.helper_out):
+            lines.thread.join(timeout=10)
+        for process in (self.provider, self.helper):
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream and not stream.closed:
+                    stream.close()
 
 
 @unittest.skipUnless(node_available(), "node is not installed")
