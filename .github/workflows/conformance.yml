@@ -31,6 +31,8 @@ jobs:
         run: node tools/check-links.js
       - name: generated files are fresh
         run: python3 tools/generate_from_policy.py --check
+      - name: the schema checks run rather than skip
+        run: python3 -c "import jsonschema"
       - name: python model
         run: python3 -m unittest discover -v
       - name: reference providers produce their transcripts
