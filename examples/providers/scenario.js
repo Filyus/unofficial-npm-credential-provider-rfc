@@ -8,7 +8,8 @@
 //
 // With a transcript it starts the fake vendor API, prints one JSON line
 // ({provider, cwd, configFile, env}) saying how to start the provider, and
-// then reads its stdin: `tick` before each client request moves the clock,
+// then reads its stdin: `tick` before each client request moves the clock
+// and is answered `ticked` once it has,
 // and the end of stdin runs the checks run.js runs after a session (the
 // presence answers asked for, the store, the fake's state). It exits 0 when
 // they hold and 1, with the reason on stderr, when they do not. The
@@ -52,6 +53,9 @@ const main = async () => {
       if (line.trim() === 'tick') {
         requests += 1
         run.tick(`${run.label} request ${requests}`)
+        // the client waits for this before it sends the request, or the
+        // provider could read the clock before it moved
+        console.log('ticked')
       }
     }
     if (sessions) {

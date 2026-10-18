@@ -66,10 +66,9 @@ fn run(name: &str, transcript: &Path) {
         .spawn()
         .expect("node starts the scenario");
     let mut helper_in = helper.stdin.take().unwrap();
+    let mut helper_out = BufReader::new(helper.stdout.take().unwrap());
     let mut first = String::new();
-    BufReader::new(helper.stdout.take().unwrap())
-        .read_line(&mut first)
-        .unwrap();
+    helper_out.read_line(&mut first).unwrap();
     let setup: Setup = serde_json::from_str(&first).unwrap_or_else(|error| {
         let mut stderr = String::new();
         helper
@@ -131,7 +130,15 @@ fn run(name: &str, transcript: &Path) {
                     "{at}: hello leaves {} out",
                     request.registry
                 );
+                // the clock moves before the request is sent, not after
                 writeln!(helper_in, "tick").unwrap();
+                let mut ticked = String::new();
+                helper_out.read_line(&mut ticked).unwrap();
+                assert_eq!(
+                    ticked.trim(),
+                    "ticked",
+                    "{at}: the scenario did not move its clock"
+                );
                 pending = Some(request);
             }
             (Some("provider"), _) if session.is_none() => {
