@@ -1,0 +1,90 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "config": {
+    "idp": "https://idp.corp.example.com"
+  },
+  "store": {
+    "session": {
+      "refreshToken": "refresh-1",
+      "interactiveAt": 1792190000
+    }
+  },
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "sessions": {
+        "refresh-1": {}
+      },
+      "groups": [
+        "corp",
+        "corp-secure"
+      ]
+    },
+    "gateway": {
+      "tokens": {
+        "read:@corp": [
+          {
+            "token": "example-read-token-revoked",
+            "expires_at": 1792197000,
+            "groups": [
+              "corp"
+            ]
+          },
+          {
+            "token": "example-read-token-reminted",
+            "expires_at": 1792197100,
+            "groups": [
+              "corp"
+            ]
+          }
+        ],
+        "read:@corp-secure": [
+          {
+            "token": "example-read-token-secure-old-groups",
+            "expires_at": 1792197110,
+            "groups": [
+              "corp"
+            ]
+          },
+          {
+            "token": "example-read-token-secure-new-groups",
+            "expires_at": 1792197120,
+            "groups": [
+              "corp",
+              "corp-secure"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "session": {
+        "refreshToken": "refresh-1",
+        "accessToken": "access-3"
+      }
+    },
+    "state": {
+      "idp": {
+        "refreshes": 3,
+        "devices": 0
+      },
+      "gateway": {
+        "minted": [
+          "read:@corp",
+          "read:@corp",
+          "read:@corp-secure",
+          "read:@corp-secure"
+        ]
+      }
+    }
+  }
+}

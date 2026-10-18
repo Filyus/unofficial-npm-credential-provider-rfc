@@ -1,0 +1,99 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "config": {
+    "idp": "https://idp.corp.example.com",
+    "serviceIdentity": "fixtures/ci-identity.json"
+  },
+  "store": {
+    "session": {
+      "refreshToken": "refresh-1",
+      "interactiveAt": 1792190000
+    }
+  },
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "sessions": {
+        "refresh-1": {}
+      }
+    },
+    "gateway": {
+      "tokens": {
+        "read:@corp": [
+          {
+            "token": "example-read-token-corp",
+            "expires_at": 1792197000,
+            "groups": [
+              "corp"
+            ]
+          },
+          {
+            "token": "example-read-token-corp-later",
+            "expires_at": 1792199000,
+            "groups": [
+              "corp"
+            ]
+          }
+        ],
+        "read:unscoped": [
+          {
+            "token": "example-read-token-unscoped",
+            "expires_at": 1792197010,
+            "groups": [
+              "corp"
+            ]
+          }
+        ],
+        "read:@corp-data": [
+          {
+            "token": "example-read-token-corp-data",
+            "expires_at": 1792197020,
+            "groups": [
+              "corp"
+            ]
+          }
+        ],
+        "read:@corp-eu": [
+          {
+            "token": "example-read-token-corp-eu",
+            "expires_at": 1792197030,
+            "groups": [
+              "corp"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "session": {
+        "refreshToken": "refresh-1",
+        "accessToken": "access-1",
+        "interactiveAt": 1792190000
+      }
+    },
+    "state": {
+      "idp": {
+        "refreshes": 1,
+        "devices": 0
+      },
+      "gateway": {
+        "minted": [
+          "read:@corp",
+          "read:unscoped",
+          "read:@corp-data",
+          "read:@corp-eu",
+          "read:@corp"
+        ]
+      }
+    }
+  }
+}

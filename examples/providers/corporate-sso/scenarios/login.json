@@ -1,0 +1,38 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "config": {
+    "idp": "https://idp.corp.example.com"
+  },
+  "store": {},
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "pending": 1
+    },
+    "gateway": {}
+  },
+  "expect": {
+    "store": {
+      "session": {
+        "refreshToken": "refresh-device-1",
+        "accessToken": "access-1",
+        "accessExpiresAt": 1792196700,
+        "interactiveAt": 1792196100
+      }
+    },
+    "state": {
+      "idp": {
+        "devices": 1,
+        "pending": 0,
+        "refreshes": 0
+      }
+    }
+  }
+}

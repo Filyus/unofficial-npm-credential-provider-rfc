@@ -1,0 +1,73 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "config": {
+    "idp": "https://idp.corp.example.com"
+  },
+  "presence": [
+    true,
+    true
+  ],
+  "store": {
+    "session": {
+      "refreshToken": "refresh-1",
+      "interactiveAt": 1792192500
+    }
+  },
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "sessions": {
+        "refresh-1": {}
+      }
+    },
+    "gateway": {
+      "tokens": {
+        "publish:@corp/ui-kit@2.4.1": [
+          {
+            "token": "example-publish-token-ui-kit",
+            "expires_at": 1792196400,
+            "groups": [
+              "corp"
+            ]
+          }
+        ],
+        "publish:@corp/ui-icons@3.0.0": [
+          {
+            "token": "example-publish-token-ui-icons",
+            "expires_at": 1792196410,
+            "groups": [
+              "corp"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "session": {
+        "refreshToken": "refresh-device-1",
+        "interactiveAt": 1792196100
+      }
+    },
+    "state": {
+      "idp": {
+        "devices": 1,
+        "refreshes": 0
+      },
+      "gateway": {
+        "minted": [
+          "publish:@corp/ui-kit@2.4.1",
+          "publish:@corp/ui-icons@3.0.0"
+        ]
+      }
+    }
+  }
+}
