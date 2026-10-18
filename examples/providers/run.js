@@ -8,7 +8,9 @@
 // For examples/<name>/<t>.jsonl the scenario examples/providers/<name>/
 // scenarios/<t>.json gives the starting state: what the provider has stored,
 // the vendor API's state (served by the provider's fake.js on 127.0.0.1),
-// the clock, the environment, and the person's scripted answers. After the
+// the clock (`now`, or `clock` with one time per client request), the
+// environment, and the person's scripted answers, every one of which the
+// provider must ask for. After the
 // session, `expect.store` and `expect.state` are compared, as subsets, with
 // what the provider left stored and the state the fake ended in. Every
 // transcript of an example must have a scenario, so a new exchange cannot
@@ -31,8 +33,13 @@ const readJsonl = (file) =>
 
 // `actual` contains `expected`: every key of expected, recursively, with an
 // equal value; arrays compare whole.
+// `null` in expected means the key is absent (or null).
 const assertSubset = (actual, expected, where) => {
-  if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) {
+  if (expected === null) {
+    assert.ok(actual === undefined || actual === null, `${where}: expected absent, got ${JSON.stringify(actual)}`)
+    return
+  }
+  if (typeof expected !== 'object' || Array.isArray(expected)) {
     assert.deepStrictEqual(actual, expected, where)
     return
   }
@@ -53,6 +60,11 @@ const runTranscript = async (name, transcriptFile) => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), `provider-${name}-`))
   let child = null
   try {
+    // `now` is the clock at the start; `clock`, if given, is the clock for
+    // each client request in turn, so time can pass between requests
+    const clockFile = path.join(scratch, 'clock')
+    const clock = [...(scenario.clock || [])]
+    fs.writeFileSync(clockFile, String(scenario.now ?? 0))
     const storeFile = path.join(scratch, 'store.json')
     fs.writeFileSync(storeFile, JSON.stringify(scenario.store || {}))
     const endpoints = Object.fromEntries((scenario.hosts || []).map((origin) => [origin, fake.url]))
@@ -63,8 +75,8 @@ const runTranscript = async (name, transcriptFile) => {
         ...(scenario.config || {}),
         store: 'store.json',
         endpoints,
-        now: scenario.now,
-        person: { mode: 'scripted', presence: scenario.presence || [] },
+        clock: 'clock',
+        person: { mode: 'scripted', presence: scenario.presence || [], log: 'asked.log' },
       }),
     )
 
@@ -96,6 +108,10 @@ const runTranscript = async (name, transcriptFile) => {
       if (event.from === 'client' && event.event === 'close') {
         child.stdin.end()
       } else if (event.from === 'client') {
+        if (scenario.clock) {
+          assert.ok(clock.length, `${where}: the scenario's clock has no time left for this request`)
+          fs.writeFileSync(clockFile, String(clock.shift()))
+        }
         child.stdin.write(`${JSON.stringify(event.message)}\n`)
         pending = event.message
       } else {
@@ -106,6 +122,13 @@ const runTranscript = async (name, transcriptFile) => {
     }
     const code = await exited
     assert.equal(code, 0, `${name}/${base}: provider exited ${code}\n${stderr}`)
+    const askedFile = path.join(scratch, 'asked.log')
+    const asked = fs.existsSync(askedFile) ? fs.readFileSync(askedFile, 'utf8').split('\n').filter(Boolean) : []
+    assert.equal(
+      asked.length,
+      (scenario.presence || []).length,
+      `${name}/${base}: the provider asked for presence ${asked.length} times, the scenario scripts ${(scenario.presence || []).length} answers`,
+    )
     if (scenario.expect?.store) {
       assertSubset(JSON.parse(fs.readFileSync(storeFile, 'utf8')), scenario.expect.store, `${name}/${base} store`)
     }

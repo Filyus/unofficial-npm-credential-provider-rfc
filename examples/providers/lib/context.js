@@ -35,9 +35,12 @@ const loadContext = (configPath) => {
     }
   }
 
-  // Seconds since the epoch; a fixed clock when the configuration sets one,
-  // so that a transcript's `expiresAt` is reproducible.
-  const now = () => config.now ?? Math.floor(Date.now() / 1000)
+  // Seconds since the epoch. The conformance run sets the clock, in a file
+  // it moves forward between requests (a retry comes when a token has
+  // lapsed), so that a transcript's `expiresAt` is reproducible.
+  const clockPath = config.clock && path.resolve(path.dirname(configPath), config.clock)
+  const now = () =>
+    clockPath ? Number(fs.readFileSync(clockPath, 'utf8')) : config.now ?? Math.floor(Date.now() / 1000)
 
   // The address that answers for a registry or API URL: the configured
   // endpoint for its origin, or the URL itself.
@@ -79,6 +82,8 @@ const loadContext = (configPath) => {
       if (!answers.length) {
         throw new Error(`no scripted answer for: ${question}`)
       }
+      // the run checks that every scripted answer was asked for
+      fs.appendFileSync(path.resolve(path.dirname(configPath), config.person.log), `${question}\n`)
       return answers.shift()
     }
     return askTerminal(question)
@@ -107,16 +112,20 @@ const writeTerminal = (text) => {
   }
 }
 
-const askTerminal = async (question) => {
-  writeTerminal(`${question} [y/N] `)
-  const fd = fs.openSync(terminalPaths().input, 'r')
-  try {
-    const buffer = Buffer.alloc(64)
-    const n = fs.readSync(fd, buffer, 0, buffer.length, null)
-    return /^y(es)?$/i.test(buffer.toString('utf8', 0, n).trim())
-  } finally {
-    fs.closeSync(fd)
-  }
-}
+// Asynchronous, so that a provider's own deadline on the prompt can fire.
+const askTerminal = (question) =>
+  new Promise((resolve, reject) => {
+    writeTerminal(`${question} [y/N] `)
+    const input = fs.createReadStream(terminalPaths().input)
+    let answer = ''
+    input.on('data', (chunk) => {
+      answer += chunk
+      if (answer.includes('\n')) {
+        input.destroy()
+        resolve(/^y(es)?$/i.test(answer.trim()))
+      }
+    })
+    input.on('error', reject)
+  })
 
 module.exports = { loadContext }
