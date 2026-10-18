@@ -157,7 +157,11 @@ const create = async (args) => {
       if (!widens) {
         return err('other', `${request.operation} was refused with 403 and no other credential is released for it.`)
       }
-      return release(request, ['session'])
+      const widened = await release(request, ['session'])
+      // nothing wider is stored: the retry could only fail the same way
+      return widened.Err && widened.Err.kind === 'not-found'
+        ? err('other', `${request.operation} was refused with 403 and no other credential is released for it.`)
+        : widened
     }
     return release(request, op.tiers)
   }

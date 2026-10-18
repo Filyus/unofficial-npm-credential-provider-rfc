@@ -34,10 +34,13 @@ const assertSubset = (actual, expected, where) => {
   }
 }
 
-// Every secret a scenario puts within the provider's reach: values under a
-// key that names a token, secret or password, and the keys of an object so
-// named (a fake's table of tokens), in the store, the fake's state, the
-// environment, the provider's fixtures and every message of the transcript.
+// Every secret a scenario puts within the provider's reach: a string right
+// under a key that names a token, secret or password (or in an array so
+// named), and the keys of an object so named when they look like a token
+// rather than a package or a cache key (a fake's table of live tokens), in
+// the store, the fake's state, the environment, the provider's fixtures and
+// every message of the transcript. Records under such a key are searched by
+// their own keys, so a token's tier or package is not taken for a secret.
 const SECRET_KEY = /token|secret|password|credential/i
 const collectSecrets = (value, secretContext = false, found = new Set()) => {
   if (typeof value === 'string') {
@@ -48,11 +51,13 @@ const collectSecrets = (value, secretContext = false, found = new Set()) => {
     value.forEach((item) => collectSecrets(item, secretContext, found))
   } else if (value && typeof value === 'object') {
     for (const [key, item] of Object.entries(value)) {
-      const secret = secretContext || SECRET_KEY.test(key)
-      if (SECRET_KEY.test(key) && item && typeof item === 'object' && !Array.isArray(item)) {
-        Object.keys(item).forEach((inner) => collectSecrets(inner, true, found))
+      const named = SECRET_KEY.test(key)
+      if (named && item && typeof item === 'object' && !Array.isArray(item)) {
+        Object.keys(item)
+          .filter((inner) => !/[:/@]/.test(inner))
+          .forEach((inner) => collectSecrets(inner, true, found))
       }
-      collectSecrets(item, secret, found)
+      collectSecrets(item, named, found)
     }
   }
   return found
@@ -69,7 +74,9 @@ const fixtureSecrets = (name) => {
   return found
 }
 
-const prepare = async (name, transcriptFile) => {
+// `presence` replaces the scenario's scripted answers, for sessions that are
+// not the transcript's (tests/test_provider_sessions.py).
+const prepare = async (name, transcriptFile, { presence } = {}) => {
   const base = path.basename(transcriptFile, '.jsonl')
   const label = `${name}/${base}`
   const scenarioFile = path.join(providers, name, 'scenarios', `${base}.json`)
@@ -96,12 +103,24 @@ const prepare = async (name, transcriptFile) => {
       store: 'store.json',
       endpoints,
       clock: 'clock',
-      person: { mode: 'scripted', presence: scenario.presence || [], log: 'asked.log' },
+      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log' },
     }),
   )
 
   return {
     label,
+    askedFile: path.join(scratch, 'asked.log'),
+    // what the scenario puts within the provider's reach, for a client
+    // that checks stderr itself
+    secrets: () => [
+      ...new Set([
+        ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env }),
+        ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
+        ...collectSecrets(JSON.parse(fs.readFileSync(storeFile, 'utf8'))),
+        ...collectSecrets(fakeState),
+        ...fixtureSecrets(name),
+      ]),
+    ],
     provider: path.join(providers, name, 'provider.js'),
     cwd: path.join(providers, name),
     configFile,
