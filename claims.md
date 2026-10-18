@@ -90,7 +90,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 
 | Claim | Evidence |
 |---|---|
-| A helper's output becomes the same Authorization value in the prototype and in the Python model, or is refused by both, and a refusal quotes none of it | [`tests/fuzz_helper.py`](tests/fuzz_helper.py), run in the `prototype` workflow on each OS and Node version |
+| A helper's output becomes the same Authorization value in the prototype and in the Python model, or is refused by both, and a refusal quotes none of it; a `tokenHelper` value is accepted or refused (not absolute, arguments, not found) the same way by both, on a tree of real files | [`tests/fuzz_helper.py`](tests/fuzz_helper.py), run in the `prototype` workflow on each OS and Node version |
 | Control characters in helper stderr are removed before it is logged; `cmd.exe` runs with `/v:off` | `fetch: control characters in stderr never reach the terminal`, `fetch: batch files run through cmd.exe on Windows only`, [`poc/helper-fuzz/names.js`](poc/helper-fuzz/names.js) (helpers named with `& ^ ( ) ! , ; = '` and spaces, in directories named so, run as themselves and nothing else, `%` refused; on Linux and macOS names with `$ ` ; & | ' " * ? [`, a newline or a leading dash are only names; each seen to fail when the quoting was weakened) |
 | An absolute path with no arguments; anything else refused with `ETOKENHELPER` | `fetch: a relative path or a command with arguments is refused` |
 | `.cmd`/`.bat` through `cmd.exe` on Windows only; `"` or `%` refused there; `& ^ ! ; ( ) ' , =`, spaces and non-ASCII in the directory reach the helper unchanged and inject nothing | `fetch: batch files run through cmd.exe on Windows only`, `probe: runs as itself, in its own directory`, `probe: is refused with a reason` |
@@ -150,6 +150,16 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 | Messages agree with the JSON schema | `py: test_model_schema_agreement`, `py: test_json_schema` |
 | Session reuse: 118 µs per lookup against 10.3 ms per fresh process (instant mock) | [`poc/rust/crates/mock-client/examples/round_trip.rs`](poc/rust/crates/mock-client/examples/round_trip.rs), measured once |
 
+## What these documents do not claim
+
+Not a list of things left to do: each is outside the claim, for a reason, and each says what would make the claim wider. What is merely not yet checked is under "Not verified".
+
+| Not claimed | Why | Wider if |
+|---|---|---|
+| That a helper's credential is hidden from stderr in every encoding: the helper's own token is hidden as it is, as JSON, inside a shell's single or double quotes and percent-encoded (both cases of the digits), and credential-like text is masked; base64, hex, a credential split over lines or cut short are not | The helper is the user's own program and already holds the credential: a helper that encodes it on purpose cannot be stopped by what npm does to its stderr, and every other encoding is unbounded in number. The forms hidden are the ones an accident produces: a token echoed by `set -x`, quoted in an error body, in a logged URL | A helper family is found that writes its credential in another form by default, as `set -x` does in a shell's quotes |
+| That the credential never reaches the HTTP cache index on disk | It takes a change to make-fetch-happen, which is not this prototype's to make; the cost and the way to avoid it are in Phase 1 | make-fetch-happen leaves `Authorization` out of the index whatever a response's `Vary` says |
+| That the scheme and the port of a request limit where a helper's credential is sent: they are not compared, as for a stored token, so a lockfile URL over `http://` on the registry's host gets the header | The prototype keeps npm's matching so that a helper does not differ from a stored token | npm compares them for a stored token |
+
 ## Not verified
 
 - Phase 2 client behaviour that only an npm implementation can show, as no Phase 2 client exists yet: masking and control-character stripping of provider stderr and error messages, the `.cmd` argument quoting and refusals, the Windows working-directory limit for providers, `${VAR}` expansion of per-registry provider lists, who owns the provider process, and that an interactive request goes through npm's input bracket.
@@ -158,4 +168,5 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 - Node's Windows installer shipping a builtin `npmrc` that sets `prefix=${APPDATA}\npm`: recalled, not checked on an installed copy.
 - registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401: npm's own 404 message allows for it and it is commonly reported, but no request was made for this document.
 - Which registries send `Vary: Authorization`: none of the mainstream ones were found to, but no header survey was made.
+- Whether a helper path with whitespace in it is refused or accepted the same way on Windows by the prototype and by the model: compared on Linux and macOS in CI and in a Linux distribution on Windows, on Windows only for paths with no whitespace, because Win32, Python and libuv each normalize a trailing space or dot, a slash after a file and a verbatim path differently.
 - Windows filesystems without inode numbers (FAT, some network shares): the fallback to spellings is tested with a simulated zero inode, not on such a filesystem.

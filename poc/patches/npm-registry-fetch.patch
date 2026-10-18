@@ -1,4 +1,4 @@
-From ef52c4771fe7f2ad727dce042b9e435e62ee9bf7 Mon Sep 17 00:00:00 2001
+From 96d59c07151c2cf601930f9061a2fd6d139c59cc Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -28,9 +28,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 +++
  lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  410 +++++++++++++++
- test/token-helper.js | 1160 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1710 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  417 +++++++++++++++
+ test/token-helper.js | 1164 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1721 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -262,10 +262,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..a34c593
+index 0000000..1aa85f6
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,417 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -374,22 +374,28 @@ index 0000000..a34c593
 +// as JSON does (a quote or a backslash escaped, and in ASCII, every other
 +// character as \uXXXX), inside a shell's single quotes, which `set -x` prints
 +// (a quote as '\''), inside its double quotes, and percent-encoded as a URL
-+// has it. A credential made of letters, digits and `-._~` is written the same
-+// way in all of them.
++// has it. The hexadecimal digits of an escape come in both cases, as encoders
++// differ (`\u001b` and `\u001B`, `%2b` and `%2B`). A credential made of
++// letters, digits and `-._~` is written the same way in all of them.
 +const written = (secret) => {
 +  const json = JSON.stringify(secret).slice(1, -1)
++  // eslint-disable-next-line no-control-regex
++  const ascii = json.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 +  const forms = [
 +    secret,
 +    json,
-+    // eslint-disable-next-line no-control-regex
-+    json.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`),
++    ascii,
++    ascii.replace(/\\u[0-9a-f]{4}/g, (escape) => escape.toUpperCase().replace('\\U', '\\u')),
 +    secret.replace(/'/g, "'\\''"),
 +    secret.replace(/["$`\\]/g, '\\$&'),
 +  ]
 +  try {
 +    const encoded = encodeURIComponent(secret)
 +    // encodeURIComponent leaves ! ' ( ) * alone and RFC 3986 does not
-+    forms.push(encoded, encoded.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`))
++    const strict = encoded.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
++    for (const form of [encoded, strict]) {
++      forms.push(form, form.replace(/%[0-9A-F]{2}/g, (escape) => escape.toLowerCase()))
++    }
 +  } catch {
 +    // a lone surrogate cannot be encoded; the text a helper printed has none
 +  }
@@ -665,6 +671,7 @@ index 0000000..a34c593
 +}
 +
 +module.exports = getTokenHelperHeader
++module.exports.refusal = refusal
 +module.exports.toHeader = toHeader
 +module.exports.command = command
 +module.exports.reason = reason
@@ -678,10 +685,10 @@ index 0000000..a34c593
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..4169003
+index 0000000..ea1424e
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1160 @@
+@@ -0,0 +1,1164 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1160,6 +1167,10 @@ index 0000000..4169003
 +    ['B!x+/=', 'B%21x%2B%2F%3D', '***', 'percent-encoded as RFC 3986 has it'],
 +    ["(a)*'!", "%28a%29%2A%27%21 (a)*'!", '*** ***', 'percent-encoded strictly, and as it is'],
 +    ['a b!', 'a%20b! a%20b%21', '*** ***', 'percent-encoded as encodeURIComponent has it, and strictly'],
++    // encoders differ in the case of the hexadecimal digits of an escape
++    ['é\x1b', '"\\u00E9\\u001B"', '"***"', 'JSON in ASCII, upper case digits'],
++    ['a+b/c', 'a%2bb%2fc a%2Bb%2Fc', '*** ***', 'percent-encoded, lower and upper case digits'],
++    ["(a)*'!", '%28a%29%2a%27%21', '***', 'percent-encoded strictly, lower case digits'],
 +  ]
 +  for (const [secret, echoed, left, how] of echoes) {
 +    t.equal(scrub(echoed, secret), left, how)

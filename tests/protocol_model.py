@@ -951,10 +951,31 @@ _HEADER_FORBIDDEN = re.compile(r"[^\t\x20-\x7e]")
 _SCHEME = re.compile(r"^[A-Za-z]+ ")
 
 
+def _is_there(path: str) -> bool:
+    """Whether a path is there, as the prototype means it: only a path that is
+    not there (ENOENT, ENOTDIR) is told apart; one that cannot be read is left
+    to spawn, which reports the real reason."""
+    try:
+        os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as error:
+        # on Windows libuv, and so Node, reads a name that cannot be one (a
+        # control character, `*`, `?`) and a path with no such drive, share or
+        # directory as ENOENT, where Python says what Windows did
+        return getattr(error, "winerror", None) not in _WINDOWS_NOT_THERE
+    return True
+
+
+# ERROR_FILE_NOT_FOUND, PATH_NOT_FOUND, INVALID_DRIVE, BAD_NETPATH, BAD_NET_NAME,
+# INVALID_NAME, BAD_PATHNAME, DIRECTORY
+_WINDOWS_NOT_THERE = {2, 3, 15, 53, 67, 123, 161, 267}
+
+
 def check_token_helper_config(
     value: str,
     config_source: str,
-    exists: Callable[[str], bool] = os.path.exists,
+    exists: Callable[[str], bool] = _is_there,
     is_file: Callable[[str], bool] = os.path.isfile,
 ) -> None:
     """Phase 1 accepts pnpm's `tokenHelper` the way the prototype does: from user

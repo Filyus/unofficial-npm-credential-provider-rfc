@@ -13,7 +13,16 @@ two things are checked against the Python model and against what Phase 1 says:
   characters out, `mask`: poc/helper-fuzz/bridge.js runs them in that order)
   holds no control character, never the helper's token, whole or in the
   pieces after its scheme, nor that token as JSON writes it, and, for output
-  the prototype refused, none of its long runs of printable characters.
+  the prototype refused, none of its long runs of printable characters;
+- `setting`: whether the prototype takes a `tokenHelper` value (`refusal`) is
+  what the model (`check_token_helper_config`) says of it, on a tree of real
+  files: an absolute path, one with arguments, one that is not there. On
+  Windows only the values with no whitespace are compared, since whether a
+  path with whitespace in it is there depends on how Win32, Python and libuv
+  each normalize a name; Linux and macOS compare them all.
+
+What it does not look for is in "What these documents do not claim" in
+claims.md: a credential that is encoded on purpose.
 
 Needs `node`. Exit status 1 if anything was found.
 """
@@ -32,7 +41,13 @@ import time
 import urllib.parse
 from typing import Any
 
-from tests.protocol_model import JS_WHITESPACE, TokenHelperFailure, token_helper_header
+from tests.protocol_model import (
+    JS_WHITESPACE,
+    ResolutionFailure,
+    TokenHelperFailure,
+    check_token_helper_config,
+    token_helper_header,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = ROOT / "poc" / "helper-fuzz" / "bridge.js"
@@ -167,17 +182,100 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
         if expected is None:
             cleaned = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", " ", case.token)
             secrets |= {run for run in re.split(r"[^\x21-\x7e]+", cleaned) if len(run) >= 8}
+        # what the text around a hidden credential is, with the credential as ***:
+        # a short credential may be part of an ordinary word next to it, as `er *`
+        # is of `Bearer ***`, and that is no leak
+        around = case.stderr.decode("utf-8", "replace")
+        for hidden in sorted({form for secret in secrets if secret for form in {secret} | forms(secret)}, key=len, reverse=True):
+            around = around.replace(hidden, "***")
         for secret in sorted(secrets):
             # a credential is what can be typed: a lone control character the
             # helper printed is none
             if not secret or not all(" " <= character <= "~" for character in secret) or secret in "***":
                 continue
             for form in {secret} | forms(secret):
-                if form and form in shown:
+                if form and form in shown and form not in around:
                     found.append({"kind": "secret in the log", "case": case, "secret": secret, "form": form, "log": log["lines"]})
                     break
         if any(CONTROL.search(line) for line in log["lines"]):
             found.append({"kind": "control character in the log", "case": case, "log": log["lines"]})
+    return found
+
+
+# --- the setting: which paths are a helper -----------------------------------------
+
+PREFIXES = ["", "", "", " ", "\t", "rel/", "./", "../", "~/", "C:", "C:x", "\\\\?\\", "file:///", "$HOME/", "%USERPROFILE%\\",
+            "\\", "/", "C:\\", "C:/"]
+SUFFIXES = ["", "", "", " arg", " --flag value", "\t", "\targ", "\u00a0arg", " ", "  ", "\u2003x", "\ufeffx", "\n", " \"quoted arg\"",
+            "\u180ex", "\u200bx", "x y z", " .exe", ".cmd", ".sh"]
+
+
+def path_fixture(root: Path) -> list[str]:
+    """Files and directories to point at, some with whitespace in their names."""
+    made = []
+    for relative, is_dir in (("bin/aws", False), ("bin/aws cli", False), ("dir with space/tool", False),
+                             ("a b", False), ("x/y z", False), ("empty dir", True), ("t\tab", False)):
+        target = root / relative
+        try:
+            if is_dir:
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("#!/bin/sh\n", encoding="utf-8")
+        except OSError:
+            continue  # a name this file system will not take
+        made.append(str(target))
+    return made
+
+
+def path_cases(rng: random.Random, existing: list[str], count: int) -> list[str]:
+    values = []
+    for _ in range(count):
+        base = rng.choice(existing + [str(Path(existing[0]).parent / "nope"), "/usr/bin/env", "C:\\Windows\\System32\\cmd.exe", "tool"])
+        prefix = rng.choice(PREFIXES) if rng.random() < 0.35 else ""
+        suffix = rng.choice(SUFFIXES)
+        value = prefix + base + suffix
+        if rng.random() < 0.1:
+            at = rng.randrange(len(value) + 1)
+            value = value[:at] + rng.choice([" ", "\t", "/", "\\", "\u00a0", "\u2028"]) + value[at:]
+        if re.match(r"^[/\\]{2}", value) and any(char in JS_WHITESPACE for char in value):
+            # a UNC path with whitespace in it would make the file system look for a
+            # server, and a verbatim (`\\?\`) or device path has an error mapping of its
+            # own in libuv that the model does not copy
+            continue
+        if sys.platform == "win32" and any(char in JS_WHITESPACE for char in value):
+            # whether a path with whitespace in it is there is up to the file system, and
+            # Win32, Python and libuv each normalize a name differently (a space or a dot
+            # at the end of a segment, a slash after a file, a verbatim path): on Windows
+            # only the part that touches no file is compared, and the rest on Linux and macOS
+            continue
+        values.append(value)
+    return values
+
+
+def model_refusal(value: str) -> str:
+    """What the model says of a tokenHelper setting from user config: ok, abs
+    (not an absolute path, or one with arguments) or notfound. The model takes
+    an absolute path to be either form's; Node, on a platform that has one
+    form, takes only that form's."""
+    if sys.platform != "win32" and not value.startswith("/"):
+        return "abs"
+    try:
+        check_token_helper_config(value, "user")
+    except ResolutionFailure as failure:
+        return "notfound" if "not found" in str(failure) else "abs"
+    return "ok"
+
+
+def judge_paths(prototype: Path, values: list[str]) -> list[dict]:
+    answers = bridge(prototype, [{"op": "config", "value": value} for value in values])
+    found = []
+    for value, answer in zip(values, answers):
+        refused = answer["refused"]
+        got = "ok" if refused is None else "notfound" if "not found" in refused else "abs"
+        expected = model_refusal(value)
+        if got != expected:
+            found.append({"kind": "setting", "value": value, "prototype": got, "model": expected})
     return found
 
 
@@ -191,18 +289,30 @@ def main(argv: list[str] | None = None) -> int:
     master = args.seed if args.seed is not None else random.SystemRandom().getrandbits(32)
     chooser = random.Random(master)
     print(f"master seed {master}", flush=True)
-    started, tried, kinds = time.monotonic(), 0, {}
-    while time.monotonic() - started < args.seconds:
-        cases = [Case(chooser.getrandbits(32)) for _ in range(args.batch)]
-        tried += len(cases)
-        for finding in judge(args.prototype, cases):
-            current = kinds.get(finding["kind"])
-            if current is None or len(finding["case"].stdout) + len(finding["case"].stderr) < len(current["case"].stdout) + len(current["case"].stderr):
-                kinds[finding["kind"]] = finding
-    print(f"{tried} outputs in {time.monotonic() - started:.0f} s, master seed {master}")
+    started, tried, settings, kinds = time.monotonic(), 0, 0, {}
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="helper-paths-") as scratch:
+        existing = path_fixture(Path(scratch))
+        while time.monotonic() - started < args.seconds:
+            cases = [Case(chooser.getrandbits(32)) for _ in range(args.batch)]
+            tried += len(cases)
+            findings = judge(args.prototype, cases)
+            values = path_cases(chooser, existing, 800)
+            settings += len(values)
+            findings += judge_paths(args.prototype, values)
+            for finding in findings:
+                size = lambda item: len(item["case"].stdout) + len(item["case"].stderr) if "case" in item else len(item["value"])
+                current = kinds.get(finding["kind"])
+                if current is None or size(finding) < size(current):
+                    kinds[finding["kind"]] = finding
+    print(f"{tried} outputs and {settings} settings in {time.monotonic() - started:.0f} s, master seed {master}")
     for kind, finding in kinds.items():
-        case = finding["case"]
-        print(f"\n[{kind}] seed {case.seed}\n  stdout {case.stdout[:200]!r}\n  stderr {case.stderr[:300]!r}")
+        case = finding.get("case")
+        if case:
+            print(f"\n[{kind}] seed {case.seed}\n  stdout {case.stdout[:200]!r}\n  stderr {case.stderr[:300]!r}")
+        else:
+            print(f"\n[{kind}] {finding['value']!r}")
         for key in ("model", "prototype", "secret", "form", "log"):
             if key in finding:
                 print(f"  {key}: {str(finding[key])[:300]}")

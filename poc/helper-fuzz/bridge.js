@@ -7,6 +7,7 @@
 // Reads JSON lines from stdin, each {op, stdout, stderr} with the helper's
 // output as base64, and writes one JSON line for each:
 //   header: {ok: <Authorization value>} or {err: <message>}
+//   config: {refused: <why the setting is refused, or null>}, for {op, value}
 //   log:    {lines: [<what the prototype logs of stderr>]}
 // `log` runs what the prototype runs on a finished helper's stderr, in the
 // order it runs it: scrub, split into lines, drop control characters, mask.
@@ -30,10 +31,12 @@ const logged = (stderr, stdout) => {
 
 const main = async () => {
   for await (const line of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
-    const { op, stdout, stderr } = JSON.parse(line)
-    const out = Buffer.from(stdout, 'base64').toString('utf8')
+    const { op, stdout, stderr, value } = JSON.parse(line)
+    const out = Buffer.from(stdout ?? '', 'base64').toString('utf8')
     let answer
-    if (op === 'header') {
+    if (op === 'config') {
+      answer = { refused: helper.refusal(value) }
+    } else if (op === 'header') {
       try {
         answer = { ok: helper.toHeader('/h', out) }
       } catch (error) {

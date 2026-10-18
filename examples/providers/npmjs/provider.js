@@ -6,7 +6,7 @@
 //
 // Store layout (stands in for the OS keychain):
 //   { tokens: [ { tier, token, selects, issuedAt } ] }
-//   tier: read | stage-read | stage-only | publish | session
+//   tier: read | stage-read | stage-only | publish | trust | session
 //   selects: { all: true } | { scopes: ['@acme'] } | { packages: ['@acme/widgets'] }
 //
 // API paths: /-/whoami, /-/v1/login (+ its doneUrl) and DELETE
@@ -38,6 +38,9 @@ const OPERATIONS = {
   deprecate: { tiers: ['stage-only'], write: true },
   'dist-tag': { tiers: ['stage-only'], write: true },
   publish: { tiers: ['publish'], write: true },
+  // a granular token, not the session token that serves `access`: as
+  // documented, the session token does not serve `trust`
+  trust: { tiers: ['trust'], write: true },
   unpublish: { tiers: ['publish', 'session'], write: true },
   owner: { tiers: ['session'], write: true },
   'stage-reject': { tiers: ['session'], write: true },
@@ -96,7 +99,9 @@ const create = async (args) => {
       auth: { type: 'bearer', token: entry.token },
       cache: 'session',
       operationIndependent: false,
-      granularity: covers,
+      // a trusted-publisher credential is bound to the package it is asked for,
+      // whatever the token selects
+      granularity: request.operation === 'trust' ? 'package' : covers,
     })
   }
 

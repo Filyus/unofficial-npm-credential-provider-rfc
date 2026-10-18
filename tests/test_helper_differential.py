@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import random
 import shutil
 import tempfile
 import unittest
@@ -54,6 +55,32 @@ class HarnessTests(unittest.TestCase):
     def test_a_refusal_that_quotes_the_output_is_found(self) -> None:
         source = HONEST.replace("throw new Error('not a valid header value')", "throw new Error('printed ' + token)")
         self.assertIn("refusal quotes the output", self.found(source))
+
+    def test_a_prototype_that_takes_every_setting_is_found(self) -> None:
+        root = prototype(HONEST.replace("module.exports = {", "module.exports = { refusal: () => null,"))
+        self.addCleanup(shutil.rmtree, root, True)
+        with tempfile.TemporaryDirectory() as scratch:
+            existing = fuzz_helper.path_fixture(Path(scratch))
+            values = fuzz_helper.path_cases(random.Random(1), existing, 1500)
+            found = fuzz_helper.judge_paths(root, values)
+        self.assertGreater(len(found), 10)
+        self.assertEqual({finding["kind"] for finding in found}, {"setting"})
+
+    def test_the_model_says_what_the_prototype_means_by_a_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            tool = Path(scratch) / "bin dir" / "tool"
+            tool.parent.mkdir()
+            tool.write_text("#!/bin/sh\n", encoding="utf-8")
+            expected = {
+                str(tool): "ok",  # a path with a space in it that is there
+                f"{tool} --flag": "abs",  # arguments after a file that is there
+                f"{tool.parent / 'nope'} x": "notfound",
+                "tool": "abs",
+                "./tool": "abs",
+            }
+            for value, verdict in expected.items():
+                with self.subTest(value=value):
+                    self.assertEqual(fuzz_helper.model_refusal(value), verdict)
 
     def test_a_log_that_keeps_a_control_character_is_found(self) -> None:
         source = HONEST.replace("mask: (line) => line", "mask: (line) => line + '\\x1b'")
