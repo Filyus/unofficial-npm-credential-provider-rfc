@@ -1,4 +1,4 @@
-From 0ef43b651b08555eb8f34e400741e02880b49745 Mon Sep 17 00:00:00 2001
+From ef52c4771fe7f2ad727dce042b9e435e62ee9bf7 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -16,8 +16,9 @@ gets SIGTERM, then SIGKILL; on Windows the whole process tree is ended with
 taskkill, since the real helper behind a .cmd is a grandchild of cmd.exe.
 More than 1 MiB of output also ends it. Every failure, including a spawn
 that throws, rejects with ETOKENHELPER and a cause of only { code, signal }.
-stderr is logged as warnings with the helper's own credential and anything
-that looks like one masked. A body failure or an abort while the helper
+stderr is logged as warnings with the helper's own credential, as it is
+and as JSON, a shell's quotes and a URL write it, and anything that looks like
+one masked. A body failure or an abort while the helper
 runs rejects the request without waiting for it. On Windows a .cmd/.bat
 helper runs in its own directory and a path containing `"` or `%` is
 refused.
@@ -27,9 +28,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 +++
  lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  384 ++++++++++++++
- test/token-helper.js | 1141 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1665 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  410 +++++++++++++++
+ test/token-helper.js | 1160 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1710 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -261,10 +262,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..c237633
+index 0000000..a34c593
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,410 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -369,6 +370,32 @@ index 0000000..c237633
 +    signal: err.signal,
 +  })
 +
++// The ways a helper that echoes its credential may write it besides as it is:
++// as JSON does (a quote or a backslash escaped, and in ASCII, every other
++// character as \uXXXX), inside a shell's single quotes, which `set -x` prints
++// (a quote as '\''), inside its double quotes, and percent-encoded as a URL
++// has it. A credential made of letters, digits and `-._~` is written the same
++// way in all of them.
++const written = (secret) => {
++  const json = JSON.stringify(secret).slice(1, -1)
++  const forms = [
++    secret,
++    json,
++    // eslint-disable-next-line no-control-regex
++    json.replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`),
++    secret.replace(/'/g, "'\\''"),
++    secret.replace(/["$`\\]/g, '\\$&'),
++  ]
++  try {
++    const encoded = encodeURIComponent(secret)
++    // encodeURIComponent leaves ! ' ( ) * alone and RFC 3986 does not
++    forms.push(encoded, encoded.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`))
++  } catch {
++    // a lone surrogate cannot be encoded; the text a helper printed has none
++  }
++  return forms
++}
++
 +// stderr is the helper's channel to the user, but a helper that fails or runs
 +// with `set -x` is likely to echo the credential it handles. Two layers mask it.
 +//
@@ -383,10 +410,10 @@ index 0000000..c237633
 +  const token = clean(stdout)
 +  // eslint-disable-next-line no-control-regex
 +  const runs = token.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ' ').split(/[^\x21-\x7e]+/).filter(r => r.length >= 8)
-+  for (const secret of [token, token.replace(/^[A-Za-z]+\s+/, ''), ...runs]) {
-+    if (secret) {
-+      text = text.split(secret).join('***')
-+    }
++  const secrets = new Set([token, token.replace(/^[A-Za-z]+\s+/, ''), ...runs].filter(Boolean).flatMap(written))
++  // longest first, so that a form that contains another is hidden whole
++  for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
++    text = text.split(secret).join('***')
 +  }
 +  return text
 +}
@@ -651,10 +678,10 @@ index 0000000..c237633
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..ec7df73
+index 0000000..4169003
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1141 @@
+@@ -0,0 +1,1160 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1117,6 +1144,25 @@ index 0000000..ec7df73
 +  for (const out of ['npm_8Hq2sK9xLmZ4\x1b[0m', 'npm_8Hq2sK9xLmZ4\0', 'npm_8Hq2sK9xLmZ4\nexpires soon',
 +    'npm_8Hq2sK9xLmZ4é', 'npm_8Hq2sK9xLmZ4�', '“npm_8Hq2sK9xLmZ4”', 'npm_8Hq2sK9xLmZ4​']) {
 +    t.equal(scrub('+ printf %s npm_8Hq2sK9xLmZ4', out), '+ printf %s ***', JSON.stringify(out))
++  }
++})
++
++// found by fuzzing what is logged against what is printed (the rfc's
++// tests/fuzz_helper.py): a helper that echoes its credential need not write it
++// as it is
++t.test('scrub hides the credential as JSON, a shell and a URL write it', async t => {
++  const echoes = [
++    // [credential, how a helper might print it, what is left of that]
++    ['a"b\\c', '{"token":"a\\"b\\\\c"}', '{"token":"***"}', 'JSON: a quote and a backslash escaped'],
++    ['é\x1b', '"\\u00e9\\u001b"', '"***"', 'JSON in ASCII'],
++    ["it's", "+ echo 'it'\\''s'", "+ echo '***'", 'inside single quotes, as set -x prints it'],
++    ['a$b`c"d\\e', 'a\\$b\\`c\\"d\\\\e', '***', 'inside double quotes'],
++    ['B!x+/=', 'B%21x%2B%2F%3D', '***', 'percent-encoded as RFC 3986 has it'],
++    ["(a)*'!", "%28a%29%2A%27%21 (a)*'!", '*** ***', 'percent-encoded strictly, and as it is'],
++    ['a b!', 'a%20b! a%20b%21', '*** ***', 'percent-encoded as encodeURIComponent has it, and strictly'],
++  ]
++  for (const [secret, echoed, left, how] of echoes) {
++    t.equal(scrub(echoed, secret), left, how)
 +  }
 +})
 +

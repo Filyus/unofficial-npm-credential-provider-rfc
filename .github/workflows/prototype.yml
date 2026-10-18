@@ -65,6 +65,15 @@ jobs:
         run: |
           npm test --ignore-scripts
           npm run eslint --ignore-scripts
+      # what a helper printed, read by the prototype and by the Python model
+      # of Phase 1, and what is logged of what it wrote to stderr
+      - name: Helper output against the model, fuzzed
+        run: |
+          PY=$(command -v python3 || command -v python)
+          cd rfc && "$PY" -m tests.fuzz_helper --prototype ../npm-registry-fetch --seconds 20 --seed "$GITHUB_RUN_NUMBER"
+      # helpers named as awkwardly as the file system allows, run for real
+      - name: Helpers with awkward names
+        run: node rfc/poc/helper-fuzz/names.js npm-registry-fetch
       - name: token-helper tests with deprecations as errors
         if: env.DEPRECATIONS != ''
         working-directory: npm-registry-fetch
