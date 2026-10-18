@@ -160,6 +160,8 @@ def classify(raw: bytes) -> tuple[str, Any]:
         validate_request(message)
     except ProtocolViolation as violation:
         return "malformed", str(violation)
+    except RecursionError:
+        return "unsure", "nested too deep for Python"
     return "request", message
 
 

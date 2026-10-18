@@ -154,6 +154,20 @@ class RequestValidationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ProtocolViolation):
                 validate_request({**BASE_GET, field: None})
 
+    def test_a_request_nested_beyond_the_recursion_limit_is_judged_not_a_crash(self) -> None:
+        """CI's Python reads JSON nested far deeper than 1000 levels, and a
+        recursive check of the result ran out of stack."""
+        for leaf, refused in (("\ud800", True), ("x", False)):
+            deep: object = leaf
+            for _ in range(5000):
+                deep = [deep]
+            with self.subTest(leaf=leaf):
+                if refused:
+                    with self.assertRaises(ProtocolViolation):
+                        validate_request({**BASE_GET, "x": deep})
+                else:
+                    validate_request({**BASE_GET, "x": deep})
+
     def test_an_integer_may_be_written_with_a_fraction_but_not_beyond_2_pow_53(self) -> None:
         validate_request({**BASE_GET, "v": 1.0})
         validate_request({**BASE_GET, "retry": True, "httpStatus": 401.0})

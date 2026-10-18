@@ -266,18 +266,23 @@ DUPLICATE = object()
 def unrepresentable(value: Any) -> bool:
     """A lone surrogate in a string or member name, or a number beyond a double:
     what the schema cannot say and Phase 2 does."""
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            return True
-        return False
-    if isinstance(value, float):
-        return value != value or value in (float("inf"), float("-inf"))
-    if isinstance(value, list):
-        return any(unrepresentable(item) for item in value)
-    if isinstance(value, dict):
-        return any(unrepresentable(key) or unrepresentable(item) for key, item in value.items())
+    pending = [value]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                return True
+        elif isinstance(value, float):
+            if value != value or value in (float("inf"), float("-inf")):
+                return True
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                pending.append(key)
+                pending.append(item)
     return False
 
 

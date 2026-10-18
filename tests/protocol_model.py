@@ -479,21 +479,24 @@ def _check_strings(value: Any) -> None:
     """No string, member names included, holds a lone surrogate, and no number
     is beyond a double: a message is UTF-8, which cannot spell the one, and the
     readers that can hold either differ."""
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            raise ProtocolViolation("a string holds a lone surrogate") from None
-    elif isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            raise ProtocolViolation("a number is beyond a double")
-    elif isinstance(value, list):
-        for item in value:
-            _check_strings(item)
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            _check_strings(key)
-            _check_strings(item)
+    # a stack of its own: a message may nest as deep as the JSON reader let it
+    pending = [value]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                raise ProtocolViolation("a string holds a lone surrogate") from None
+        elif isinstance(value, float):
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ProtocolViolation("a number is beyond a double")
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                pending.append(key)
+                pending.append(item)
 
 
 def _is_enum(value: Any, allowed: frozenset[str]) -> bool:
