@@ -2,7 +2,7 @@
 
 How providers for real registries would use the [Phase 2 protocol](../phase-2-credential-provider.md): their configuration, hello, and the exchanges for an install, a publish, a rejection, a login and CI, with where a provider author is likely to go wrong and what each registry asks of the RFC. The providers are hypothetical; what they rely on (token lifetimes, scopes, APIs, CLIs) is the vendors' documented behaviour, cited beside each fact, and anything only recalled is marked as such.
 
-Every exchange is also a transcript in the example's directory, and `tests/test_examples.py` replays each one through the Python model of the client, so an example that stops following the protocol fails the tests. An exchange that ends in an error answer (`other`, `operation-not-supported`) is a transcript too: the model fails that registry request and the session goes on.
+Every exchange is also a transcript in the example's directory, and `tests/test_examples.py` replays each one through the Python model of the client, so an example that stops following the protocol fails the tests. For [GitLab](gitlab.md), [npmjs.com](npmjs.md) and the [corporate SSO gateway](corporate-sso.md) the transcripts are also the output of code: [reference providers](providers/README.md), run against fake vendor APIs, must produce every answer, from what they have stored, the clock and the person's answers. An exchange that ends in an error answer (`other`, `operation-not-supported`) is a transcript too: the model fails that registry request and the session goes on.
 
 | Registry | What it shows |
 |---|---|

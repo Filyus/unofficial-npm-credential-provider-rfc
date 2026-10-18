@@ -1,7 +1,8 @@
 # Checks the links between the documents and runs the Phase 2 conformance
 # material: the generated files are fresh relative to spec/policy-v1.json,
 # the Python model's tests (every policy value, the provider chain and the
-# example transcripts included) pass, and the Rust client and provider pair
+# example transcripts included) pass, the reference providers produce
+# their examples' transcripts, and the Rust client and provider pair
 # builds, lints clean and passes its tests.
 name: conformance
 
@@ -31,6 +32,8 @@ jobs:
         run: python3 tools/generate_from_policy.py --check
       - name: python model
         run: python3 -m unittest discover -v
+      - name: reference providers produce their transcripts
+        run: node examples/providers/run.js
       - name: rust
         working-directory: poc/rust
         run: |
