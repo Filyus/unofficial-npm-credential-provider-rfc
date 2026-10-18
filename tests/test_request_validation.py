@@ -154,6 +154,19 @@ class RequestValidationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ProtocolViolation):
                 validate_request({**BASE_GET, field: None})
 
+    def test_an_integer_may_be_written_with_a_fraction_but_not_beyond_2_pow_53(self) -> None:
+        validate_request({**BASE_GET, "v": 1.0})
+        validate_request({**BASE_GET, "retry": True, "httpStatus": 401.0})
+        for field, refused in (("v", 1.5), ("v", 2**53), ("httpStatus", 99.5), ("httpStatus", float("inf"))):
+            with self.subTest(field=field, refused=refused), self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, field: refused})
+
+    def test_a_lone_surrogate_or_a_number_beyond_a_double_is_refused_anywhere(self) -> None:
+        for extra in ({"x": "\ud800"}, {"\udc00": 1}, {"x": {"y": ["\ud800"]}}, {"x": float("-inf")}):
+            with self.subTest(extra=extra), self.assertRaises(ProtocolViolation):
+                validate_request({**BASE_GET, **extra})
+        validate_request({**BASE_GET, "x": "\U0001f600"})
+
     def test_unknown_request_fields_are_ignored(self) -> None:
         validate_request({**BASE_GET, "futureField": {"nested": True}})
 

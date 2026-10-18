@@ -187,6 +187,9 @@ class CredentialClientModel:
 
     def handle_response(self, request: dict[str, Any], response: dict[str, Any]) -> str:
         self._require_state(ClientState.READY)
+        if not isinstance(response, dict):
+            raise ProtocolViolation("response must be an object")
+        _check_strings(response)
         if ("Ok" in response) == ("Err" in response):
             raise ProtocolViolation("response must contain exactly one of Ok or Err")
         if "Err" in response:
@@ -358,12 +361,10 @@ class CredentialClientModel:
         kind = err.get("kind")
         if not isinstance(kind, str) or kind not in ERROR_KINDS:
             raise ProtocolViolation(f"unsupported error kind: {kind!r}")
-        message = err.get("message")
-        if message is not None and not isinstance(message, str):
+        if "message" in err and not isinstance(err["message"], str):
             raise ProtocolViolation("Err.message must be a string")
-        caused_by = err.get("causedBy")
-        if caused_by is not None and (
-            not isinstance(caused_by, list) or not all(isinstance(item, str) for item in caused_by)
+        if "causedBy" in err and (
+            not isinstance(err["causedBy"], list) or not all(isinstance(item, str) for item in err["causedBy"])
         ):
             raise ProtocolViolation("Err.causedBy must be string[]")
         if request.get("kind") == "erase":
@@ -460,8 +461,39 @@ def provider_reply_to_unsupported(
     return None
 
 
+# every integer of the protocol fits what every JSON reader holds exactly
+MAX_SAFE_INTEGER = 2**53 - 1
+
+
 def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    """An integer as JSON has it: `1`, `1.0` and `1e0` are one number, and none
+    is beyond 2^53 - 1 in either direction."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return value.is_integer() and abs(value) <= MAX_SAFE_INTEGER
+    return isinstance(value, int) and abs(value) <= MAX_SAFE_INTEGER
+
+
+def _check_strings(value: Any) -> None:
+    """No string, member names included, holds a lone surrogate, and no number
+    is beyond a double: a message is UTF-8, which cannot spell the one, and the
+    readers that can hold either differ."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ProtocolViolation("a string holds a lone surrogate") from None
+    elif isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ProtocolViolation("a number is beyond a double")
+    elif isinstance(value, list):
+        for item in value:
+            _check_strings(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _check_strings(key)
+            _check_strings(item)
 
 
 def _is_enum(value: Any, allowed: frozenset[str]) -> bool:
@@ -490,6 +522,7 @@ def validate_hello(message: Any) -> tuple[list[int], list[str]]:
     capabilities, when present, is an array of unique non-empty strings."""
     if not isinstance(message, dict):
         raise ProtocolViolation("provider hello must be an object")
+    _check_strings(message)
     versions = message.get("v")
     if (
         not isinstance(versions, list)
@@ -557,6 +590,7 @@ def registry_matches(served: str, url: str) -> bool:
 def validate_request(message: dict[str, Any]) -> None:
     if not isinstance(message, dict):
         raise ProtocolViolation("request must be an object")
+    _check_strings(message)
     if not _is_int(message.get("v")) or message.get("v") != PROTOCOL_VERSION:
         raise ProtocolViolation("request must use negotiated protocol version")
     if not _is_identifier(message.get("kind")):

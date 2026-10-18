@@ -38,6 +38,13 @@ cargo test --manifest-path poc/rust/Cargo.toml
 node tools/check-links.js
 ```
 
+Fuzzing, for as long as you like (each prints its seed, shrinks what it finds and writes a repro; they are also what the nightly workflow runs):
+
+```sh
+python -m tests.fuzz_providers --seconds 600   # random and hostile sessions against the reference providers
+python -m tests.fuzz_messages --seconds 600    # the schema, the Python model, the Rust crate and the JS providers against each other
+```
+
 End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch on their `token-helper` branches (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
 
 ```sh

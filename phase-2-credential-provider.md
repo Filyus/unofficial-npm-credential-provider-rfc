@@ -72,6 +72,13 @@ The current working directory and project-local `node_modules/.bin` are never se
 
 The client communicates with the provider via **stdin/stdout** using **single-line JSON messages** (no embedded newlines). The provider is invoked as a child process. Stdin is reserved for protocol JSON only; providers must not read interactive secrets, MFA codes, or device-code confirmations from stdin.
 
+A message is UTF-8 JSON, read where JSON readers differ as follows, so that the schema, a Rust reader and a JavaScript one agree:
+
+- A member that is present has its type: `null` is not "absent", and a field to be left out is left out.
+- An integer is a number with no fractional part, however it is written (`1`, `1.0` and `1e0` are one number), from -(2^53 - 1) to 2^53 - 1, the range every reader holds exactly; no number is beyond a double (`1e400`).
+- A string, a member name included, holds no lone surrogate (an escape such as `\ud800` with no partner), and only space, tab, carriage return and line feed may follow a value.
+- A sender does not name a member twice; what a reader makes of a repeated name is not defined. Unknown members are ignored. A sender stays within 64 levels of nesting, and a reader may refuse more.
+
 #### Version negotiation
 
 On startup, the provider sends a hello message listing supported protocol versions, optionally with capabilities:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation
+from tests.protocol_model import CacheKey, CredentialClientModel, ProtocolViolation, ProviderFailure
 
 
 REQUEST = {
@@ -102,6 +102,35 @@ class ResponseValidationTests(unittest.TestCase):
 
         self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client"), self.client.cache)
         self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui"), self.client.cache)
+
+    # Found by fuzzing the readers of the protocol against each other
+    # (tests/differential.py), each where the model said otherwise than the
+    # schema, the Rust crate and the JavaScript providers.
+
+    def test_a_response_that_is_not_an_object_is_a_violation_not_a_crash(self) -> None:
+        for response in (1, "Ok", None, [], [{"Ok": {}}], True):
+            with self.subTest(response=response), self.assertRaises(ProtocolViolation):
+                self.client.handle_response(REQUEST, response)
+
+    def test_an_err_member_that_is_there_has_its_type_even_when_it_is_null(self) -> None:
+        for member in ("message", "causedBy"):
+            with self.subTest(member=member), self.assertRaises(ProtocolViolation):
+                self.client.handle_response(REQUEST, {"Err": {"kind": "other", member: None}})
+
+    def test_an_integer_may_be_written_with_a_fraction_but_not_beyond_2_pow_53(self) -> None:
+        ok = {"kind": "get", "auth": {"type": "bearer", "token": "t"}, "cache": "expires"}
+        for spelled in (1700000000, 1700000000.0, 1.7e9):
+            self.client.handle_response(REQUEST, {"Ok": {**ok, "expiresAt": spelled}})
+        for refused in (2**53, 1.5, 1e400, float("inf"), -1):
+            with self.subTest(expires_at=refused), self.assertRaises(ProtocolViolation):
+                self.client.handle_response(REQUEST, {"Ok": {**ok, "expiresAt": refused}})
+
+    def test_a_lone_surrogate_or_a_number_beyond_a_double_is_refused_anywhere(self) -> None:
+        for extra in ({"x": "\ud800"}, {"\udc00": 1}, {"x": [{"y": "\ud800"}]}, {"x": float("inf")}):
+            with self.subTest(extra=extra), self.assertRaises(ProtocolViolation):
+                self.client.handle_response(REQUEST, {"Err": {"kind": "other"}, **extra})
+        with self.assertRaises(ProviderFailure):  # a well-formed answer: the provider failed
+            self.client.handle_response(REQUEST, {"Err": {"kind": "other"}, "x": "\U0001f600"})
 
 
 if __name__ == "__main__":

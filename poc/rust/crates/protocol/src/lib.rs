@@ -7,6 +7,66 @@ pub mod generated;
 
 pub use generated::PROTOCOL_VERSION;
 
+/// How the messages are read where JSON readers differ. A member that is
+/// present has its type, and `null` is no value; an integer is any number
+/// without a fractional part (`1`, `1.0` and `1e0` are one number) up to
+/// 2^53 - 1, the largest every reader holds exactly; unknown members are
+/// ignored.
+mod wire {
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer};
+
+    pub const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+    /// An optional member that, when it is there, is a `T`.
+    pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        deserializer: D,
+    ) -> Result<Option<T>, D::Error> {
+        T::deserialize(deserializer).map(Some)
+    }
+
+    pub struct Integer(pub u64);
+
+    impl<'de> Deserialize<'de> for Integer {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let number = serde_json::Number::deserialize(deserializer)?;
+            let value = match number.as_u64() {
+                Some(value) => value,
+                None => match number.as_f64() {
+                    Some(float) if float.is_finite() && float.fract() == 0.0 && float >= 0.0 => {
+                        float as u64
+                    }
+                    _ => return Err(D::Error::custom("expected a non-negative integer")),
+                },
+            };
+            if value > MAX_SAFE_INTEGER {
+                return Err(D::Error::custom("integer beyond 2^53 - 1"));
+            }
+            Ok(Self(value))
+        }
+    }
+
+    /// A required integer member that fits `T`.
+    pub fn integer<'de, D: Deserializer<'de>, T: TryFrom<u64>>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        let Integer(value) = Integer::deserialize(deserializer)?;
+        T::try_from(value).map_err(|_| D::Error::custom("integer out of range"))
+    }
+
+    /// An optional integer member that fits `T`, present or absent.
+    pub fn optional_integer<'de, D: Deserializer<'de>, T: TryFrom<u64>>(
+        deserializer: D,
+    ) -> Result<Option<T>, D::Error> {
+        integer(deserializer).map(Some)
+    }
+
+    pub fn integers<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u64>, D::Error> {
+        let list = Vec::<Integer>::deserialize(deserializer)?;
+        Ok(list.into_iter().map(|Integer(value)| value).collect())
+    }
+}
+
 /// Upper bound on one protocol line, newline included. The draft leaves the
 /// value to each peer above a floor every peer accepts (`LINE_SIZE_MINIMUM`,
 /// 1 MiB); this build uses the floor. An oversized line is rejected whole
@@ -15,19 +75,50 @@ pub const MAX_LINE_BYTES: usize = generated::LINE_SIZE_MINIMUM;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
-    pub v: Vec<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "wire::integers")]
+    pub v: Vec<u64>,
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub capabilities: Option<Vec<String>>,
     /// The registries the provider serves. npm treats any other registry as
     /// `url-not-supported` and sends the provider nothing about it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub registries: Option<Vec<String>>,
 }
 
 impl Hello {
-    /// The schema's rules for `registries`: unique absolute `http:`/`https:`
-    /// URLs, lowercase scheme, no user info, backslash, query or fragment.
+    /// The schema's rules for a hello: `v` is at least one unique integer
+    /// from 1, `capabilities` unique non-empty strings, and `registries`
+    /// unique absolute `http:`/`https:` URLs, lowercase scheme, no user info,
+    /// backslash, query or fragment.
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        require(!self.v.is_empty(), "hello v must list a version")?;
+        for (index, version) in self.v.iter().enumerate() {
+            require(*version >= 1, "hello versions are integers from 1")?;
+            require(
+                !self.v[..index].contains(version),
+                "hello versions must be unique",
+            )?;
+        }
+        if let Some(capabilities) = &self.capabilities {
+            for (index, capability) in capabilities.iter().enumerate() {
+                require(
+                    !capability.is_empty(),
+                    "hello capabilities must not be empty",
+                )?;
+                require(
+                    !capabilities[..index].contains(capability),
+                    "hello capabilities must be unique",
+                )?;
+            }
+        }
         let Some(registries) = &self.registries else {
             return Ok(());
         };
@@ -67,7 +158,7 @@ impl Hello {
 
     pub fn v1() -> Self {
         Self {
-            v: vec![PROTOCOL_VERSION],
+            v: vec![u64::from(PROTOCOL_VERSION)],
             capabilities: Some(
                 generated::CAPABILITIES
                     .iter()
@@ -173,36 +264,83 @@ impl fmt::Debug for Secret {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
+    #[serde(deserialize_with = "wire::integer")]
     pub v: u32,
     pub kind: RequestKind,
     pub registry: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scope: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub package: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub operation: Option<Operation>,
     /// `erase` only: the granularity of the response that carried the rejected
     /// credential. With `scope`, `package` and `operation` it repeats the
     /// context of the `get` that produced that credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub granularity: Option<Granularity>,
     /// Informational, so open-ended: `generated::KNOWN_COMMANDS` lists the
     /// values the draft names, and any other npm command may appear.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub command: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub interactive: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub retry: Option<bool>,
-    #[serde(rename = "httpStatus", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "httpStatus",
+        default,
+        deserialize_with = "wire::optional_integer",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub http_status: Option<u16>,
     /// `login` only: a token the user already holds, kept out of `Debug`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub token: Option<Secret>,
-    #[serde(rename = "authChallenges", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "authChallenges",
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auth_challenges: Option<Vec<String>>,
 }
 
@@ -292,6 +430,21 @@ impl Request {
         if let Some(token) = &self.token {
             require(!token.expose().is_empty(), "token must not be empty")?;
         }
+        if let Some(scope) = &self.scope {
+            require(
+                scope.len() > 1 && scope.starts_with('@') && !scope.contains('/'),
+                "scope must look like @name",
+            )?;
+        }
+        for (name, value) in [
+            ("package", &self.package),
+            ("version", &self.version),
+            ("command", &self.command),
+        ] {
+            if let Some(value) = value {
+                require(!value.is_empty(), &format!("{name} must not be empty"))?;
+            }
+        }
         if self.retry == Some(true) {
             require(self.http_status.is_some(), "retry=true requires httpStatus")?;
         }
@@ -343,18 +496,37 @@ pub enum Granularity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderOk {
     pub kind: RequestKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auth: Option<Auth>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cache: Option<CachePolicy>,
-    #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "expiresAt",
+        default,
+        deserialize_with = "wire::optional_integer",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at: Option<u64>,
     #[serde(
         rename = "operationIndependent",
+        default,
+        deserialize_with = "wire::present",
         skip_serializing_if = "Option::is_none"
     )]
     pub operation_independent: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub granularity: Option<Granularity>,
 }
 
@@ -420,9 +592,18 @@ impl ProviderOk {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderErr {
     pub kind: ErrorKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub message: Option<String>,
-    #[serde(rename = "causedBy", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "causedBy",
+        default,
+        deserialize_with = "wire::present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub caused_by: Option<Vec<String>>,
 }
 
@@ -435,10 +616,37 @@ pub enum ErrorKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ProviderResponse {
     Ok(ProviderOk),
     Err(ProviderErr),
+}
+
+impl<'de> Deserialize<'de> for ProviderResponse {
+    /// Exactly one of `Ok` and `Err`; any other member of the envelope is
+    /// unknown and ignored, as everywhere in the protocol.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Envelope {
+            #[serde(rename = "Ok", default, deserialize_with = "wire::present")]
+            ok: Option<ProviderOk>,
+            #[serde(rename = "Err", default, deserialize_with = "wire::present")]
+            err: Option<ProviderErr>,
+        }
+        match Envelope::deserialize(deserializer)? {
+            Envelope {
+                ok: Some(ok),
+                err: None,
+            } => Ok(Self::Ok(ok)),
+            Envelope {
+                ok: None,
+                err: Some(err),
+            } => Ok(Self::Err(err)),
+            _ => Err(serde::de::Error::custom(
+                "a response holds exactly one of Ok and Err",
+            )),
+        }
+    }
 }
 
 impl ProviderResponse {
@@ -453,7 +661,7 @@ impl ProviderResponse {
 #[derive(Debug)]
 pub enum ProtocolError {
     InvalidMessage(String),
-    NoCompatibleVersion { supported: Vec<u32> },
+    NoCompatibleVersion { supported: Vec<u64> },
     LineTooLong { limit: usize },
     Io(io::Error),
     Json(serde_json::Error),
@@ -491,7 +699,7 @@ impl From<serde_json::Error> for ProtocolError {
 
 pub fn negotiate(hello: &Hello) -> Result<u32, ProtocolError> {
     hello.validate()?;
-    if hello.v.contains(&PROTOCOL_VERSION) {
+    if hello.v.contains(&u64::from(PROTOCOL_VERSION)) {
         Ok(PROTOCOL_VERSION)
     } else {
         Err(ProtocolError::NoCompatibleVersion {
@@ -516,7 +724,14 @@ pub fn read_json_line<T: DeserializeOwned>(
             limit: MAX_LINE_BYTES,
         });
     }
-    Ok(Some(serde_json::from_slice(line.trim_ascii_end())?))
+    // through `Value` first: a string with a lone surrogate is refused
+    // wherever it is, an unknown member's included, and a member named twice
+    // keeps its last value, as everywhere else
+    // not trimmed: JSON's own whitespace (space, tab, CR, LF) may follow the
+    // value and serde_json allows it, but ASCII whitespace such as a form feed
+    // is not JSON whitespace
+    let value: serde_json::Value = serde_json::from_slice(&line)?;
+    Ok(Some(serde_json::from_value(value)?))
 }
 
 pub fn write_json_line<T: Serialize>(
@@ -540,6 +755,144 @@ fn require(condition: bool, message: &str) -> Result<(), ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn read<T: serde::de::DeserializeOwned>(line: &str) -> Result<T, ProtocolError> {
+        read_json_line(&mut io::Cursor::new(format!("{line}\n")))
+            .map(|message| message.expect("a line"))
+    }
+
+    const GET: &str =
+        r#""v":1,"kind":"get","registry":"https://r.test/","operation":"read","interactive":true"#;
+
+    // Found by fuzzing the readers of the protocol against each other
+    // (tests/differential.py): each of these was accepted or refused where
+    // the schema, the Python model and the JavaScript providers said the
+    // opposite.
+
+    #[test]
+    fn a_hello_lists_a_version_and_a_capability_is_a_name() {
+        for hello in [
+            r#"{"v":[]}"#,
+            r#"{"v":[0]}"#,
+            r#"{"v":[1,1]}"#,
+            r#"{"v":[1],"capabilities":[""]}"#,
+            r#"{"v":[1],"capabilities":["a","a"]}"#,
+        ] {
+            let hello: Hello = read(hello).unwrap();
+            assert!(hello.validate().is_err(), "{hello:?}");
+        }
+        read::<Hello>(r#"{"v":[2,1],"capabilities":["login"]}"#)
+            .unwrap()
+            .validate()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_member_that_is_there_has_its_type_and_null_is_no_value() {
+        for line in [
+            format!(r#"{{{GET},"retry":null}}"#),
+            format!(r#"{{{GET},"httpStatus":null}}"#),
+            format!(r#"{{{GET},"scope":null}}"#),
+            format!(r#"{{{GET},"authChallenges":null}}"#),
+        ] {
+            assert!(read::<Request>(&line).is_err(), "{line}");
+        }
+        assert!(read::<Hello>(r#"{"v":[1],"registries":null}"#).is_err());
+        assert!(read::<ProviderResponse>(r#"{"Err":{"kind":"other","message":null}}"#).is_err());
+        assert!(
+            read::<ProviderResponse>(
+                r#"{"Ok":{"kind":"get","auth":{"type":"bearer","token":"t"},"cache":null}}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn an_integer_is_a_number_without_a_fraction_up_to_2_pow_53() {
+        for spelled in ["1", "1.0", "1e0", "10e-1"] {
+            let request: Request = read(&format!(
+                r#"{{"v":{spelled},"kind":"logout","registry":"https://r.test/"}}"#
+            ))
+            .unwrap();
+            request.validate().unwrap();
+        }
+        let hello: Hello = read(r#"{"v":[9007199254740991]}"#).unwrap();
+        assert_eq!(hello.v, vec![9_007_199_254_740_991]);
+        for refused in [
+            r#"{"v":[9007199254740992]}"#,
+            r#"{"v":[1.5]}"#,
+            r#"{"v":[-1]}"#,
+            r#"{"v":[1e400]}"#,
+        ] {
+            assert!(read::<Hello>(refused).is_err(), "{refused}");
+        }
+        assert!(
+            read::<ProviderResponse>(r#"{"Ok":{"kind":"logout","expiresAt":9007199254740992}}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_response_holds_one_of_ok_and_err_and_ignores_other_members() {
+        let err: ProviderResponse =
+            read(r#"{"Err":{"kind":"other"},"retry":false,"note":[1]}"#).unwrap();
+        assert!(matches!(err, ProviderResponse::Err(_)));
+        for both in [
+            r#"{"Ok":{"kind":"logout"},"Err":{"kind":"other"}}"#,
+            r#"{}"#,
+            r#"{"retry":false}"#,
+        ] {
+            assert!(read::<ProviderResponse>(both).is_err(), "{both}");
+        }
+    }
+
+    #[test]
+    fn a_request_follows_the_schema_in_its_text_members() {
+        for line in [
+            format!(r#"{{{GET},"scope":"a"}}"#),
+            format!(r#"{{{GET},"scope":"@"}}"#),
+            format!(r#"{{{GET},"scope":"@a/b"}}"#),
+            format!(r#"{{{GET},"package":""}}"#),
+            format!(r#"{{{GET},"version":""}}"#),
+            format!(r#"{{{GET},"command":""}}"#),
+        ] {
+            let request: Request = read(&line).unwrap();
+            assert!(request.validate().is_err(), "{line}");
+        }
+        read::<Request>(&format!(r#"{{{GET},"scope":"@a","package":"p"}}"#))
+            .unwrap()
+            .validate()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_lone_surrogate_is_refused_wherever_it_is() {
+        for line in [
+            r#"{"v":[1],"x":"\ud800"}"#,
+            r#"{"v":[1],"x":["\udc00"]}"#,
+            r#"{"v":[1],"\ud800":1}"#,
+        ] {
+            assert!(read::<Hello>(line).is_err(), "{line}");
+        }
+        read::<Hello>(r#"{"v":[1],"x":"\ud83d\ude00"}"#).unwrap();
+    }
+
+    #[test]
+    fn only_json_whitespace_may_follow_a_value() {
+        read::<Hello>("{\"v\":[1]} \t\r").unwrap();
+        for stray in ["\u{c}", "\u{b}", "\u{a0}", "x"] {
+            assert!(
+                read::<Hello>(&format!("{{\"v\":[1]}}{stray}")).is_err(),
+                "{stray:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_member_named_twice_keeps_its_last_value() {
+        let hello: Hello = read(r#"{"v":[2],"v":[1]}"#).unwrap();
+        assert_eq!(hello.v, vec![1]);
+    }
 
     #[test]
     fn response_shape_matches_rfc_external_tagging() {

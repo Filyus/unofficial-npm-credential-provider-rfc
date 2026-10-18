@@ -82,6 +82,39 @@ async function* readLines(stream, limit = MAX_LINE_BYTES) {
 // ignoreBOM keeps a byte order mark in the text, where JSON.parse refuses it
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
+// No string, member names included, holds a lone surrogate, and no number is
+// beyond a double (1e400 reads as Infinity): a message is UTF-8, which cannot
+// spell the one, and the readers that can hold either differ.
+// Walked with a stack of its own: a request may nest as deep as JSON.parse
+// will read, and a recursion would run out first.
+const wellFormed = (root) => {
+  const pending = [root]
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (typeof value === 'string') {
+      if (!value.isWellFormed()) {
+        return false
+      }
+    } else if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        return false
+      }
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        pending.push(item)
+      }
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) {
+        if (!key.isWellFormed()) {
+          return false
+        }
+        pending.push(item)
+      }
+    }
+  }
+  return true
+}
+
 const IDENTIFIER = /^[a-z][a-z0-9-]*$/
 const SCOPE = /^@[^/]+$/
 const GRANULARITIES = new Set(['registry', 'scope', 'package'])
@@ -156,6 +189,9 @@ const parseRequest = (line) => {
   }
   if (message === null || typeof message !== 'object' || Array.isArray(message)) {
     return { answer: err('other', 'malformed request: not a JSON object') }
+  }
+  if (!wellFormed(message)) {
+    return { answer: err('other', 'malformed request: a lone surrogate or a number beyond a double') }
   }
   const problem = validateRequest(message)
   return problem ? { answer: err('other', `malformed request: ${problem}`) } : { message }

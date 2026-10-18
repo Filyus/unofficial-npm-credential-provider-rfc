@@ -27,6 +27,20 @@ class HandshakeTests(unittest.TestCase):
         self.assertEqual(selected, 1)
         self.assertEqual(client.state, ClientState.READY)
 
+    def test_a_hello_follows_the_schema_in_what_fuzzing_found_unclear(self) -> None:
+        client = CredentialClientModel()
+        self.assertEqual(client.receive_hello({"v": [1.0, 2e0]}), 1)
+        for hello in (
+            {"v": [2**53]},
+            {"v": [1.5]},
+            {"v": [1e400]},
+            {"v": [1], "x": "\ud800"},
+            {"v": [1], "capabilities": None},
+            {"v": [1], "registries": None},
+        ):
+            with self.subTest(hello=hello), self.assertRaises(ProtocolViolation):
+                CredentialClientModel().receive_hello(hello)
+
     def test_malformed_hello_is_rejected(self) -> None:
         client = CredentialClientModel()
 

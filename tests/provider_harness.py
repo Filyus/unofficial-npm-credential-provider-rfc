@@ -448,6 +448,7 @@ class Session:
             (8, self.line_not_a_request),
             (8, self.line_not_utf8),
             (4, self.line_deeply_nested),
+            (3, self.line_wide),
             (5, self.line_near_the_floor),
             (5, self.line_over_the_floor),
             (5, self.line_with_prototype_keys),
@@ -484,6 +485,13 @@ class Session:
     def line_deeply_nested(self) -> bytes:
         depth = self.random.choice([50, 300, 5000, 200000])
         return b'{"v":1,"kind":"refresh","registry":"x","deep":' + b"[" * depth + b"]" * depth + b"}"
+
+    def line_wide(self) -> bytes:
+        # as many elements or members as a line under the floor can hold
+        if self.random.random() < 0.5:
+            return b'{"v":1,"kind":"refresh","registry":"x","wide":[' + b"0," * 400000 + b"0]}"
+        members = b",".join(b'"k%d":0' % number for number in range(60000))
+        return b'{"v":1,"kind":"refresh","registry":"x",' + members + b"}"
 
     def line_near_the_floor(self) -> bytes:
         # a line near the floor must still be accepted, so it must be a valid request
