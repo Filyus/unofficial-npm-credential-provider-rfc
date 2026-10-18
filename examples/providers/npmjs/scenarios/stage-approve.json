@@ -1,0 +1,39 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "presence": [
+    true
+  ],
+  "store": {
+    "tokens": [
+      {
+        "tier": "read",
+        "token": "example-read-all-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1790000000
+      },
+      {
+        "tier": "stage-read",
+        "token": "example-stage-read-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1790000000
+      },
+      {
+        "tier": "publish",
+        "token": "example-publish-token",
+        "selects": {
+          "packages": [
+            "@acme/widgets"
+          ]
+        },
+        "issuedAt": 1790000000
+      }
+    ]
+  }
+}

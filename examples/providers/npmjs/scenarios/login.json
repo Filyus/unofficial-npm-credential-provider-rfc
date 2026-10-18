@@ -1,0 +1,70 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "config": {
+    "pollMs": 20
+  },
+  "store": {
+    "tokens": [
+      {
+        "tier": "read",
+        "token": "example-read-token",
+        "selects": {
+          "scopes": [
+            "@acme"
+          ]
+        },
+        "issuedAt": 1790000000
+      },
+      {
+        "tier": "session",
+        "token": "example-old-session-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1790000000
+      }
+    ]
+  },
+  "state": {
+    "login": {
+      "pending": 2,
+      "token": "example-session-token"
+    }
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "read",
+          "token": "example-read-token",
+          "selects": {
+            "scopes": [
+              "@acme"
+            ]
+          },
+          "issuedAt": 1790000000
+        },
+        {
+          "tier": "session",
+          "token": "example-session-token",
+          "selects": {
+            "all": true
+          },
+          "issuedAt": 1792238400
+        }
+      ]
+    },
+    "state": {
+      "logins": 1,
+      "doneAuth": null,
+      "tokens": {
+        "example-session-token": {
+          "valid": true
+        }
+      }
+    }
+  }
+}
