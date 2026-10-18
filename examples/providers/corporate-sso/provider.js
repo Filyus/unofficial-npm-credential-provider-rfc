@@ -27,7 +27,6 @@ const ACCESS_MARGIN_SECONDS = 60
 // inside npm's 5-minute budget for `login` and an interactive `get`
 const WAIT_MS = 4.5 * 60 * 1000
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const minutes = (ms) => {
   const seconds = Math.max(0, Math.round(ms / 1000))
@@ -65,10 +64,10 @@ const start = (args) => {
     const { device_code: deviceCode, user_code: userCode, verification_uri: uri } = started.json
     let interval = started.json.interval ?? 5
     const budget = Math.min((started.json.expires_in ?? 270) * 1000, WAIT_MS)
-    const deadline = Date.now() + budget
+    const deadline = ctx.clockMs() + budget
     ctx.showToPerson(`Open ${uri} and enter the code ${userCode}\nWaiting for approval (${minutes(budget)} left) ...`)
     for (;;) {
-      await sleep(Math.min(interval * 1000, Math.max(0, deadline - Date.now())))
+      await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
       const polled = await ctx.request('POST', tokenUrl, {
         form: { grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: CLIENT_ID },
       })
@@ -87,7 +86,7 @@ const start = (args) => {
       } else if (code !== 'authorization_pending') {
         throw new Error(`The identity provider refused the sign-in (HTTP ${polled.status}).`)
       }
-      if (Date.now() >= deadline) {
+      if (ctx.clockMs() >= deadline) {
         throw new Error('Stopped waiting for the sign-in after 4 minutes 30 seconds.')
       }
     }
@@ -202,20 +201,8 @@ const start = (args) => {
 
   // --- presence ----------------------------------------------------------------
 
-  const confirmWithin = (question, ms) =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => resolve(null), ms)
-      ctx.confirm(question).then(
-        (answer) => {
-          clearTimeout(timer)
-          resolve(answer)
-        },
-        (error) => {
-          clearTimeout(timer)
-          reject(error)
-        },
-      )
-    })
+  // the answer, or null when the deadline passes first
+  const confirmWithin = (question, ms) => Promise.race([ctx.confirm(question), ctx.sleep(ms).then(() => null)])
 
   // --- handlers ----------------------------------------------------------------
 

@@ -45,13 +45,13 @@ const createFake = (state) => {
     if (method === 'GET' && path === '/-/v1/done' && state.login) {
       state.doneAuth = request.token
       const retryAfter = state.login.retryAfter
-      if (retryAfter && Date.now() < notBefore) {
+      if (retryAfter && request.clock < notBefore) {
         state.tooSoon = (state.tooSoon || 0) + 1
         return { status: 429, headers: { 'retry-after': String(retryAfter) }, json: { error: 'too many requests' } }
       }
       if (polls < (state.login.pending || 0)) {
         polls += 1
-        notBefore = Date.now() + (retryAfter || 0) * 1000
+        notBefore = request.clock + (retryAfter || 0) * 1000
         return { status: 202, headers: retryAfter ? { 'retry-after': String(retryAfter) } : {}, json: {} }
       }
       state.tokens[state.login.token] = { valid: true, username: 'alice' }

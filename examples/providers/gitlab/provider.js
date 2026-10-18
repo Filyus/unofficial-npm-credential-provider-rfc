@@ -229,7 +229,7 @@ const start = async (args) => {
     ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)
     let wait = (device.json.interval ?? 5) * 1000
     for (let attempt = 0; attempt < 120; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, wait))
+      await ctx.sleep(wait)
       const res = await ctx.request('POST', `${instance}/oauth/token`, {
         form: {
           client_id: clientId,

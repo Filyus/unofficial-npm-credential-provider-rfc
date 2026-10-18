@@ -229,7 +229,7 @@ const create = async (args) => {
       }
       const retryAfter = Number(polled.headers['retry-after'])
       const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : interval
-      await new Promise((resolve) => setTimeout(resolve, wait))
+      await ctx.sleep(wait)
     }
     return err('other', 'The web login was not completed in time.')
   }

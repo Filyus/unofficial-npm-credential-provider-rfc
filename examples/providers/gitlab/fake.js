@@ -44,7 +44,7 @@ const createFake = (state) => {
     })
   }
 
-  return ({ method, path, token, body }) => {
+  return ({ method, path, token, body, clock }) => {
     if (method === 'POST' && path === '/oauth/token') {
       if (body.grant_type === 'refresh_token') {
         // the old refresh token stops working with the first use
@@ -53,10 +53,10 @@ const createFake = (state) => {
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
         if (oauth.slowDown) {
           if (oauth.notBefore === undefined) {
-            oauth.notBefore = Date.now() + 5000 - 100
+            oauth.notBefore = clock + 5000
             return json(400, { error: 'slow_down' })
           }
-          if (Date.now() < oauth.notBefore) {
+          if (clock < oauth.notBefore) {
             oauth.tooSoon = (oauth.tooSoon || 0) + 1
             return json(400, { error: oauth.tooSoon >= 2 ? 'expired_token' : 'slow_down' })
           }

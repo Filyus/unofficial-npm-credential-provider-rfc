@@ -41,7 +41,7 @@ const createFake = (state) => {
     return token
   }
 
-  const tokenEndpoint = ({ body }) => {
+  const tokenEndpoint = ({ body, clock }) => {
     if (body.grant_type === 'refresh_token') {
       const session = idp.sessions[body.refresh_token]
       if (!session || session.lapsed) {
@@ -56,10 +56,10 @@ const createFake = (state) => {
       }
       if (idp.slowDown) {
         if (notBefore === null) {
-          notBefore = Date.now() + ((idp.interval || 0) + 5) * 1000 - 100
+          notBefore = clock + ((idp.interval || 0) + 5) * 1000
           return json(400, { error: 'slow_down' })
         }
-        if (Date.now() < notBefore) {
+        if (clock < notBefore) {
           tooSoon += 1
           idp.tooSoon = tooSoon
           return json(400, { error: tooSoon >= 2 ? 'expired_token' : 'slow_down' })

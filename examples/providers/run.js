@@ -94,8 +94,16 @@ const runTranscript = async (name, transcriptFile) => {
     })
     const exited = new Promise((resolve) => child.on('close', resolve))
     const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]()
+    // time inside a run is synthetic, so a provider that has not answered
+    // within a few real seconds is waiting on something that will not come
     const next = async (what) => {
-      const { value, done } = await lines.next()
+      let timer
+      const { value, done } = await Promise.race([
+        lines.next(),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`${name}/${base}: no answer within 10 s, waiting for ${what}\n${stderr}`)), 10000)
+        }),
+      ]).finally(() => clearTimeout(timer))
       assert.ok(!done, `${name}/${base}: provider closed stdout before ${what}\n${stderr}`)
       return JSON.parse(value)
     }

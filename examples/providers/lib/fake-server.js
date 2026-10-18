@@ -22,7 +22,9 @@ const startFake = (handle) =>
         }
         const url = new URL(req.url, 'http://fake')
         const token = (req.headers.authorization || '').replace(/^Bearer /, '') || null
-        const request = { method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), token, body }
+        // the provider's clock in a conformance run, in milliseconds
+        const clock = Number(req.headers['x-conformance-clock']) || Date.now()
+        const request = { method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), token, body, clock }
         requests.push(request)
         let answer
         try {

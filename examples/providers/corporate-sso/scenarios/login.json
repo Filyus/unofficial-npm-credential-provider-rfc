@@ -24,8 +24,8 @@
       "session": {
         "refreshToken": "refresh-device-1",
         "accessToken": "access-1",
-        "accessExpiresAt": 1792196700,
-        "interactiveAt": 1792196100
+        "accessExpiresAt": 1792196705,
+        "interactiveAt": 1792196105
       }
     },
     "state": {

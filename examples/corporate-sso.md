@@ -94,7 +94,7 @@ A machine where nobody ever logged in and no service identity exists has nothing
 The provider's policy for `publish`:
 
 1. The IdP session must have been interactively confirmed in the last 5 minutes. If it has not, the provider starts a device flow on the controlling terminal and waits.
-2. It then asks on the controlling terminal: `Publish @corp/ui-kit@2.4.1 to npm.corp.example.com? [y/N]`. The prompt names the package and the version, which only a `publish` request carries.
+2. It then asks on the controlling terminal: `Publish @corp/ui-kit@2.4.1 to npm.corp.example.com? [y/N]`. The prompt names the package and the version, which only a `publish` request carries. A prompt left unanswered for 4 minutes 30 seconds, the provider's own deadline inside npm's 5-minute interactive budget, is `other` ([publish-unanswered.jsonl](corporate-sso/publish-unanswered.jsonl)).
 3. It mints a token for that package and version, valid for 5 minutes, and answers with `granularity: "package"`.
 
 The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so it shows only the `[y/N]` prompt. npm caches publish answers per operation and package, so each package in a workspace publish asks again; the provider asks the user once per package and the device flow once per five minutes. With `interactive: false` and no service identity, a publish gets ([publish-no-terminal.jsonl](corporate-sso/publish-no-terminal.jsonl)):
@@ -142,7 +142,7 @@ Open https://idp.corp.example.com/device and enter the code WDJB-MJHT
 Waiting for approval (4:55 left) ...
 ```
 
-It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `access_denied`, `expired_token` or its own deadline of 4 minutes 30 seconds, which is inside npm's 5-minute `login` budget. On approval it keeps the refresh token in the OS keychain, writes nothing into any `.npmrc`, and answers `{"Ok":{"kind":"login"}}`. A cancelled or expired flow is `other` with the reason.
+It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `access_denied`, `expired_token` or its own deadline of 4 minutes 30 seconds, which is inside npm's 5-minute `login` budget. On approval it keeps the refresh token in the OS keychain, writes nothing into any `.npmrc`, and answers `{"Ok":{"kind":"login"}}`. A cancelled or expired flow is `other` with the reason, and so is one nobody approved before the deadline ([login-unapproved.jsonl](corporate-sso/login-unapproved.jsonl)).
 
 [logout.jsonl](corporate-sso/logout.jsonl):
 

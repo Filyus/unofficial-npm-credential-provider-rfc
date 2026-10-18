@@ -35,12 +35,36 @@ const loadContext = (configPath) => {
     }
   }
 
-  // Seconds since the epoch. The conformance run sets the clock, in a file
-  // it moves forward between requests (a retry comes when a token has
-  // lapsed), so that a transcript's `expiresAt` is reproducible.
+  // Time comes from here, never from Date.now or setTimeout, so that a run
+  // can make it synthetic. A real run uses the system clock. The
+  // conformance run sets the time in a file it moves forward between
+  // requests (a retry comes when a token has lapsed), and within a request
+  // time passes only by `sleep`, which returns at once: a five-second poll
+  // interval or a deadline of minutes costs nothing, and `expiresAt` stays
+  // reproducible.
   const clockPath = config.clock && path.resolve(path.dirname(configPath), config.clock)
-  const now = () =>
-    clockPath ? Number(fs.readFileSync(clockPath, 'utf8')) : config.now ?? Math.floor(Date.now() / 1000)
+  let base = null
+  let elapsedMs = 0
+  const clockMs = () => {
+    if (!clockPath) {
+      return Date.now()
+    }
+    const set = Number(fs.readFileSync(clockPath, 'utf8')) * 1000
+    if (set !== base) {
+      base = set
+      elapsedMs = 0
+    }
+    return base + elapsedMs
+  }
+  const now = () => Math.floor(clockMs() / 1000)
+  const sleep = (ms) => {
+    if (!clockPath) {
+      return new Promise((resolve) => setTimeout(resolve, ms))
+    }
+    clockMs()
+    elapsedMs += Math.max(0, ms)
+    return new Promise((resolve) => setImmediate(resolve))
+  }
 
   // The address that answers for a registry or API URL: the configured
   // endpoint for its origin, or the URL itself.
@@ -63,6 +87,10 @@ const loadContext = (configPath) => {
       headers['content-type'] = 'application/json'
       payload = JSON.stringify(body)
     }
+    if (clockPath) {
+      // the fake API judges "too soon" by the provider's time, not its own
+      headers['x-conformance-clock'] = String(clockMs())
+    }
     const response = await fetch(endpoint(url), { method, headers, body: payload, redirect: 'manual' })
     const text = await response.text()
     let json = null
@@ -84,7 +112,10 @@ const loadContext = (configPath) => {
       }
       // the run checks that every scripted answer was asked for
       fs.appendFileSync(path.resolve(path.dirname(configPath), config.person.log), `${question}\n`)
-      return answers.shift()
+      const answer = answers.shift()
+      // "silent": the person never answers, and the provider's own
+      // deadline, a `sleep`, decides
+      return answer === 'silent' ? new Promise(() => {}) : answer
     }
     return askTerminal(question)
   }
@@ -97,7 +128,7 @@ const loadContext = (configPath) => {
     }
   }
 
-  return { config, readStore, writeStore, now, request, confirm, showToPerson }
+  return { config, readStore, writeStore, now, clockMs, sleep, request, confirm, showToPerson }
 }
 
 const terminalPaths = () =>
