@@ -123,16 +123,28 @@ const loadContext = (configPath) => {
   // A browser or device-code step the person completes. Scripted runs have
   // the fake identity provider complete it; a real run would open the URL.
   const showToPerson = (text) => {
-    if (!scripted) {
+    if (scripted) {
+      return
+    }
+    try {
       writeTerminal(`${text}\n`)
+    } catch {
+      // no controlling terminal: say so on stderr, never on stdout
+      process.stderr.write('no controlling terminal to show the sign-in step on\n')
     }
   }
 
   return { config, readStore, writeStore, now, clockMs, sleep, request, confirm, showToPerson }
 }
 
+// On Windows the device names, not `CONIN$` and `CONOUT$`: Node resolves a
+// bare name against the current directory, which takes it out of the
+// device namespace, and opening it for writing creates a file called
+// CONOUT$ there.
 const terminalPaths = () =>
-  process.platform === 'win32' ? { input: 'CONIN$', output: 'CONOUT$' } : { input: '/dev/tty', output: '/dev/tty' }
+  process.platform === 'win32'
+    ? { input: '\\\\.\\CONIN$', output: '\\\\.\\CONOUT$' }
+    : { input: '/dev/tty', output: '/dev/tty' }
 
 const writeTerminal = (text) => {
   const fd = fs.openSync(terminalPaths().output, 'w')

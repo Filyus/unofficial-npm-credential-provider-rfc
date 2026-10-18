@@ -2,7 +2,8 @@
 # material: the generated files are fresh relative to spec/policy-v1.json,
 # the Python model's tests (every policy value, the provider chain and the
 # example transcripts included) pass, the reference providers produce
-# their examples' transcripts, and the Rust client and provider pair
+# their examples' transcripts on synthetic time and, on each OS, on real
+# time, and the Rust client and provider pair
 # builds, lints clean and passes its tests.
 name: conformance
 
@@ -40,3 +41,20 @@ jobs:
           cargo fmt --all --check
           cargo clippy --all-targets -- -D warnings
           cargo test
+
+  # A conformance run makes time synthetic; this runs the reference
+  # providers on the system clock and real timers instead, on each OS, since
+  # how a provider reaches the terminal differs on Windows.
+  real-time:
+    name: reference providers on real time, ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - run: node --test examples/providers/real-time.test.js
