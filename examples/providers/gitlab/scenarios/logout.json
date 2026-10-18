@@ -1,0 +1,75 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://gitlab.example.com": {
+      "oauth": {
+        "refreshToken": "refresh-1",
+        "accessToken": "access-1",
+        "accessExpiresAt": 1792202400
+      },
+      "minted": {
+        "https://gitlab.example.com/api/v4/projects/42/packages/npm/|read|@acme": {
+          "id": 3,
+          "projectId": "42"
+        },
+        "https://gitlab.example.com/api/v4/projects/42/packages/npm/|write|@acme/widgets": {
+          "id": 4,
+          "projectId": "42"
+        }
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "refreshToken": "refresh-1",
+      "accessToken": "access-1",
+      "next": []
+    },
+    "nextId": 5,
+    "deployTokens": [
+      {
+        "id": 3,
+        "token": "r",
+        "scopes": [
+          "read_package_registry"
+        ],
+        "expires_at": "2026-10-18"
+      },
+      {
+        "id": 4,
+        "token": "w",
+        "scopes": [
+          "write_package_registry"
+        ],
+        "expires_at": "2026-10-18"
+      }
+    ]
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": null
+    },
+    "state": {
+      "deployTokens": [],
+      "deleted": [
+        3,
+        4
+      ],
+      "oauth": {
+        "revoked": [
+          "access-1",
+          "refresh-1"
+        ]
+      }
+    }
+  }
+}

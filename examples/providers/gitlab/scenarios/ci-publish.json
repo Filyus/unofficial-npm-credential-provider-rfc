@@ -1,0 +1,33 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {
+    "CI_JOB_TOKEN": "example-job-token",
+    "CI_SERVER_HOST": "gitlab.example.com",
+    "CI_PROJECT_ID": "42"
+  },
+  "presence": [],
+  "store": {},
+  "state": {
+    "tokens": [
+      "must-not-be-minted"
+    ],
+    "nextId": 1
+  },
+  "expect": {
+    "store": {},
+    "state": {
+      "tokens": [
+        "must-not-be-minted"
+      ],
+      "deployTokens": [],
+      "deleted": []
+    }
+  }
+}

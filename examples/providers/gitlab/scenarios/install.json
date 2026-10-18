@@ -1,0 +1,82 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://gitlab.example.com": {
+      "oauth": {
+        "refreshToken": "refresh-1"
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "refreshToken": "refresh-1",
+      "accessToken": "access-0",
+      "next": [
+        {
+          "accessToken": "access-1",
+          "refreshToken": "refresh-2"
+        }
+      ]
+    },
+    "tokens": [
+      "example-read-deploy-token",
+      "example-read-deploy-token-2"
+    ],
+    "nextId": 1
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": {
+        "oauth": {
+          "refreshToken": "refresh-2",
+          "accessToken": "access-1",
+          "accessExpiresAt": 1792202400
+        },
+        "minted": {
+          "https://gitlab.example.com/api/v4/projects/42/packages/npm/|read|@acme": {
+            "id": 1,
+            "projectId": "42"
+          },
+          "https://gitlab.example.com/api/v4/projects/42/packages/npm/|read|@acme-tools": {
+            "id": 2,
+            "projectId": "42"
+          }
+        }
+      }
+    },
+    "state": {
+      "oauth": {
+        "refreshToken": "refresh-2",
+        "next": []
+      },
+      "deployTokens": [
+        {
+          "id": 1,
+          "token": "example-read-deploy-token",
+          "scopes": [
+            "read_package_registry"
+          ],
+          "expires_at": "2026-10-18"
+        },
+        {
+          "id": 2,
+          "token": "example-read-deploy-token-2",
+          "scopes": [
+            "read_package_registry"
+          ],
+          "expires_at": "2026-10-18"
+        }
+      ],
+      "deleted": []
+    }
+  }
+}
