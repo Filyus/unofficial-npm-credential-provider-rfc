@@ -30,7 +30,7 @@ const startFake = (handle) =>
         } catch (error) {
           answer = { status: 500, json: { error: error.message } }
         }
-        res.writeHead(answer.status, { 'content-type': 'application/json' })
+        res.writeHead(answer.status, { 'content-type': 'application/json', ...(answer.headers || {}) })
         res.end(answer.json === undefined ? '' : JSON.stringify(answer.json))
       })
     })

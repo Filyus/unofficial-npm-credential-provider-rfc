@@ -29,12 +29,11 @@ Every transcript of an example must have a scenario, so an exchange added to a p
 
 The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. None of this has run against a live registry: no secret is needed, and none is in the repository.
 
-## What the transcripts do not pin
+## What the transcripts pin
 
-Writing the providers showed behaviour the recorded exchanges leave open, so a change to it passes the run:
+Every behaviour the providers' authors found unpinned on a first pass now has an exchange of its own, and each was seen to fail when the code behind it was broken: a GitLab job token asked about another project, the deploy token `erase` deletes, a read and a stage-only credential refused with 403 on npmjs.com, a package with no read token, a pasted token in `npm login`, `access` in CI, `Retry-After` on the web-login poll, the corporate gateway refusing a revoked IdP access token, a 403 with the user's groups unchanged, a CI identity without the publisher role, and `slow_down` in the device flow.
 
-- **GitLab:** a job token offered for another project (no transcript has one), and the delete on `erase` alone, since the retry's `get` deletes the same token before minting.
-- **npmjs.com:** `not-found` against `other` for a provider with nothing stored, a 403 retry from a stage-only token, and a token pasted into `npm login`.
-- **Corporate SSO:** the 403 retry when the user's groups are unchanged, and a CI identity without the publisher role.
+Left open, on purpose:
 
-`Retry-After` on a login poll cannot be expressed: the fake sends no headers, and the npmjs provider polls at the interval its configuration sets.
+- **Deadlines on a person.** The corporate provider stops waiting for a presence answer after 4 minutes 30 seconds; a run that waited for it would take as long.
+- **What no page describes.** The npmjs.com provider does not serve `trust`, which its page leaves untested against the registry, and the GitLab provider does not read a deploy token from a CI variable, whose name the page does not give.

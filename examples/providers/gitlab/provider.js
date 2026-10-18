@@ -185,8 +185,11 @@ const start = async (args) => {
     const granularity = write ? 'package' : req.scope ? 'scope' : 'registry'
     const key = mintedKey(req.registry, tier, granularity, req.scope, req.package)
     // a retry after a rejection that sent no erase (a 403), or a second get
-    // for the same context: the token held for it is not handed out again
-    await release(account, key)
+    // for the same context: the token held for it is not handed out again.
+    // A 401 retry follows the erase that already deleted it.
+    if (!(req.retry && req.httpStatus === 401)) {
+      await release(account, key)
+    }
     const limit = ctx.now() + READ_LIFETIME
     const minted = await mint(account, target.projectId, tier, limit)
     account.minted = { ...account.minted, [key]: { id: minted.id, projectId: target.projectId } }

@@ -69,7 +69,7 @@ Because the chain is asked about every registry, this provider lists `registries
 
 ## Install
 
-Provider logic for `read`: the read-only granular token whose selection covers the request, and `granularity` taken from that selection: a package selection gives `package`, a scope selection `scope`, all packages `registry`. `operationIndependent` is `false`, so a publish never picks up the read token. There is no presence check, and it works in CI.
+Provider logic for `read`: the read-only granular token whose selection covers the request, and `granularity` taken from that selection: a package selection gives `package`, a scope selection `scope`, all packages `registry`. `operationIndependent` is `false`, so a publish never picks up the read token. There is no presence check, and it works in CI. A package no read-only token selects gets `not-found` ([install-nothing-stored.jsonl](npmjs/install-nothing-stored.jsonl)), so a credential behind the provider in the chain can serve it; the provider does not hand out a broader tier instead.
 
 [install.jsonl](npmjs/install.jsonl): `@acme/widgets` is answered by a token selected to the `@acme` scope, so every other `@acme/*` package is a cache hit. An unscoped package has no scope, so the scope-level entry does not serve it, and the provider answers from a read-only token that selects all packages:
 
@@ -122,6 +122,8 @@ A provider may instead answer the retry `{"Err":{"kind":"other","message":"The s
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-session-token"},"cache":"expires","expiresAt":1792245600,"operationIndependent":false,"granularity":"package"}}
 ```
 
+It widens nothing else. A 403 on `read` is answered `other` ([install-403.jsonl](npmjs/install-403.jsonl)), since the RFC never moves a read to a credential that can write, and so is a 403 after a stage-only token ([stage-403.jsonl](npmjs/stage-403.jsonl)), which is `E_STAGE_REQUIRED` or a refusal no other token here would change.
+
 ## Login and logout
 
 `npm login --registry https://registry.npmjs.org/` reaches the provider as `login` ([login.jsonl](npmjs/login.jsonl)). With no `token` field, the provider runs the web login itself: `POST /-/v1/login` on registry.npmjs.org returns `loginUrl` and `doneUrl`; it prints `loginUrl` on the controlling terminal (never reading "press ENTER" from stdin, as npm's own flow does) and polls `doneUrl` on registry.npmjs.org only, honouring `Retry-After`. The done response is `{token}` with no expiry (read in the source of npm 11.19.0, `npm-profile`; not run for this page), so the provider stores the token with the issue time it records. The user sees the page on www.npmjs.com, where 2FA happens.
@@ -131,7 +133,7 @@ A provider may instead answer the retry `{"Err":{"kind":"other","message":"The s
 {"Ok":{"kind":"login"}}
 ```
 
-A later `get` answered from that token uses `cache` `expires` with `expiresAt` the issue time plus 7200, since the API gives none; the RFC's 60 seconds of margin then applies ([Caching](../phase-2-credential-provider.md#5-caching)). This is the `expiresAt` in the 403 transcript above. With a `token` field, the provider stores a pasted granular token, and has to ask on the terminal what it is for (see below).
+A later `get` answered from that token uses `cache` `expires` with `expiresAt` the issue time plus 7200, since the API gives none; the RFC's 60 seconds of margin then applies ([Caching](../phase-2-credential-provider.md#5-caching)). This is the `expiresAt` in the 403 transcript above. With a `token` field, the provider stores a pasted granular token, and has to ask on the terminal what it is for (see below): read-only, stage-only or publish-and-stage, in that order, storing it for the whole registry since its selection cannot be read either ([login-token.jsonl](npmjs/login-token.jsonl), where the person says it is stage-only). Without an interactive terminal it stores nothing.
 
 `npm logout` is [logout.jsonl](npmjs/logout.jsonl). For a session token the provider calls `DELETE /-/user/token/<token>`, as npm's own logout does, best effort, and removes it locally. A granular token cannot be revoked without a one-time password, so the provider removes it locally and says on stderr to revoke it on the website. Either way it answers `Ok`:
 
@@ -142,7 +144,7 @@ A later `get` answered from that token uses `cache` `expires` with `expiresAt` t
 
 ## CI
 
-In CI `interactive` is `false`, so the provider prompts for nothing and serves only what is already authorized: read-only tokens for `read` and `stage-read`, and a stage-only token for `stage`, which the user pre-authorized by creating it for that package. Direct publish in CI is trusted publishing: npm exchanges the identity token and asks no provider ([Trusted publishing](../phase-2-credential-provider.md#error-response)). `access`, `trust` and `account` answer `other` naming what was needed, as the RFC requires for a credential that needs presence ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). A transcript cannot hold that answer, for the reason above. [ci.jsonl](npmjs/ci.jsonl) is `npm stage publish`:
+In CI `interactive` is `false`, so the provider prompts for nothing and serves only what is already authorized: read-only tokens for `read` and `stage-read`, and a stage-only token for `stage`, which the user pre-authorized by creating it for that package. Direct publish in CI is trusted publishing: npm exchanges the identity token and asks no provider ([Trusted publishing](../phase-2-credential-provider.md#error-response)). `access`, `trust` and `account` answer `other` naming what was needed, as the RFC requires for a credential that needs presence ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)): [ci-access.jsonl](npmjs/ci-access.jsonl). [ci.jsonl](npmjs/ci.jsonl) is `npm stage publish`:
 
 ```json
 {"v":1,"kind":"get","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"stage","command":"stage","interactive":false}

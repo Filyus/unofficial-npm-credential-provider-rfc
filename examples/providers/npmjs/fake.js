@@ -2,7 +2,9 @@
 // A fake of the registry.npmjs.org endpoints the provider uses, answering
 // from the scenario's state:
 //   tokens: { <token>: { valid, username } }   accepted by /-/whoami
-//   login:  { pending, token }                 the web login; `pending` polls answer 202 first
+//   login:  { pending, token, retryAfter }     the web login; `pending` polls answer 202 first,
+//                                              each with Retry-After, and a poll sooner than
+//                                              that is answered 429
 // It records `revoked` (tokens deleted), `logins` (web logins started) and
 // `doneAuth` (the credential, if any, a done poll carried).
 
@@ -11,6 +13,7 @@ const createFake = (state) => {
   state.revoked ||= []
   state.logins ||= 0
   let polls = 0
+  let notBefore = 0
   return (request) => {
     const { method, path } = request
     if (method === 'GET' && path === '/-/whoami') {
@@ -41,9 +44,15 @@ const createFake = (state) => {
     }
     if (method === 'GET' && path === '/-/v1/done' && state.login) {
       state.doneAuth = request.token
+      const retryAfter = state.login.retryAfter
+      if (retryAfter && Date.now() < notBefore) {
+        state.tooSoon = (state.tooSoon || 0) + 1
+        return { status: 429, headers: { 'retry-after': String(retryAfter) }, json: { error: 'too many requests' } }
+      }
       if (polls < (state.login.pending || 0)) {
         polls += 1
-        return { status: 202, json: {} }
+        notBefore = Date.now() + (retryAfter || 0) * 1000
+        return { status: 202, headers: retryAfter ? { 'retry-after': String(retryAfter) } : {}, json: {} }
       }
       state.tokens[state.login.token] = { valid: true, username: 'alice' }
       return { status: 200, json: { token: state.login.token } }

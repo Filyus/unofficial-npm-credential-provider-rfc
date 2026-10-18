@@ -6,6 +6,9 @@
 // invented for the example (see ../../corporate-sso.md).
 //
 // state.idp:     interval, pending (polls answered authorization_pending),
+//                slowDown (the first poll is answered slow_down; after it a poll
+//                sooner than interval + 5 s is answered slow_down again, and a
+//                second such poll expired_token, as RFC 8628 allows),
 //                userCode, verificationUri, sessions { refreshToken: { lapsed } },
 //                clients { id: { secret, roles } }, groups
 // state.gateway: tokens { "read:@corp": [{ token, expires_at, groups }] }, a queue
@@ -28,6 +31,8 @@ const createFake = (state) => {
   gateway.tokens ??= {}
   gateway.minted = []
   let counter = 0
+  let notBefore = null
+  let tooSoon = 0
 
   const issueAccess = () => {
     counter += 1
@@ -48,6 +53,17 @@ const createFake = (state) => {
     if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
       if (body.device_code !== 'device-code-1') {
         return json(400, { error: 'invalid_grant' })
+      }
+      if (idp.slowDown) {
+        if (notBefore === null) {
+          notBefore = Date.now() + ((idp.interval || 0) + 5) * 1000 - 100
+          return json(400, { error: 'slow_down' })
+        }
+        if (Date.now() < notBefore) {
+          tooSoon += 1
+          idp.tooSoon = tooSoon
+          return json(400, { error: tooSoon >= 2 ? 'expired_token' : 'slow_down' })
+        }
       }
       if (idp.pending > 0) {
         idp.pending -= 1

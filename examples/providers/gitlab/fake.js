@@ -6,6 +6,9 @@
 //   oauth.next                              pairs issued by the next refreshes
 //                                           or device logins, in order
 //   oauth.pending                           polls answered authorization_pending
+//   oauth.slowDown                          the first poll is answered slow_down; a poll sooner
+//                                           than 5 s after it slow_down again, a second one
+//                                           expired_token (RFC 8628)
 //   oauth.revoked                           tokens revoked so far
 //   tokens                                  secrets the next deploy tokens get
 //   deployTokens                            live deploy tokens, as created
@@ -48,6 +51,16 @@ const createFake = (state) => {
         return body.refresh_token === oauth.refreshToken ? issue() : json(400, { error: 'invalid_grant' })
       }
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
+        if (oauth.slowDown) {
+          if (oauth.notBefore === undefined) {
+            oauth.notBefore = Date.now() + 5000 - 100
+            return json(400, { error: 'slow_down' })
+          }
+          if (Date.now() < oauth.notBefore) {
+            oauth.tooSoon = (oauth.tooSoon || 0) + 1
+            return json(400, { error: oauth.tooSoon >= 2 ? 'expired_token' : 'slow_down' })
+          }
+        }
         if (oauth.pending > 0) {
           oauth.pending -= 1
           return json(400, { error: 'authorization_pending' })

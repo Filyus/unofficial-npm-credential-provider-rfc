@@ -12,13 +12,14 @@
   "store": {},
   "state": {
     "oauth": {
-      "pending": 1,
+      "pending": 0,
       "next": [
         {
           "accessToken": "access-1",
           "refreshToken": "refresh-1"
         }
-      ]
+      ],
+      "slowDown": true
     }
   },
   "expect": {
@@ -34,7 +35,8 @@
     "state": {
       "oauth": {
         "pending": 0,
-        "next": []
+        "next": [],
+        "tooSoon": null
       }
     }
   }

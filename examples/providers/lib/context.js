@@ -71,7 +71,7 @@ const loadContext = (configPath) => {
     } catch {
       json = null
     }
-    return { status: response.status, json }
+    return { status: response.status, headers: Object.fromEntries(response.headers), json }
   }
 
   // User presence. A real run asks on the controlling terminal, never on

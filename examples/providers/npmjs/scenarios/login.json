@@ -30,8 +30,9 @@
   },
   "state": {
     "login": {
-      "pending": 2,
-      "token": "example-session-token"
+      "pending": 1,
+      "token": "example-session-token",
+      "retryAfter": 1
     }
   },
   "expect": {
@@ -64,7 +65,8 @@
         "example-session-token": {
           "valid": true
         }
-      }
+      },
+      "tooSoon": null
     }
   }
 }

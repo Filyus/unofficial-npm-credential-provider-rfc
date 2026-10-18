@@ -63,7 +63,7 @@ The chain ends with the implicit `npm:token`. A user with a stored token for a c
 
 ## Install
 
-[install.jsonl](corporate-sso/install.jsonl). `npm install` in a developer's terminal (`interactive` is `true`) with the IdP session alive. The provider refreshes the IdP access token silently, then asks the gateway for a read token for the request's scope. Nothing is shown to the user.
+[install.jsonl](corporate-sso/install.jsonl). `npm install` in a developer's terminal (`interactive` is `true`) with the IdP session alive. The provider refreshes the IdP access token silently, then asks the gateway for a read token for the request's scope. Nothing is shown to the user. When the gateway refuses the cached IdP access token with 401, as after a revocation at the IdP, the provider renews it once with the refresh token and asks again, without a login ([install-revoked-access.jsonl](corporate-sso/install-revoked-access.jsonl)).
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","command":"install","interactive":true}
@@ -125,7 +125,7 @@ Erase drops the gateway token and any copy the provider kept. It does not touch 
 {"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp-secure","package":"vault-client","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403,"authChallenges":["Bearer realm=\"https://npm.corp.example.com/\", error=\"insufficient_scope\""]}
 ```
 
-The provider fetches the user's current groups from the IdP and mints another read token. It would release that token for a plain `read` anyway; it does not widen to a publish token because the gateway said 403, which a hostile lockfile URL on the host could provoke. If the groups have not changed, it answers `other` naming the package, and the 403 stands. The retry goes out once; a second 403 is reported.
+The provider fetches the user's current groups from the IdP and mints another read token. It would release that token for a plain `read` anyway; it does not widen to a publish token because the gateway said 403, which a hostile lockfile URL on the host could provoke. If the groups have not changed, it answers `other` naming the package, and the 403 stands ([rejection-403-unchanged.jsonl](corporate-sso/rejection-403-unchanged.jsonl)). The retry goes out once; a second 403 is reported.
 
 ## Login and logout
 
@@ -165,7 +165,7 @@ It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-publish-token"},"cache":"expires","expiresAt":1792196400,"operationIndependent":false,"granularity":"package"}}
 ```
 
-On a runner whose identity lacks the role, the same request gets `other` naming the missing role, not `not-found`: the provider holds an identity and its policy withholds the credential. The provider never takes the identity from the environment or from a project file, since npm strips `npm_config_*` and the project controls the rest; the file's path and permissions are the image's.
+On a runner whose identity lacks the role, the same request gets `other` naming the missing role, not `not-found`: the provider holds an identity and its policy withholds the credential ([ci-no-publisher-role.jsonl](corporate-sso/ci-no-publisher-role.jsonl)). The provider never takes the identity from the environment or from a project file, since npm strips `npm_config_*` and the project controls the rest; the file's path and permissions are the image's.
 
 ## Where it is easy to go wrong
 

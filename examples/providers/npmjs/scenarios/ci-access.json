@@ -1,0 +1,21 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "env": {
+    "CI": "true"
+  },
+  "store": {
+    "tokens": [
+      {
+        "tier": "session",
+        "token": "example-session-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1792238400
+      }
+    ]
+  }
+}

@@ -14,7 +14,8 @@
       "interval": 0,
       "userCode": "WDJB-MJHT",
       "verificationUri": "https://idp.corp.example.com/device",
-      "pending": 1
+      "slowDown": true,
+      "pending": 0
     },
     "gateway": {}
   },
@@ -31,7 +32,8 @@
       "idp": {
         "devices": 1,
         "pending": 0,
-        "refreshes": 0
+        "refreshes": 0,
+        "tooSoon": null
       }
     }
   }

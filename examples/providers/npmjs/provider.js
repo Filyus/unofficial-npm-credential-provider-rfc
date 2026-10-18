@@ -170,9 +170,34 @@ const create = async (args) => {
     return ok('erase')
   }
 
+  // A pasted granular token comes with no label, and the session-only token
+  // list cannot tell its tier, so the person is asked what it is for; a
+  // write token stored as the read credential would go out with every
+  // install. It is stored for the whole registry: its package selection is
+  // not readable either, and the registry refuses what it does not select.
+  const PASTED_TIERS = [
+    ['read', 'a read-only token'],
+    ['stage-only', 'a stage-only token'],
+    ['publish', 'a publish-and-stage token'],
+  ]
+  const storePasted = async (request) => {
+    if (!request.interactive) {
+      return err('other', 'A pasted token is stored only after the person says what it is for; this request is not interactive.')
+    }
+    for (const [tier, label] of PASTED_TIERS) {
+      if (await ctx.confirm(`Is the pasted token ${label}?`)) {
+        const store = ctx.readStore()
+        const tokens = [...(store.tokens || []), { tier, token: request.token, selects: { all: true }, issuedAt: ctx.now() }]
+        ctx.writeStore({ ...store, tokens })
+        return ok('login')
+      }
+    }
+    return err('other', 'The pasted token was not stored: it is none of the kinds this provider hands out.')
+  }
+
   const login = async (request) => {
     if (request.token) {
-      return err('other', 'A pasted token has no label here; add granular tokens with the provider command line, not login.')
+      return storePasted(request)
     }
     if (!request.interactive) {
       return err('other', 'A web login needs the person at the terminal; this request is not interactive.')
@@ -187,8 +212,9 @@ const create = async (args) => {
       return err('other', 'The registry named a doneUrl outside its own origin; not following it.')
     }
     ctx.showToPerson(`Open ${loginUrl} to log in to npmjs.com`)
-    // Retry-After is not visible through ctx.request, so the wait is fixed
-    const wait = ctx.config.pollMs ?? 2000
+    // the registry's Retry-After decides the wait; without one, the
+    // configured interval
+    const interval = ctx.config.pollMs ?? 2000
     for (let attempt = 0; attempt < (ctx.config.pollLimit ?? 300); attempt += 1) {
       const polled = await ctx.request('GET', doneUrl)
       if (polled.status === 200 && polled.json && polled.json.token) {
@@ -201,6 +227,8 @@ const create = async (args) => {
       if (polled.status !== 202) {
         return err('other', `The web login ended with status ${polled.status}.`)
       }
+      const retryAfter = Number(polled.headers['retry-after'])
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : interval
       await new Promise((resolve) => setTimeout(resolve, wait))
     }
     return err('other', 'The web login was not completed in time.')
