@@ -75,6 +75,13 @@ The provider holds a long-lived login in the OS keychain: a refresh token or an 
 - `operationIndependent` is `true` and `granularity` is `registry`: the same token is what the provider would hand out for any operation, and for any repository on the instance. It reuses the one minted token for every `get` of the session.
 - The token is a JWT. A reference token would be opaque and carry no `exp`.
 
+**A refresh that rotates the refresh token.** [install-rotated-refresh.jsonl](jfrog-artifactory/install-rotated-refresh.jsonl). Whether Artifactory's refresh grant hands out a new refresh token is unverified; the provider takes one if the answer carries one, and stores it before it answers, replacing the old one and keeping the stored access token. In the transcript the short token lapses between two `get`s of one session, so the second mint is a refresh again, and the platform accepts only the refresh token the first one returned. The second `get`:
+
+```json
+{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"gadgets","operation":"read","command":"install","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-user-token-2"},"cache":"expires","expiresAt":1792237300,"operationIndependent":true,"granularity":"registry"}}
+```
+
 ## Publish
 
 [publish.jsonl](jfrog-artifactory/publish.jsonl)
@@ -202,7 +209,7 @@ This is JFrog's exchange, not npm's trusted publishing. The npm exchange goes to
 - **Relaying `/api/npm/auth` output.** It is a pre-encoded `_auth`, and it mishandles group tokens. If Basic is needed, decode it into `{"type":"basic","username":…,"password":…}`.
 - **Polling as long as the CLI.** The CLI's 5-minute web-login poll equals npm's `login` timeout, so the provider is killed before its own timeout fires. Stop at 4.5 minutes.
 - **Expecting `logout` or `erase` to revoke what npm holds.** Tokens below the revocable threshold cannot be revoked, and those under the persistency threshold (3 hours by default) are not stored at all.
-- **Rotating the refresh token without care.** If a refresh rotates the refresh token (unverified), two npm commands at once, each with a provider process, race, and the loser presents a used token. Update the keychain atomically and read it again after a failure before calling the login dead.
+- **Rotating the refresh token without care.** If a refresh rotates the refresh token (unverified), two npm commands at once, each with a provider process, race, and the loser presents a used token. Update the keychain atomically and read it again after a failure before calling the login dead. The reference provider does the first half only: it stores a rotated refresh token whole or not at all ([rotation](#install), [install-rotated-refresh.jsonl](jfrog-artifactory/install-rotated-refresh.jsonl)), but a 401 on a refresh is final for it, with no second read. That is a limit of the example: the loser of the race would need the winner's write to land in the store between its two reads, which a run cannot stage with one provider process against a fake that has no hand on the store, so the branch would have no transcript, and a rotation is itself unverified.
 - **Sending the user's token to unimplemented endpoints.** Answer `stage`, `owner`, `access`, `trust` and `account` with `operation-not-supported`.
 - **Matching the wrong scheme.** An `https:` hello entry does not cover `http://host:8081`. A provider that serves both, with one token, exposes it on the wire.
 - **Starting a login from a 401.** The URL may be one a lockfile chose. Confirm with a mint first.

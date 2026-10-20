@@ -1,0 +1,65 @@
+{
+  "hosts": [
+    "https://acme.jfrog.io"
+  ],
+  "now": 1792230000,
+  "clock": [
+    1792230000,
+    1792233700
+  ],
+  "config": {
+    "url": "https://acme.jfrog.io"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://acme.jfrog.io": {
+      "login": {
+        "type": "refresh",
+        "accessToken": "example-login-access-token",
+        "refreshToken": "example-refresh-token"
+      }
+    }
+  },
+  "state": {
+    "refreshTokens": [
+      "example-refresh-token"
+    ],
+    "rotate": [
+      "example-refresh-token-2",
+      "example-refresh-token-3"
+    ],
+    "tokens": [
+      "example-user-token",
+      "example-user-token-2"
+    ]
+  },
+  "expect": {
+    "store": {
+      "https://acme.jfrog.io": {
+        "login": {
+          "type": "refresh",
+          "accessToken": "example-login-access-token",
+          "refreshToken": "example-refresh-token-3"
+        }
+      }
+    },
+    "state": {
+      "refreshTokens": [
+        "example-refresh-token-3"
+      ],
+      "minted": [
+        {
+          "token": "example-user-token",
+          "expires_in": 3600,
+          "via": "refresh_token"
+        },
+        {
+          "token": "example-user-token-2",
+          "expires_in": 3600,
+          "via": "refresh_token"
+        }
+      ]
+    }
+  }
+}

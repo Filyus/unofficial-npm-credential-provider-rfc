@@ -103,6 +103,15 @@ for `unpublish`, `owner`, `access`, `account`, `trust`, `stage`, `stage-read` an
 
 The erase carries no `authChallenges`, since CodeArtifact's header is not documented. The provider drops its cached domain token, never `~/.aws/sso/cache`, and cannot revoke on the server, since tokens have no revocation. The retry mints again. If the AWS session itself has expired and `interactive` is `false`, the retry answers `other` ("run aws sso login"); with `interactive: true` it starts an SSO login only after a check of its own shows the sign-in lapsed (the Identity Center portal refuses the cached sign-in when role credentials are asked for, or `sts:GetCallerIdentity` fails for what the portal handed out), not because of the 401.
 
+**An erase for one repository, a request for another.** [rejection-other-repository.jsonl](aws-codeartifact/rejection-other-repository.jsonl). One token serves every repository of the domain, so the provider's copy is kept per domain and `tools` is answered with the token minted for `my-repo`, at no call to AWS. When `my-repo` is rejected and erased, the copy must go with it, for every repository: npm evicts the entry of `tools` by value and asks the provider again, and a provider that kept the erased token would hand the rejected string back. Here that request comes before the retry of `my-repo` (requests for different registries interleave within a session), so the retry's own drop of the token does not hide a missing erase:
+
+```json
+{"v":1,"kind":"erase","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"read","granularity":"registry"}
+{"Ok":{"kind":"erase"}}
+{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/","scope":"@acme","package":"lint","operation":"read","command":"install","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token-2"},"cache":"expires","expiresAt":1760001050,"operationIndependent":true,"granularity":"registry"}}
+```
+
 **A 401 that no new token can answer.** [rejection-sso-lapsed.jsonl](aws-codeartifact/rejection-sso-lapsed.jsonl). The IAM Identity Center session behind the profile has lapsed in the middle of the day. AWS documents that the CLI renews expired AWS credentials by itself only while the Identity Center session is alive, and that once that session expires the user must sign in again ([CLI SSO](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)). The cached domain token has also run out, so npm erases it and retries; the provider's check of its own fails (here the portal refuses the cached sign-in, so there are no credentials to ask `sts:GetCallerIdentity` about; the portal's role-credentials call is recalled, not read), and `GetAuthorizationToken` cannot be called without credentials:
 
 ```json

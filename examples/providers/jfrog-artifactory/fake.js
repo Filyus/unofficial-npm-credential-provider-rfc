@@ -4,6 +4,10 @@
 //
 //   identityTokens, refreshTokens    long-lived logins the platform accepts
 //   tokens                           secrets the next tokens it creates get
+//   rotate                           refresh tokens a refresh hands out in turn: each
+//                                    refresh then invalidates the one presented and
+//                                    answers with the next (rotation, which the page
+//                                    marks unverified); empty, a refresh keeps its token
 //   canCreateTokens                  false: creating a token is refused with 403
 //   minted                           tokens created so far, with what was asked
 //   user                             the name /users/me gives
@@ -60,7 +64,14 @@ const createFake = (state) => {
         return json(500, { error: 'the fake has no token secrets left' })
       }
       state.minted.push({ token: secret, expires_in: Number(body.expires_in), via: body.grant_type })
-      return json(200, { access_token: secret, token_type: 'Bearer', expires_in: Number(body.expires_in), scope: body.scope || 'applied-permissions/user' })
+      const answer = { access_token: secret, token_type: 'Bearer', expires_in: Number(body.expires_in), scope: body.scope || 'applied-permissions/user' }
+      if (body.grant_type === 'refresh_token' && state.rotate && state.rotate.length) {
+        const next = state.rotate.shift()
+        state.refreshTokens = state.refreshTokens.filter((used) => used !== body.refresh_token)
+        state.refreshTokens.push(next)
+        answer.refresh_token = next
+      }
+      return json(200, answer)
     }
     if (method === 'POST' && path === '/access/api/v1/tokens/revoke') {
       if (!state.revocable) {
