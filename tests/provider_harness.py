@@ -238,6 +238,8 @@ class Session:
                     if event.get("from") == "client" and event.get("message", {}).get("kind") == "get"
                 ]
         self.write_tokens: set[str] = set()
+        # a session is one npm command, whatever the requests it was drawn from said
+        self.command = self.random.choice(["install", "ci", "publish", "view"])
 
     # --- the wire ---------------------------------------------------------------
 
@@ -309,6 +311,7 @@ class Session:
         request = dict(self.random.choice(self.pool))
         for field in ("retry", "httpStatus", "authChallenges"):
             request.pop(field, None)
+        request["command"] = self.command
         # mostly what the recorded request asked, so that credentials are
         # handed out and retried; sometimes any operation, now and then one
         # no version knows
@@ -335,7 +338,7 @@ class Session:
         base = self.random.choice(self.pool)
         for operation in sorted(SUPPORTED_OPERATIONS - READ_OPERATIONS):
             request = {key: value for key, value in base.items() if key not in ("retry", "httpStatus", "authChallenges")}
-            request.update(operation=operation, interactive=True)
+            request.update(operation=operation, interactive=True, command=self.command)
             if operation in OPERATIONS_REQUIRING_VERSION:
                 request.setdefault("package", "widgets")
                 request.setdefault("version", "9.9.9")
@@ -355,7 +358,7 @@ class Session:
             return
         roll = self.random.random()
         if roll < 0.08:
-            request = {"v": 1, "kind": "get", "registry": FOREIGN, "operation": "read", "command": "install",
+            request = {"v": 1, "kind": "get", "registry": FOREIGN, "operation": "read", "command": self.command,
                        "interactive": False}
             answer = self.send(request)
             if answer != {"Err": {"kind": "url-not-supported"}}:

@@ -152,11 +152,16 @@ The provider revokes both generated tokens with `DELETE /-/npm/v1/tokens/token/<
 
 ## CI
 
-[ci.jsonl](verdaccio/ci.jsonl): `npm ci`, then `npm stage publish`, with `interactive: false`.
+[ci.jsonl](verdaccio/ci.jsonl) is `npm ci` and [ci-stage.jsonl](verdaccio/ci-stage.jsonl) is `npm stage publish`: two commands, so two sessions, with `interactive: false`.
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"ci","interactive":false}
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-read-token"},"cache":"session","granularity":"registry","operationIndependent":false}}
+```
+
+And the staging, in its own session:
+
+```json
 {"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","version":"2.4.1","operation":"stage","command":"stage","interactive":false}
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-stage-token"},"cache":"session","granularity":"package","operationIndependent":false}}
 ```

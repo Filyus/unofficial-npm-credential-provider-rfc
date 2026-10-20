@@ -1,6 +1,4 @@
 {"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.4.0","operation":"publish","command":"publish","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-user-token"},"cache":"expires","expiresAt":1792233600,"operationIndependent":true,"granularity":"registry"}}}
-{"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"dist-tag","command":"dist-tag","interactive":true}}
-{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-user-token"},"cache":"expires","expiresAt":1792233600,"operationIndependent":true,"granularity":"registry"}}}
 {"from":"client","event":"close"}

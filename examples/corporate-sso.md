@@ -155,7 +155,7 @@ It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `
 
 ## CI
 
-[ci.jsonl](corporate-sso/ci.jsonl). The runner image holds a service identity file readable only by the runner account, and the provider is in the image's global npmrc. `interactive` is `false`.
+[ci.jsonl](corporate-sso/ci.jsonl). The runner image holds a service identity file readable only by the runner account, and the provider is in the image's global npmrc. `interactive` is `false`. An `npm ci` and an `npm publish` are two commands, so two sessions: the publish is [ci-publish.jsonl](corporate-sso/ci-publish.jsonl).
 
 - Reads: the provider does a client credentials grant ([RFC 6749, section 4.4](https://www.rfc-editor.org/rfc/rfc6749#section-4.4)) for the service identity, then asks the gateway for a read token. Same answer shape as the install.
 - Writes: only a service identity with the `npm-publisher` role, which the release runner image has and the test runners do not, gets a publish token. It has no presence and needs none; the role and the runner image are the gate, and the token is bound to the package and version for 5 minutes.

@@ -83,7 +83,7 @@ The provider holds a long-lived login in the OS keychain: a refresh token or an 
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-user-token"},"cache":"expires","expiresAt":1792233600,"operationIndependent":true,"granularity":"registry"}}
 ```
 
-Artifactory serves publish, `dist-tag`, `deprecate` and `unpublish` from the same user-scope token. A publish needs Deploy on the target repository (through a virtual repository, on its Default Deployment Repository); an unpublish also needs Delete. All of this is from memory and not verified against the current documentation. The transcript also shows a `dist-tag` request, answered with the same token.
+Artifactory serves publish, `dist-tag` ([dist-tag.jsonl](jfrog-artifactory/dist-tag.jsonl), a command and so a session of its own), `deprecate` and `unpublish` from the same user-scope token. A publish needs Deploy on the target repository (through a virtual repository, on its Default Deployment Repository); an unpublish also needs Delete. All of this is from memory and not verified against the current documentation. The transcript also shows a `dist-tag` request, answered with the same token.
 
 The provider answers the operations Artifactory has no npm endpoint for with `operation-not-supported` ([Request kinds](../phase-2-credential-provider.md#3-request-kinds)): `stage`, `stage-read`, `stage-reject`, `owner`, `access`, `trust` and `account` (unverified, from memory). The answer is [stage-unsupported.jsonl](jfrog-artifactory/stage-unsupported.jsonl):
 

@@ -1,6 +1,4 @@
 {"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-publish-token"},"cache":"expires","expiresAt":1760000900,"operationIndependent":false,"granularity":"package"}}}
-{"from":"client","message":{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"dist-tag","command":"dist-tag","interactive":true}}
-{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-tag-token"},"cache":"expires","expiresAt":1760000960,"operationIndependent":false,"granularity":"package"}}}
 {"from":"client","event":"close"}

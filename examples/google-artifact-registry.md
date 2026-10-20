@@ -96,7 +96,7 @@ npm then fails the request, naming the provider ([rejection-403.jsonl](google-ar
 
 ## CI
 
-[ci.jsonl](google-artifact-registry/ci.jsonl). `interactive` is `false`. The provider takes the identity Application Default Credentials resolves to: a federated identity from the CI job, or the metadata server's service account on Cloud Build. Both are machine identities, so it asks for no presence and answers `publish` at once:
+[ci.jsonl](google-artifact-registry/ci.jsonl) is the install and [ci-publish.jsonl](google-artifact-registry/ci-publish.jsonl) the publish: two commands, so two sessions. `interactive` is `false` in both. The provider takes the identity Application Default Credentials resolves to: a federated identity from the CI job, or the metadata server's service account on Cloud Build. Both are machine identities, so it asks for no presence and answers `publish` at once:
 
 ```json
 {"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-private/","scope":"@acme","package":"web-ui","version":"2.4.1","operation":"publish","command":"publish","interactive":false}

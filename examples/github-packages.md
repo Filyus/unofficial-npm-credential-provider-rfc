@@ -202,13 +202,18 @@ Logout deletes the keychain entries. As a best effort it also revokes a token it
 
 ## CI
 
-[ci.jsonl](github-packages/ci.jsonl) strings an install, a publish and a read of another owner's package onto one session, to keep the fixture short; in a job each is its own npm command with its own session.
+[ci.jsonl](github-packages/ci.jsonl) is an install, [ci-publish.jsonl](github-packages/ci-publish.jsonl) a publish and [ci-other-owner.jsonl](github-packages/ci-other-owner.jsonl) a read of another owner's package: three npm commands in a job, so three sessions.
 
 In a GitHub Actions job the provider runs with `interactive: false`: no device flow, no presence prompt. It serves `GITHUB_TOKEN` if the workflow exported it into the environment (for example through `env:` or `setup-node`; Phase 1's environment rules keep it), and otherwise a stored token.
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"ci","interactive":false}
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}
+```
+
+And the publish, in its own session:
+
+```json
 {"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.2","operation":"publish","command":"publish","interactive":false}
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-actions-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}
 ```

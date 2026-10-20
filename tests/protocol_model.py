@@ -876,6 +876,9 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
     # whether a retry did; a 403 retry follows no erase, and a request gets one
     erased_since_get = False
     retried_since_get = False
+    # a provider process lives for one npm command: every request of a session
+    # names the same one, and an `npm ci` and an `npm publish` are two sessions
+    session_command: str | None = None
     for event in load_transcript(path):
         actor = event.get("from")
         if actor == "provider" and client.state == ClientState.SPAWNED:
@@ -886,6 +889,12 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
                 continue
             message = event.get("message")
             validate_request(message)
+            if "command" in message:
+                if session_command not in (None, message["command"]):
+                    raise ProtocolViolation(
+                        f"one session serves one npm command: {session_command!r} and {message['command']!r}"
+                    )
+                session_command = message["command"]
             if message["kind"] == "erase":
                 client.evict_rejected(message)
                 erased_since_get = True

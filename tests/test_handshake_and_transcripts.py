@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 
@@ -140,6 +141,32 @@ class TranscriptTests(unittest.TestCase):
                 )
                 with self.assertRaises(ProtocolViolation):
                     validate_transcript(str(path))
+
+    def test_a_session_serves_one_npm_command(self) -> None:
+        """A provider process lives for one npm command, so an `npm ci` and an
+        `npm publish` are two sessions and cannot be one transcript."""
+        registry = "https://registry.example.test/"
+        ok = {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "t"}, "cache": "session"}}
+
+        def transcript(*commands: str) -> list[dict]:
+            events = [{"from": "provider", "message": {"v": [1]}}]
+            for command in commands:
+                events.append({"from": "client", "message": {
+                    "v": 1, "kind": "get", "registry": registry, "operation": "read", "command": command,
+                    "interactive": False}})
+                events.append({"from": "provider", "message": ok})
+            events.append({"from": "client", "event": "close"})
+            return events
+
+        def validate(events: list[dict]) -> None:
+            with tempfile.TemporaryDirectory() as scratch:
+                path = Path(scratch) / "t.jsonl"
+                path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+                validate_transcript(str(path))
+
+        validate(transcript("ci", "ci"))
+        with self.assertRaises(ProtocolViolation):
+            validate(transcript("ci", "publish"))
 
     def test_not_found_leaves_the_session_usable_for_the_chain(self) -> None:
         client = validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))

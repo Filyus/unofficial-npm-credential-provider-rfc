@@ -35,13 +35,6 @@
             "expires_at": 1792197000,
             "groups": []
           }
-        ],
-        "publish:@corp/ui-kit@2.4.1": [
-          {
-            "token": "example-ci-publish-token",
-            "expires_at": 1792196400,
-            "groups": []
-          }
         ]
       }
     }
@@ -55,8 +48,7 @@
       },
       "gateway": {
         "minted": [
-          "read:@corp",
-          "publish:@corp/ui-kit@2.4.1"
+          "read:@corp"
         ]
       }
     }

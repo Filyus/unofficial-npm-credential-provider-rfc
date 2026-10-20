@@ -23,6 +23,56 @@ class ExampleTranscriptTests(unittest.TestCase):
                 validate_transcript(str(path))
 
 
+class PagesAndTranscriptsTests(unittest.TestCase):
+    """A page and its transcripts say the same: every transcript is linked from
+    the page of its example, and every JSON line a page shows is a message of one
+    of them, so that a page cannot describe an exchange no file has."""
+
+    def pages(self):
+        return sorted(page for page in EXAMPLES.glob("*.md") if page.name != "README.md")
+
+    def test_every_transcript_is_linked_from_its_page(self) -> None:
+        for page in self.pages():
+            text = page.read_text(encoding="utf-8")
+            for transcript in sorted((EXAMPLES / page.stem).glob("*.jsonl")):
+                with self.subTest(page=page.name, transcript=transcript.name):
+                    self.assertIn(f"{page.stem}/{transcript.name}", text, "no link to it")
+
+    def test_every_json_block_a_page_shows_is_part_of_a_transcript_linked_in_its_section(self) -> None:
+        """The lines of a block are messages of one transcript that the section of the
+        page links, in its order (a block may leave some out). Taken one by one, or
+        against any transcript of the example, a line would match the same message in
+        another file, and a changed token in the one it is shown for would pass. A
+        hello, which every transcript of an example starts with, is not tied to one."""
+        import re
+
+        for page in self.pages():
+            text = page.read_text(encoding="utf-8")
+            transcripts = {
+                transcript.name: [event["message"] for event in load_transcript(str(transcript)) if "message" in event]
+                for transcript in (EXAMPLES / page.stem).glob("*.jsonl")
+            }
+            self.assertTrue(transcripts, page.name)
+            for block in re.finditer(r"```json\n(.*?)```", text, re.S):
+                lines = [json.loads(line) for line in block.group(1).splitlines() if line.strip().startswith("{")]
+                if not lines or (isinstance(lines[0].get("v"), list) and len(lines) == 1):
+                    continue
+                start = max(text.rfind("\n## ", 0, block.start()), 0)
+                end = text.find("\n## ", block.end())
+                section = text[start:len(text) if end == -1 else end]
+                linked = set(re.findall(re.escape(page.stem) + r"/([\w.-]+\.jsonl)", section))
+                with self.subTest(page=page.name, block=block.group(1)[:90]):
+                    self.assertTrue(
+                        any(self.in_order(lines, transcripts[name]) for name in linked if name in transcripts),
+                        f"no transcript linked in this section has these messages in this order ({sorted(linked)})",
+                    )
+
+    @staticmethod
+    def in_order(lines: list, messages: list) -> bool:
+        remaining = iter(messages)
+        return all(any(message == line for message in remaining) for line in lines)
+
+
 class TranscriptSchemaTests(unittest.TestCase):
     """Every message of every transcript, the examples' and the model's own,
     against the JSON schema for its role, independently of the Python model.

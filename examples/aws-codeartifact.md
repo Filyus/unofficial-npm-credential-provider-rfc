@@ -78,7 +78,7 @@ The token is valid for the whole domain, but npm's cache is keyed by registry UR
 
 The provider asks for presence on the controlling terminal, naming `@acme/ui` and 2.4.1, reads the MFA code there, and assumes the publish role with a session policy limited to `PublishPackageVersion` on `arn:aws:codeartifact:us-west-2:111122223333:package/my-domain/my-repo/npm/acme/ui` (scope without `@`; an unscoped package ends `npm//name`). It then mints with `durationSeconds` 0, so the token ends with the session. That a token minted this way is in practice limited to that package follows from [bearer tokens](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_bearer.html) but is untested. With `interactive: false` it answers `other` ("publish needs user presence"), unless its trusted config says the ambient identity is a CI publisher ([CI](#ci)).
 
-`dist-tag add` and `rm` need `PutPackageMetadata`, so the provider maps `dist-tag` to the same write identity and answers with its own package-bound token, as in the second exchange in the file. `deprecate` maps likewise.
+`dist-tag add` and `rm` need `PutPackageMetadata`, so the provider maps `dist-tag` to the same write identity and answers with its own package-bound token ([dist-tag.jsonl](aws-codeartifact/dist-tag.jsonl): `npm dist-tag` is a command of its own, so a session of its own). `deprecate` maps likewise.
 
 Operations CodeArtifact does not serve get a clear refusal, not the read token:
 
@@ -133,7 +133,7 @@ Only a provider configured with a second, more privileged identity for that oper
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-token"},"cache":"expires","expiresAt":1760000900,"operationIndependent":true,"granularity":"registry"}}
 ```
 
-For `publish` the example provider's trusted config (an argument such as `--ci-publisher`) says that the ambient role is a publisher, so it answers without presence, still bound to the package and the operation, as the second exchange shows. Without that argument it answers `other`. No AWS credentials at all is `not-found`. npm's own OIDC exchange does not apply to CodeArtifact (recalled: it has no such endpoint); if npm tries it, it fails and leaves the chain in charge.
+For `publish` the example provider's trusted config (an argument such as `--ci-publisher`) says that the ambient role is a publisher, so it answers without presence, still bound to the package and the operation, as [ci-publish.jsonl](aws-codeartifact/ci-publish.jsonl) shows (an `npm publish` is a command, and so a session, of its own). Without that argument it answers `other`. No AWS credentials at all is `not-found`. npm's own OIDC exchange does not apply to CodeArtifact (recalled: it has no such endpoint); if npm tries it, it fails and leaves the chain in charge.
 
 ## Where it is easy to go wrong
 

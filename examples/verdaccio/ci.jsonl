@@ -1,6 +1,4 @@
 {"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"ci","interactive":false}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-read-token"},"cache":"session","granularity":"registry","operationIndependent":false}}}
-{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","version":"2.4.1","operation":"stage","command":"stage","interactive":false}}
-{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-stage-token"},"cache":"session","granularity":"package","operationIndependent":false}}}
 {"from":"client","event":"close"}

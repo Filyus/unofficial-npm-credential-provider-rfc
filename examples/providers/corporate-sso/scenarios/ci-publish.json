@@ -1,0 +1,56 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "env": {
+    "CI": "true"
+  },
+  "config": {
+    "idp": "https://idp.corp.example.com",
+    "serviceIdentity": "fixtures/ci-identity.json"
+  },
+  "store": {},
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "clients": {
+        "corp-ci-release": {
+          "secret": "example-ci-secret",
+          "roles": [
+            "npm-publisher"
+          ]
+        }
+      }
+    },
+    "gateway": {
+      "tokens": {
+        "publish:@corp/ui-kit@2.4.1": [
+          {
+            "token": "example-ci-publish-token",
+            "expires_at": 1792196400,
+            "groups": []
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "state": {
+      "idp": {
+        "clientGrants": 1,
+        "refreshes": 0,
+        "devices": 0
+      },
+      "gateway": {
+        "minted": [
+          "publish:@corp/ui-kit@2.4.1"
+        ]
+      }
+    }
+  }
+}
