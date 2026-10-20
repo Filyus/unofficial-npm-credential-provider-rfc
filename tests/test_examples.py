@@ -135,10 +135,17 @@ class CoverageTests(unittest.TestCase):
                     else:
                         self.assertIsNotNone(note, "an empty cell needs `n/a: reason` or `task N: what` in coverage.json")
                         self.assertRegex(note, r"^(n/a: .{10,}|task \d+: .{5,})$")
+        for registry in table:
+            note = notes.get(registry, {}).get("provider")
+            with self.subTest(registry=registry, feature="provider"):
+                if coverage.has_provider(registry):
+                    self.assertIsNone(note, "the registry has a provider; delete its explanation from coverage.json")
+                else:
+                    self.assertRegex(note or "", r"^(n/a: .{10,}|task \d+: .{5,})$", "no provider: say why or name the task")
         for registry, cells in notes.items():
             self.assertIn(registry, table, "coverage.json names a registry that has no example")
             for feature in cells:
-                self.assertIn(feature, coverage.FEATURES, f"{registry}: no such situation")
+                self.assertTrue(feature in coverage.FEATURES or feature == "provider", f"{registry}: no such situation")
 
     def test_the_page_is_what_the_transcripts_say(self) -> None:
         page = (EXAMPLES / "COVERAGE.md").read_text(encoding="utf-8")
