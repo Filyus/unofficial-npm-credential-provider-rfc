@@ -1,11 +1,17 @@
 {
   "https://api-docs.npmjs.com/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "ee201128b2786f85d87beb4ac5ae6b1b6b099bbc7fd1d1070f216712dd0eeaa1",
+    "file": ".refs/api-docs.npmjs.com/index.txt"
   },
   "https://cli.github.com/manual/gh_auth_login": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "cbf6c9adc985e17493b9269e276e2442a3a3090b49ee2e513e8b571e43b7098e",
+    "file": ".refs/cli.github.com/manual_gh_auth_login.txt"
   },
   "https://cli.github.com/manual/gh_auth_refresh": {
     "kind": "page",
@@ -21,11 +27,17 @@
   },
   "https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "b53ddc0320df6436e478cc07bc9f9f13c858995532bab683489ec8f1a468da82",
+    "file": ".refs/doc.rust-lang.org/cargo_reference_credential-provider-protocol.html.txt"
   },
   "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_bearer.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "eaecd3780eaea07e3251ffe92e2d1529c97f6f2abbd5bbfe2938860fb8c3c8b1",
+    "file": ".refs/docs.aws.amazon.com/IAM_latest_UserGuide_id_credentials_bearer.html.txt"
   },
   "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html": {
     "kind": "page",
@@ -85,7 +97,10 @@
   },
   "https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "42064f057c3ab0a658a92fdd13e46c1a79a9d42e734eb6ffb727636d4739782f",
+    "file": ".refs/docs.cloud.google.com/access-context-manager_docs_session-controls-for-reauthentication.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/access-control": {
     "kind": "page",
@@ -133,11 +148,17 @@
   },
   "https://docs.docker.com/reference/cli/docker/login/": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "7de91fe8968e6992a4bfb41d9af4c271ef94300c4b9bc9762aa83debe692bfb5",
+    "file": ".refs/docs.docker.com/reference_cli_docker_login.txt"
   },
   "https://docs.github.com/en/actions/concepts/security/github_token": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "bf8e028420471e3eb2e3780c7c2130eb7c7f33b4c7bfdf7447aafa9ce296e9dc",
+    "file": ".refs/docs.github.com/en_actions_concepts_security_github_token.txt"
   },
   "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps": {
     "kind": "page",
@@ -181,7 +202,10 @@
   },
   "https://docs.gitlab.com/api/deploy_tokens/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "2ead3d2767a27b04dd41a23f656516a0219c6651af4b34db44e1d7b130fe2267",
+    "file": ".refs/docs.gitlab.com/api_deploy_tokens.txt"
   },
   "https://docs.gitlab.com/api/oauth2/": {
     "kind": "page",
@@ -213,7 +237,10 @@
   },
   "https://docs.jfrog.com/administration/docs/access-tokens": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "869f4df3b0349ccede4c6d19360dcb64fdc33bb1b4aed807c1217dddd275c0e6",
+    "file": ".refs/docs.jfrog.com/administration_docs_access-tokens.txt"
   },
   "https://docs.jfrog.com/administration/docs/security-configuration": {
     "kind": "page",
@@ -241,7 +268,10 @@
   },
   "https://docs.npmjs.com/about-access-tokens": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "9980c4f7560f0c3bc49185b0901584404b48075b8ae28834fcbddec24ba7c41a",
+    "file": ".refs/docs.npmjs.com/about-access-tokens.txt"
   },
   "https://docs.npmjs.com/cli/v11/commands/npm-trust/": {
     "kind": "page",
