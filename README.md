@@ -6,7 +6,7 @@ An independent proposal for letting npm get registry credentials from a user-con
 
 | Document | What it is |
 |---|---|
-| [Phase 1: `tokenHelper`](phase-1-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it. The motivation, and the trust rule both phases follow. Small enough to land on its own |
+| [Phase 1: `tokenHelper`](phase-1-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it. The motivation, and the trust rule both phases follow. Lands on its own, without Phase 2 |
 | [Phase 2: credential provider protocol](phase-2-credential-provider.md) | A versioned JSON protocol modelled on Cargo's: npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login`/`logout` delegation, the security model, prior art |
 | [Examples](examples/README.md) | How providers for real registries would answer, and where each is easy to get wrong |
 
