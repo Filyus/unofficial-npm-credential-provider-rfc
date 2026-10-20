@@ -7,7 +7,8 @@
 //
 //   node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 //
-// Both checkouts must be on their `token-helper` branches. The overlay is
+// Both checkouts must carry the prototype's commits (the `token-helper` branches, or the
+// patches of poc/patches applied, as CI does). The overlay is
 // undone before the script exits, including on Ctrl+C.
 
 const { execFile } = require('child_process')

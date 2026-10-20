@@ -1,6 +1,6 @@
 # RFC draft: npm credential providers
 
-This document was split by phase at revision 28. Its content now lives in:
+This document was split by phase after revision 28, its last combined one; both parts begin at revision 29. Its content now lives in:
 
 - **[Phase 1: `tokenHelper`](phase-1-token-helper.md):** the pnpm-compatible per-registry helper, the motivation, and the trust rule both phases follow.
 - **[Phase 2: credential provider protocol](phase-2-credential-provider.md):** the protocol, its security model, rationale, prior art and open questions.

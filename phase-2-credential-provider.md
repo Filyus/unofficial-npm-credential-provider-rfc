@@ -12,7 +12,7 @@
 
 ## Motivation
 
-Phase 2 shares the [motivation of Phase 1](phase-1-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1 lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
+Phase 2 shares the [motivation of Phase 1](phase-1-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1 lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per registry per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
 
 ## Scope
 
@@ -23,7 +23,7 @@ In scope:
 
 Out of scope:
 
-- Credentials for lifecycle scripts. Scripts never receive provider credentials.
+- Credentials for lifecycle scripts. npm gives scripts no provider credential; a script can still run the provider itself, as any process can ([Publishing while a script runs](#publishing-while-a-script-runs)).
 - Trusted publishing (OIDC) and the registry's own token model; both are unchanged.
 - Git dependencies, proxies, and client certificates (`certfile`/`keyfile`).
 - Protecting credentials from code that already runs as the same user: it can run a helper or provider exactly as npm does, as any process can run `git credential fill`. What changes is what it finds: no standing secret in `.npmrc` or the environment, short-lived tokens, and write credentials gated by the provider ([Threat model](#threat-model)).
@@ -189,7 +189,7 @@ npm sends `Authorization: Bearer <token>`, or base64-encodes `username:password`
 | `"url-not-supported"` | Provider does not handle this registry. | Try the next provider in the chain. |
 | `"not-found"` | No credentials stored for this registry or scope. | Try the next provider; if none answers `Ok`, fail ([Legacy fallback](#legacy-fallback)). |
 | `"operation-not-supported"` | Provider does not support this request kind or operation. | Fail with an unsupported-operation error. |
-| `"other"` | Anything else; carries `message` and optional `causedBy`. | Show the error and fail. |
+| `"other"` | Anything else; says why in `message` (the schema does not require it) and may add `causedBy`. | Show the error and fail. |
 
 **Provider chaining:**
 
@@ -226,7 +226,7 @@ A silent fallback would mask provider failures and bring back the stored secret 
 
 The implicit `npm:token` is not planned to go. Cargo can let an exhausted chain fail because it asks only for registries that need a credential; npm's global chain is asked about every registry, so without the entry, adding one global provider would change every registry that provider does not serve. Where a stored credential must not stand in for a provider, a per-registry list for that host ignores it.
 
-Providers write diagnostics to stderr, which npm reads line by line and logs at `verbose`. Before logging a line, npm removes control characters (C0 and C1 except tab), masks every credential the provider has returned in this command and anything that looks like a credential, as for a Phase 1 helper, and drops any line longer than the maximum line size. npm applies the same stripping and masking to `message` and `causedBy` before it shows them, since both may relay a registry's text. Prompts never go to stderr: they go to the controlling terminal ([Non-interactive and CI behavior](#non-interactive-and-ci-behavior)). They must not write tokens, passwords, authorization headers, or other bearer-equivalent secrets to stderr or any ordinary log. Stdout carries protocol JSON only.
+Providers write diagnostics to stderr, which npm reads line by line and logs at `verbose`: unlike a Phase 1 helper, whose stderr is the only way it can speak to the user, a provider has `message` and `causedBy` for what the user must see, so a chatty provider does not fill every install with warnings. Before logging a line, npm removes control characters (C0 and C1 except tab), masks every credential the provider has returned in this command and anything that looks like a credential, as for a Phase 1 helper, and drops any line longer than the maximum line size. npm applies the same stripping and masking to `message` and `causedBy` before it shows them, since both may relay a registry's text. Prompts never go to stderr: they go to the controlling terminal ([Non-interactive and CI behavior](#non-interactive-and-ci-behavior)). They must not write tokens, passwords, authorization headers, or other bearer-equivalent secrets to stderr or any ordinary log. Stdout carries protocol JSON only.
 
 #### Session lifecycle
 
@@ -240,7 +240,7 @@ So a global provider starts with any command that goes to the network, to send i
 
 The provider process then lives for the rest of the npm command and serves every request for it. Requests within a session are strictly sequential: the client sends a request only after reading the response to the previous one, and messages carry no request id. npm fetches in parallel, so the client serializes provider requests, and a request waiting its turn looks the cache up again before it is sent: when the answer to the request ahead of it covers it, as a `scope`-level credential covers every package of that scope, it sends no `get`; when an erase ahead of it evicted the credential it would have used, it does not leave with that credential.
 
-The client closes stdin to end the session, and the provider exits. npm need not wait for it to exit and sets no deadline, so a provider must not depend on work after stdin closes, such as revoking a credential it minted: that rests on an expiry the provider chose, since `erase` is sent only after a rejection. Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1 output limit; an oversized line is rejected whole, not partially processed. A provider that receives such a line, or any line that is not a request the schema allows (not UTF-8, not JSON, not an object), answers it with one `Err` and serves the next line: it never answers `Ok` to it, and it does not exit for it. A line of nothing but spaces, tabs and carriage returns is skipped.
+The client closes stdin to end the session, and the provider exits. npm need not wait for it to exit and sets no deadline, so a provider must not depend on work after stdin closes, such as revoking a credential it minted: that rests on an expiry the provider chose, since `erase` is sent only after a rejection. Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1 output limit; an oversized line is rejected whole, not partially processed. A provider that receives such a line, or any line that is not a request the schema allows (not UTF-8, not JSON, not an object), answers it with one `Err` (`other`: it is "anything else" in the table above) and serves the next line: it never answers `Ok` to it, and it does not exit for it. A line of nothing but spaces, tabs and carriage returns is skipped.
 
 **Timeouts** are part of the conformance policy ([`spec/policy-v1.json`](spec/policy-v1.json)):
 
@@ -318,7 +318,7 @@ The provider invalidates the credential that context identifies, including one b
 
 #### `login`: authenticate with a registry
 
-`npm login --registry https://gitlab.example.com/` delegates to the configured provider, which can run OAuth, SSO, device-code or MFA flows that `npm login` cannot:
+`npm login --registry https://gitlab.example.com/api/v4/packages/npm/` delegates to the configured provider, which can run OAuth, SSO, device-code or MFA flows that `npm login` cannot:
 
 ```json
 {"v":1,"kind":"login","registry":"https://gitlab.example.com/api/v4/packages/npm/","interactive":true}
@@ -342,7 +342,7 @@ The provider stores the result in its own secure storage and answers `{"Ok":{"ki
 
 #### `logout`: remove stored credentials
 
-`npm logout --registry https://gitlab.example.com/` sends:
+`npm logout --registry https://gitlab.example.com/api/v4/packages/npm/` sends:
 
 ```json
 {"v":1,"kind":"logout","registry":"https://gitlab.example.com/api/v4/packages/npm/"}
@@ -415,7 +415,7 @@ The client caches credentials in memory, keyed by the `granularity` the provider
 | `"scope"` | registry URL + scope | Different credentials for `@scope-a/*` and `@scope-b/*` on one registry. |
 | `"package"` | registry URL + scope + package | A credential per package. |
 
-The key also records the granularity level itself, and the operation when `operationIndependent` is `false`, so entries from different levels never collide (an unscoped package named `read` must not match a scope-level entry bound to operation `read`).
+The key also records the granularity level itself, and the operation when `operationIndependent` is `false` or the operation is not `read` (below), so entries from different levels never collide (an unscoped package named `read` must not match a scope-level entry bound to operation `read`).
 
 Lookups go from most to least specific: package, then scope, then registry, and at each level an entry bound to the requested operation before an operation-independent one. An entry with `cache: "expires"` stops matching 60 seconds before `expiresAt`, so a request never leaves with a credential about to lapse. If nothing matches, the client sends `get`.
 
@@ -632,7 +632,7 @@ No phase changes behavior for anyone who has not configured a provider. Phase 1 
 
 ## Unresolved Questions
 
-None. The last one, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test: a read-only token does ([stage-tiers-test.md](stage-tiers-test.md)).
+None. The last one, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test: a read-only token does, under the account's default publishing setting; the stricter setting that disallows tokens was not tried ([stage-tiers-test.md](stage-tiers-test.md)).
 
 ## Future possibilities
 

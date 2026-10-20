@@ -158,6 +158,10 @@ class HelloRegistriesTests(unittest.TestCase):
         self.assertEqual(client(registries=[]).request_or_decline(RequestContext(registry=REGISTRY)), "try-next-provider")
         self.assertIsInstance(client().request_or_decline(RequestContext(registry=REGISTRY)), dict)
 
+    def test_the_policy_says_the_fallback_warning_is_limited_to_listed_hosts(self):
+        policy = json.loads((Path(__file__).resolve().parents[1] / "spec" / "policy-v1.json").read_text(encoding="utf-8"))
+        self.assertIs(policy["fallback"]["globalChainWarningOnlyWhenAProviderListsTheHost"], True)
+
     def test_the_fallback_warning_is_limited_to_hosts_a_listing_provider_serves(self):
         warn = lambda host, listed: resolve_chain(["try-next-provider"], per_registry=False, stored_credential=True,
                                                  registry_host=host, listed_hosts=listed).warnings

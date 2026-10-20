@@ -90,6 +90,7 @@
   "fallback": {
     "noProviderConfigured": "stored-credential-or-anonymous",
     "globalChainAllUrlNotSupported": "stored-credential-or-anonymous-with-warning",
+    "globalChainWarningOnlyWhenAProviderListsTheHost": true,
     "registryChainAllUrlNotSupported": "fail",
     "registryChainIgnoresStoredCredential": "warn",
     "notFoundAtEnd": "fail",

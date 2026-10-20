@@ -63,7 +63,7 @@ The chain ends with the implicit `npm:token`. A user with a stored token for a c
 
 ## Install
 
-[install.jsonl](corporate-sso/install.jsonl). `npm install` in a developer's terminal (`interactive` is `true`) with the IdP session alive. The provider refreshes the IdP access token silently, then asks the gateway for a read token for the request's scope. Nothing is shown to the user. When the gateway refuses the cached IdP access token with 401, as after a revocation at the IdP, the provider renews it once with the refresh token and asks again, without a login ([install-revoked-access.jsonl](corporate-sso/install-revoked-access.jsonl)).
+[install.jsonl](corporate-sso/install.jsonl). `npm install` in a developer's terminal (`interactive` is `true`) with the IdP session alive. The provider refreshes the IdP access token silently, then asks the gateway for a read token for the request's scope. Nothing is shown to the user. When the gateway refuses the cached IdP access token with 401, as after a revocation at the IdP, the provider renews it once with the refresh token and asks again, without a login; npm sees only the `Ok` ([install-revoked-access.jsonl](corporate-sso/install-revoked-access.jsonl)).
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","operation":"read","command":"install","interactive":true}

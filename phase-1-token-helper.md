@@ -82,7 +82,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 |---|---|
 | **Where** | User or global config, per registry ([Trust](#trust)) |
 | **Value** | An absolute path, no arguments |
-| **When** | Lazily, once per registry per npm process |
+| **When** | Lazily, once per registry and helper per npm process |
 | **Output** | One line: a raw token is sent as `Bearer <token>`, `Scheme value` as is |
 | **Failure** | `ETOKENHELPER`; no fallback to another credential |
 | **Precedence** | Over a stored token; OIDC trusted publishing over both |
@@ -91,7 +91,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 
 Only in a user or global file that is the user's own. npm loads project config before the user and global files, and a project can name those files, so two things decide whether a file is the user's:
 
-- **Who chose it.** The setting that selected the file (`userconfig`, `globalconfig`, or the `prefix` the default global file derives from) must not come from a project `.npmrc`. Keys count as they are applied, after environment expansion: `user${UNSET?}config=` is `userconfig`.
+- **Who chose it.** The setting that selected the file (`userconfig`, `globalconfig`, or the `prefix` the default global file derives from) must not come from a project `.npmrc`, with one exception, below: the default files. Keys count as they are applied, after environment expansion: `user${UNSET?}config=` is `userconfig`.
 - **Where it lies.** A file inside a project is the repository's, whoever named it: `npm --prefix client` makes `client/etc/npmrc` the global config file, and a CI job's `--userconfig` may point into the checkout. A project is any directory from the current one up that has a `package.json` or `node_modules`, and a command-line prefix outside a global run. Containment is decided by the filesystem's identity of directories, not by how a path is spelled.
 - **The home directory is not a project.** An accidental `~/package.json` is common, so the default `~/.npmrc` and global file stay trusted even when a project names them. The accepted cost: where the home directory is the checkout itself (a PaaS with `HOME=/app`, a container whose working directory is `$HOME`), the repository's `.npmrc` is the user's file.
 - **Child processes keep the decision.** A child npm inherits the chosen paths as environment values, so npm tells it which files its parent did not trust.
@@ -107,8 +107,8 @@ An unscoped `tokenHelper=` in a user or global file is ignored with a warning th
 - **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe` (`/d /v:off /s /c`), as pnpm runs it through `cmd.exe`; a path containing `"` or `%` is refused there, since `cmd.exe` would reinterpret it. Everything else is executed directly, never through a shell. A `.ps1` script needs a `.cmd` wrapper; Windows does not start it directly.
 - **Working directory.** The helper's own directory, never npm's, which is usually the repository: on Windows a command started by bare name (the `node` in a cmd-shim) is looked up in the current directory first. On Windows a helper whose directory path is longer than 258 characters is refused with `ETOKENHELPER`.
 - **Environment.** npm's environment without `NODE_OPTIONS`, `npm_config_*`, `EDITOR`, `NODE_ENV`, `COLOR` and npm's own paths. npm exports a project's config to what it starts; `node-options` alone would let a repository's `.npmrc` load code into a node-based helper and read the credential it prints.
-- **When.** The first time a request to that registry is about to be sent, and at most once per registry per npm process, whatever the outcome. Never for `--offline`. It does run before a `--prefer-offline` request the HTTP cache could have answered; skipping it would need the cache consulted first, which the prototype does not do.
-- **stderr.** Shown as npm warnings, with the helper's own token removed wherever it appears (as it is, and as JSON, a shell's quotes or a URL write it) and anything that looks like a credential (`Bearer …`, `token=…`, `"password": "…"`) masked. Control characters (C0 and C1 except tab) are removed first, so an escape sequence a helper relays cannot rewrite the terminal. Hiding is for a credential a helper echoes by accident, in the forms an accident takes; a helper that encodes its credential on purpose (base64, split over lines, cut short) is not stopped, and could not be: it is the user's own program, it holds the credential, and what it writes to the user's terminal is the user's to read. As warnings these also reach npm's debug log, whose directory a project `.npmrc` can set with `logs-dir`, as for everything npm logs.
+- **When.** The first time a request to that registry is about to be sent, and at most once per registry and helper per npm process, whatever the outcome. Never for a request made offline; the packument fetch that precedes a write is made online whatever `--offline` says, and so runs the helper. It does run before a `--prefer-offline` request the HTTP cache could have answered; skipping it would need the cache consulted first, which the prototype does not do.
+- **stderr.** Shown as npm warnings, with the helper's own token removed wherever it appears (as it is, and as JSON, a shell's quotes or a URL write it) and anything that looks like a credential (`Bearer …`, `token=…`, `"password": "…"`) masked. The helper's own token is hidden in the text as it came, then control characters (C0 and C1 except tab) are removed line by line, then credential-like text is masked, so an escape sequence a helper relays cannot rewrite the terminal. Hiding is for a credential a helper echoes by accident, in the forms an accident takes; a helper that encodes its credential on purpose (base64, split over lines, cut short) is not stopped, and could not be: it is the user's own program, it holds the credential, and what it writes to the user's terminal is the user's to read. As warnings these also reach npm's debug log, whose directory a project `.npmrc` can set with `logs-dir`, as for everything npm logs.
 
 ### Output and failures
 
@@ -118,8 +118,8 @@ npm trims the output, including a leading byte order mark such as Windows PowerS
 |---|---|
 | Non-zero exit, or a spawn error | `ETOKENHELPER`; a missing `#!` interpreter is named |
 | Empty output | `ETOKENHELPER` |
-| Not a valid header value (a second line, a control or non-ASCII character) | `ETOKENHELPER`, without quoting the output: the HTTP layer's own error would print the credential |
-| More than 1 MiB of output | `ETOKENHELPER`; the helper is ended |
+| Not a valid header value (a second line, a control character other than tab, or a non-ASCII character) | `ETOKENHELPER`, without quoting the output: the HTTP layer's own error would print the credential |
+| More than 1 MiB on stdout, or more than 1 MiB on stderr (each is counted on its own, in bytes written) | `ETOKENHELPER`; the helper is ended |
 | Running longer than 60 seconds | `ETOKENHELPER`; the helper is ended |
 
 Every failure names the helper, and npm does not fall back to another credential for that registry. Ending a helper means SIGTERM, then SIGKILL after 2 seconds; on Windows its whole process tree goes, elsewhere only the helper process itself, so a helper script should `exec` the command that does the work (signalling a process group would mean a session of its own, without the terminal it may prompt on). A helper that exits while a background process it started still holds its stdout is read for 250 ms more and then taken at its word; the background process is not stopped.
@@ -127,8 +127,8 @@ Every failure names the helper, and npm does not fall back to another credential
 ### Which requests get the credential
 
 - **The same ones as a stored token for that registry key:** a request whose URL falls under the key, a full URL on the registry's host (npm's fallback for tarballs), and a redirect that keeps the host name. A redirect to another host name and a tarball on another host or port get nothing.
-- **Scheme and port are not compared,** as for a stored token, so a lockfile `resolved` URL over `http://` on the registry's host gets the header in clear. The prototype keeps npm's matching rather than making helpers differ from stored tokens.
-- **On disk:** npm's HTTP cache leaves `Authorization` out of what it stores, unless a response names it in `Vary`; make-fetch-happen then records it in the cache index, for a helper's credential as for a stored token. Keeping it off disk entirely would need a change to make-fetch-happen, which is not this prototype's to make ([what these documents do not claim](claims.md#what-these-documents-do-not-claim)).
+- **The scheme is not compared,** as for a stored token, so a lockfile `resolved` URL over `http://` on the registry's host gets the header in clear. The port is: a key is `//host:port/`, and a default port is no port, so `https://host:443/` is the key `//host/` and `https://host:8443/` is not. The prototype keeps npm's matching rather than making helpers differ from stored tokens.
+- **On disk:** npm's HTTP cache leaves `Authorization` out of what it stores, unless a response names it in `Vary`; make-fetch-happen then records it in the cache index, for a helper's credential as for a stored token (seen in the source of a historical version, not re-read in the current one: see Not verified in [claims.md](claims.md#not-verified)). Keeping it off disk entirely would need a change to make-fetch-happen, which is not this prototype's to make ([what these documents do not claim](claims.md#what-these-documents-do-not-claim)).
 - **In error bodies:** a registry that quotes the credential back has it printed and logged by npm, for any credential; npm's redaction recognises npm-issued token formats only.
 
 ### Precedence and commands

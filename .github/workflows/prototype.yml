@@ -9,6 +9,7 @@ on:
   push:
     paths:
       - 'poc/**'
+      - 'tests/**'
       - '.github/workflows/prototype.yml'
   workflow_dispatch:
 

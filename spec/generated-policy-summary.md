@@ -60,6 +60,7 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | `noProviderConfigured` | `stored-credential-or-anonymous` |
 | `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous-with-warning` |
+| `globalChainWarningOnlyWhenAProviderListsTheHost` | `True` |
 | `registryChainAllUrlNotSupported` | `fail` |
 | `registryChainIgnoresStoredCredential` | `warn` |
 | `notFoundAtEnd` | `fail` |

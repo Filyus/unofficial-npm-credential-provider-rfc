@@ -10,6 +10,8 @@ An independent proposal for letting npm get registry credentials from a user-con
 | [Phase 2: credential provider protocol](phase-2-credential-provider.md) | A versioned JSON protocol modelled on Cargo's: npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login`/`logout` delegation, the security model, prior art |
 | [Examples](examples/README.md) | How providers for real registries would answer, and where each is easy to get wrong |
 
+The old address, [rfc-credential-provider.md](rfc-credential-provider.md), says where each of its sections went.
+
 Phase 1 changes nothing for anyone who has not configured a helper, Phase 2 nothing for anyone who has not configured a provider, and both are configured only in the user's own user or global npm config.
 
 ## Evidence
@@ -53,7 +55,7 @@ cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz
 cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
 ```
 
-End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch on their `token-helper` branches (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
+End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype, as the `token-helper` branches or the patches of `poc/patches` applied (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
 
 ```sh
 node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
