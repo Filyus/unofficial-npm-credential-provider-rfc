@@ -13,7 +13,7 @@
 //                                 that exist; `tokens` is the queue of
 //                                 authorization tokens their calls get;
 //                                 `denied` makes GetAuthorizationToken a 403
-//   roles                         { roleArn: { tokens, mfaSerial, denied } }: roles that can
+//   roles                         { roleArn: { tokens, mfaSerial, mfaCode, denied } }: roles that can
 //                                 be assumed; the credentials AssumeRole
 //                                 issues are principals of that role, and
 //                                 their tokens come from the role's queue
@@ -136,8 +136,10 @@ const createFake = (state) => {
         return json(403, { Error: { Code: 'AccessDenied' } })
       }
       // the trust policy of a publish role requires an MFA device
-      if (role.mfaSerial && body.SerialNumber !== role.mfaSerial) {
-        return json(403, { Error: { Code: 'AccessDenied', Message: 'MultiFactorAuthentication failed' } })
+      // and its current code: a wrong or missing one is AccessDenied (the message is recalled,
+      // the saved AWS pages do not show an AssumeRole answer)
+      if (role.mfaSerial && (body.SerialNumber !== role.mfaSerial || body.TokenCode !== role.mfaCode)) {
+        return json(403, { Error: { Code: 'AccessDenied', Message: 'MultiFactorAuthentication failed with invalid MFA one time pass code(s).' } })
       }
       if (!(duration >= 900 && duration <= 43200) || !body.Policy) {
         return json(400, { Error: { Code: 'ValidationError' } })

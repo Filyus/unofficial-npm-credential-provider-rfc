@@ -47,7 +47,8 @@
         "mfaSerial": "arn:aws:iam::111122223333:mfa/example-user",
         "tokens": [
           "example-tag-token"
-        ]
+        ],
+        "mfaCode": "492817"
       }
     },
     "sso": {
@@ -104,5 +105,11 @@
         }
       ]
     }
-  }
+  },
+  "typed": [
+    {
+      "line": "492817",
+      "secret": true
+    }
+  ]
 }

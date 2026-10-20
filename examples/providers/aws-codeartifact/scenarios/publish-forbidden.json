@@ -47,7 +47,8 @@
         "mfaSerial": "arn:aws:iam::111122223333:mfa/example-user",
         "tokens": [
           "example-publish-token"
-        ]
+        ],
+        "mfaCode": "492817"
       }
     },
     "sso": {
@@ -108,5 +109,11 @@
   "clock": [
     1760000000,
     1760000020
+  ],
+  "typed": [
+    {
+      "line": "492817",
+      "secret": true
+    }
   ]
 }

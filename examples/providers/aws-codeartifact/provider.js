@@ -21,15 +21,16 @@
 // credential is never used or sent (in CI its presence is checked). Recalled, not read: the IAM Identity Center
 // device-authorization and token calls and the portal's role-credentials call.
 //
-// Differences from the page's provider, each because the run has no AWS CLI
-// and no way to type into a prompt: it speaks the Identity Center device flow
-// itself where the page runs `aws sso login --profile dev` (same sign-in, same
-// outcomes, and what it keeps is the CLI's own cache, which the store here
-// stands in for under `awsSsoCache`); and the person's presence for a write is
-// one yes or no, since `lib/context.js` has no prompt that reads text, so the
-// MFA code of the publish role's trust policy is not read: AssumeRole is
-// sent with the device's serial number only. A provider with a text prompt
-// would read the code there and send it as `TokenCode`.
+// Difference from the page's provider, because the run has no AWS CLI: it
+// speaks the Identity Center device flow itself where the page runs `aws sso
+// login --profile dev` (same sign-in, same outcomes, and what it keeps is the
+// CLI's own cache, which the store here stands in for under `awsSsoCache`).
+//
+// A write asks the person twice on the controlling terminal, inside one
+// 4 minute 30 second budget (npm's 5 minutes for an interactive `get`): yes or
+// no to the operation, then the MFA code of the publish role's trust policy,
+// sent to STS as `TokenCode` beside the device's `SerialNumber`. A code that is
+// not typed in time, or that STS refuses, is `other`; in CI nothing is asked.
 
 const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext } = require('../lib/context.js')
@@ -256,7 +257,7 @@ const start = (args) => {
   // The publish role, assumed with a session policy that names the package:
   // the action on its ARN (scope without the `@`, an empty namespace for an
   // unscoped package, case kept), and the two calls the mint itself needs.
-  const assumePublishRole = async (req, target, keyId, action, withMfa) => {
+  const assumePublishRole = async (req, target, keyId, action, mfaCode) => {
     const namespace = req.scope ? req.scope.slice(1) : ''
     const arn = `arn:aws:codeartifact:${target.region}:${target.owner}:package/${target.domain}/${target.repository}/npm/${namespace}/${req.package}`
     const policy = {
@@ -280,19 +281,22 @@ const start = (args) => {
         RoleSessionName: CLIENT_NAME,
         DurationSeconds: String(SESSION_SECONDS),
         Policy: JSON.stringify(policy),
-        ...(withMfa ? { SerialNumber: config.mfaSerial } : {}),
+        ...(mfaCode ? { SerialNumber: config.mfaSerial, TokenCode: mfaCode } : {}),
       },
     })
     const issued = res.json && res.json.Credentials
     if (res.status !== 200 || !issued) {
-      throw refuse(`AWS refused to assume the publish role for ${nameOf(req)} (HTTP ${res.status}).`)
+      const code = res.json && res.json.Error && res.json.Error.Code
+      throw refuse(
+        mfaCode && code === 'AccessDenied'
+          ? `AWS refused to assume the publish role for ${nameOf(req)} (HTTP ${res.status} ${code}): the MFA code was not accepted, or the role does not allow this identity.`
+          : `AWS refused to assume the publish role for ${nameOf(req)} (HTTP ${res.status}).`,
+      )
     }
     return issued.AccessKeyId
   }
 
   // --- handlers ----------------------------------------------------------------
-
-  const confirmWithin = (question, ms) => ctx.withDeadline((signal) => ctx.confirm(question, signal), ms)
 
   const get = async (req) => {
     const target = registries.includes(req.registry) ? parseTarget(req.registry) : null
@@ -364,17 +368,29 @@ const start = (args) => {
       return answer
     }
 
+    let mfaCode = null
     if (!inCi()) {
+      // one deadline for the presence prompt and the code
+      const deadline = ctx.clockMs() + WAIT_MS
       const question = `${write.verb} ${label} on ${target.repository} in domain ${target.domain}?`
-      const answered = await confirmWithin(question, WAIT_MS)
+      const answered = await ctx.confirmWithin(question, WAIT_MS)
       if (answered === null) {
         return err('other', `${write.subject} ${label} was not confirmed within 4 minutes 30 seconds.`)
       }
       if (!answered) {
         return err('other', `${write.subject} ${label} was not confirmed.`)
       }
+      const left = deadline - ctx.clockMs()
+      const typed = left > 0 ? await ctx.askWithin(`MFA code of ${config.mfaSerial} for the publish role:`, left) : null
+      if (typed === null) {
+        return err('other', `The MFA code for ${write.subject.toLowerCase()} ${label} was not entered within 4 minutes 30 seconds.`)
+      }
+      mfaCode = typed.trim()
+      if (!mfaCode) {
+        return err('other', `No MFA code was entered, so ${write.subject.toLowerCase()} ${label} was not authorized.`)
+      }
     }
-    const role = await assumePublishRole(req, target, keyId, write.action, !inCi())
+    const role = await assumePublishRole(req, target, keyId, write.action, mfaCode)
     // duration 0: the token ends with the role session
     const minted = await authorizationToken(target, role, 0)
     return ok('get', {

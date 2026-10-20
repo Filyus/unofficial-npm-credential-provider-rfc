@@ -162,8 +162,9 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
       }
       const askedFile = path.join(scratch, 'asked.log')
       const asked = fs.existsSync(askedFile) ? fs.readFileSync(askedFile, 'utf8').split('\n').filter(Boolean) : []
-      const scripted = (scenario.presence || []).length
-      assert.equal(asked.length, scripted, `${label}: the provider asked for presence ${asked.length} times, the scenario scripts ${scripted} answers`)
+      // presence questions and typed lines share the log: each scripted answer must have been asked for
+      const scripted = (scenario.presence || []).length + (scenario.typed || []).length
+      assert.equal(asked.length, scripted, `${label}: the provider asked the person ${asked.length} times, the scenario scripts ${scripted} answers`)
       if (scenario.expect?.store) {
         assertSubset(JSON.parse(fs.readFileSync(storeFile, 'utf8')), scenario.expect.store, `${label} store`)
       }
