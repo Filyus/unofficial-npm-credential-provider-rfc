@@ -113,7 +113,16 @@ A publish to a virtual repository that has no Default Deployment Repository fail
 
 - **Erase** drops the minted token and the provider's in-process copy. It keeps the login. Tokens under the revocable threshold (6 hours by default) cannot be revoked on the server, so the erase is local ([access tokens](https://docs.jfrog.com/administration/docs/access-tokens)).
 - **The retry** mints a fresh token with the stored login. A 401 does not prove the login is dead: the URL may be one a lockfile chose. If the mint itself is refused with 401, the login is dead, and the provider answers `other`, naming `npm login`. It starts no browser flow, in this request or any other that is not `login` ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)).
-- If the rejected credential is the stored identity token itself, handed out as it is, erase keeps it and the rejection is reported, naming `npm logout` and `npm login`.
+- If the rejected credential is the stored identity token itself, handed out as it is, erase keeps it and the rejection is reported, naming `npm logout` and `npm login` ([rejection-dead-identity-token.jsonl](jfrog-artifactory/rejection-dead-identity-token.jsonl)):
+
+```json
+{"v":1,"kind":"erase","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","granularity":"registry","authChallenges":["Basic realm=\"Artifactory Realm\""]}
+{"Ok":{"kind":"erase"}}
+{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["Basic realm=\"Artifactory Realm\""]}
+{"Err":{"kind":"other","message":"Artifactory rejected the stored identity token. Run npm logout and npm login for https://acme.jfrog.io/artifactory/api/npm/."}}
+```
+
+  The transcript's first request answers with the identity token as it is, `cache: "session"` and no expiry, since the provider knows none. An identity token goes dead when the user is deleted or disabled, or when the token is revoked in the UI ([identity tokens](https://docs.jfrog.com/user-management/docs/identity-tokens), read again on 2026-10-20). The status Artifactory then returns is not documented on that page, nor on the [security configuration](https://docs.jfrog.com/administration/docs/security-configuration) page, which gives 401 only for a request with no authentication: the 401 here is the page's recalled one. Erase must not delete the identity token (it is what `login` stored, and `logout` removes it), and no login flow starts on a request that is not a `login`; the person has to sign in again. `not-found` would be wrong: the provider holds a dead login, and `not-found` would let a listed `npm:token` answer in its place. The same answer follows when the mint with a stored refresh token or identity token is itself refused with 401, as described above; only the message differs.
 
 **403.** Without permission an authenticated user gets 403 ([security configuration](https://docs.jfrog.com/administration/docs/security-configuration)). npm sends no erase and retries once with `httpStatus: 403`. A provider with one identity has nothing wider to move to, and answering with the same token wastes the retry. It answers `other`, and npm shows the message and fails the request. It is [publish-403.jsonl](jfrog-artifactory/publish-403.jsonl):
 
@@ -145,11 +154,20 @@ Username and password are no substitute: SSO and SAML users have no usable passw
 {"Ok":{"kind":"logout"}}
 ```
 
+**When the web login is not completed.** [login-not-completed.jsonl](jfrog-artifactory/login-not-completed.jsonl). The poll answers 400 until the person has confirmed in the browser, and the CLI's own limit is 5 minutes ([login.go](https://github.com/jfrog/jfrog-client-go/blob/master/access/services/login.go), [weblogin.go](https://github.com/jfrog/jfrog-cli-core/blob/master/artifactory/utils/weblogin.go)). The pages read document no way to refuse the request on the JFrog side and no error for it, so a login that is not completed is a login that times out, and the provider's limit of 4.5 minutes comes before npm's 5. The provider stores nothing and answers `other`:
+
+```json
+{"v":1,"kind":"login","registry":"https://acme.jfrog.io/artifactory/api/npm/","interactive":true}
+{"Err":{"kind":"other","message":"Stopped waiting for the web login after 4 minutes 30 seconds. Run npm login again."}}
+```
+
+An instance older than 7.64.0 answers the request for a session with an error rather than a login page (unverified, from memory); the provider then answers `other` as well, telling the person to paste an identity token ([login-token.jsonl](jfrog-artifactory/login-token.jsonl)).
+
 `logout` ([logout.jsonl](jfrog-artifactory/logout.jsonl)) tries to revoke the stored long-lived token on the server, then deletes the keychain entries, and answers `Ok` even if the revocation failed, with a warning on stderr. Revocation works only on the instance that issued the token, and only for tokens above the revocable threshold. The tokens it hands to npm last an hour, below the revocable threshold, so they cannot be revoked and live until their `expiresAt`.
 
 ## CI
 
-[ci.jsonl](jfrog-artifactory/ci.jsonl), [ci-not-found.jsonl](jfrog-artifactory/ci-not-found.jsonl)
+[ci.jsonl](jfrog-artifactory/ci.jsonl), [ci-not-found.jsonl](jfrog-artifactory/ci-not-found.jsonl), [ci-publish.jsonl](jfrog-artifactory/ci-publish.jsonl)
 
 ```json
 {"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","command":"ci","interactive":false}
@@ -157,6 +175,15 @@ Username and password are no substitute: SSO and SAML users have no usable passw
 ```
 
 With `interactive: false` the provider opens no browser and starts no login ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). If an OIDC provider name is in its configuration and the CI's ID-token variables are in its environment (GitHub Actions sets `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`), it exchanges the ID token at `/access/api/v1/oidc/token` under `--url` and returns the result. The scope is whatever the identity mapping in Artifactory grants, which an admin can limit to a read-only group ([OIDC exchange](https://docs.jfrog.com/administration/reference/oidctokenexchange)). The exchange returns no refresh token. If it is rejected, the next `get` exchanges again. With neither an OIDC setup nor a stored token the provider answers `not-found`, as in [ci-not-found.jsonl](jfrog-artifactory/ci-not-found.jsonl), and npm fails or moves on along the chain, but nothing is opened.
+
+A publish in CI is the same exchange for a different job ([ci-publish.jsonl](jfrog-artifactory/ci-publish.jsonl), its own session). `interactive` is `false`, so no presence is asked; what the token may do is again the identity mapping's, so the publish job's OIDC provider name must map to an identity with Deploy on the target repository, and the install job's to a read-only one:
+
+```json
+{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.4.1","operation":"publish","command":"publish","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-oidc-publish-token"},"cache":"expires","expiresAt":1792231800,"operationIndependent":true,"granularity":"registry"}}
+```
+
+The exchange is documented as returning a token whose scope "is determined using identity mappings" ([OIDC exchange](https://docs.jfrog.com/administration/reference/oidctokenexchange), read again on 2026-10-20); that page does not say how a mapping grants Deploy, so that a mapped token publishes is **not verified** beyond the permissions model above. The answer is `operationIndependent: true` as in the install: the provider has one exchange per job and the mapping, not the provider, is where a publish identity differs from a read one. A provider with no OIDC setup and nothing stored answers `not-found` here, as for a read.
 
 This is JFrog's exchange, not npm's trusted publishing. The npm exchange goes to npm's own endpoint, which Artifactory does not implement (unverified), so it fails and leaves the chain in charge ([Trusted publishing](../phase-2-credential-provider.md#error-response)). The token may belong to a transient user, who cannot run `npm login`.
 

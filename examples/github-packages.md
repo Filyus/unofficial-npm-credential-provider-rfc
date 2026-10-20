@@ -121,9 +121,9 @@ Before it answers, the provider asks for user presence on the controlling termin
 | Operation | What GitHub does | Provider |
 |---|---|---|
 | `deprecate` | `npm deprecate` fails with a 400, `version.ID cannot be empty`, and GitHub said in February 2024 that it was not on the roadmap ([discussion 63811](https://github.com/orgs/community/discussions/63811)). | `operation-not-supported` |
-| `unpublish` | Documented deletion is the web UI or the REST `DELETE` on the package or version, which needs `read:packages` and `delete:packages`, admin on the package, and refuses a public package or version with more than 5,000 downloads ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package), [REST](https://docs.github.com/en/rest/packages/packages)). **Unverified:** whether `npm unpublish` itself works on `npm.pkg.github.com`. | The provider here answers `operation-not-supported`. The alternative is a `delete:packages` token behind a presence prompt. |
-| `dist-tag` | **Unverified:** the docs say nothing either way. | The provider would map it to the write token; it is not shown. |
-| `stage`, `stage-read`, `stage-reject` | No `/-/stage` endpoints (recalled, not documented). | `operation-not-supported` |
+| `unpublish` | Documented deletion is the web UI or the REST `DELETE` on the package or version, which needs `read:packages` and `delete:packages`, admin on the package, and refuses a public package or version with more than 5,000 downloads ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package), [REST](https://docs.github.com/en/rest/packages/packages)). **Unverified:** whether `npm unpublish` itself works on `npm.pkg.github.com`: the npm registry page (read again on 2026-10-20) does not mention it. | The provider here answers `operation-not-supported`. The alternative, shown below, is a `delete:packages` token behind a presence prompt. |
+| `dist-tag` | **Unverified:** the docs say nothing either way (the npm registry page and the REST packages page, read on 2026-10-20, do not mention dist-tags). An undated community thread ([github.community](https://github.community/t/packages-do-npm-tags-work/17657)) has GitHub Support suggesting `npm dist-tag add` and a user reporting that tags were not respected, then another that they worked; not verified. | The provider would map it to the write token; it is not shown, because nothing documented supports a transcript. |
+| `stage`, `stage-read`, `stage-reject` | No `/-/stage` endpoints (recalled, not documented). Read again on 2026-10-20: the npm registry page does not mention staging, and the staged-publishing announcements and docs found describe npmjs.com only ([npm docs](https://docs.npmjs.com/staged-publishing)). An absence, not a documented refusal; **not verified**. | `operation-not-supported` |
 | `owner`, `access`, `trust`, `account` | Not implemented; the RFC says so for `access` and `trust`, the rest is recalled. | `operation-not-supported` |
 
 [deprecate-unsupported.jsonl](github-packages/deprecate-unsupported.jsonl). The answer to `deprecate`:
@@ -132,6 +132,15 @@ Before it answers, the provider asks for user presence on the controlling termin
 {"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.0","operation":"deprecate","command":"deprecate","interactive":true}
 {"Err":{"kind":"operation-not-supported"}}
 ```
+
+[unpublish.jsonl](github-packages/unpublish.jsonl). The alternative for `unpublish`, for a user who wants the command to go through, is a provider that answers with a `delete:packages` token after a presence prompt naming the package and version:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.0","operation":"unpublish","command":"unpublish","interactive":true}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-delete-token"},"cache":"never","operationIndependent":false,"granularity":"package"}}
+```
+
+What GitHub documents is the deletion, not the npm command: the REST `DELETE` on a package or a package version needs a token with `read:packages` and `delete:packages`, and a public package or version with more than 5,000 downloads cannot be deleted this way ([REST: packages](https://docs.github.com/en/rest/packages/packages)); the web UI and the Actions `GITHUB_TOKEN` with `admin` on the package are other documented ways ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package), [npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)). That the requests `npm unpublish` makes are accepted with that token is **not verified**. `cache` is `never` and the binding is `package`, so the most dangerous scope is released for one command and never reused; the cost, if the registry answers 404 or 405, is a prompt and a token released for nothing (see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong), item 9). The transcript is the provider's side only.
 
 A deleted version can be published again: GitHub restores a deleted version within 30 days only if its name and version were not reused ([deleting and restoring](https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package)), so reuse is possible, unlike on npmjs.org. A provider's audit log keyed on name and version can see the same version twice.
 
@@ -196,6 +205,18 @@ A provider that delegates to `gh auth refresh -h HOST -s read:packages,write:pac
 ```json
 {"v":1,"kind":"logout","registry":"https://npm.pkg.github.com/"}
 {"Ok":{"kind":"logout"}}
+```
+
+**When the sign-in does not complete.** A device flow can end three ways without a token. The person can cancel on the page: GitHub then answers the provider's poll with `access_denied` and the code cannot be used again, so the provider asks for nothing more and answers `other` ([login-refused.jsonl](github-packages/login-refused.jsonl)). The provider can stop waiting: the code is valid for 15 minutes, but npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)), so the provider's own limit has to be shorter, and `expired_token` is never seen inside one npm `login` ([login-unapproved.jsonl](github-packages/login-unapproved.jsonl)). And the app may not have the device flow enabled (`device_flow_disabled`), which is the same answer with another message; not shown. All three are documented in [authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps). A pasted token that fails the `GET /user` check is also `other`. Nothing is stored in any of these, and the request fails, naming the provider.
+
+```json
+{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}
+{"Err":{"kind":"other","message":"GitHub reported that the sign-in was cancelled in the browser (access_denied). Run npm login again to start a new one."}}
+```
+
+```json
+{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}
+{"Err":{"kind":"other","message":"Stopped waiting for the code to be entered after 4 minutes 30 seconds. Run npm login again."}}
 ```
 
 Logout deletes the keychain entries. As a best effort it also revokes a token it was given with `POST https://api.github.com/credentials/revoke`, which takes `ghp_`, `gho_` and `github_pat_` tokens, is unauthenticated (an authenticated call gets a 403), allows 60 requests an hour and notifies the token's owner ([REST](https://docs.github.com/en/rest/credentials/revoke)). Whether GHES has the endpoint is **unverified**. It never revokes `gh`'s token or `GITHUB_TOKEN`. If revocation fails, logout still answers `Ok` and warns on stderr.

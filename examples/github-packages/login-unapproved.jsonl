@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Stopped waiting for the code to be entered after 4 minutes 30 seconds. Run npm login again."}}}
+{"from":"client","event":"close"}

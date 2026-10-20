@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.4.1","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-oidc-publish-token"},"cache":"expires","expiresAt":1792231800,"operationIndependent":true,"granularity":"registry"}}}
+{"from":"client","event":"close"}

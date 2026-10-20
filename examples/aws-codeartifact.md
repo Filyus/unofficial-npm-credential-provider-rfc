@@ -101,6 +101,17 @@ for `unpublish`, `owner`, `access`, `account`, `trust`, `stage`, `stage-read` an
 
 The erase carries no `authChallenges`, since CodeArtifact's header is not documented. The provider drops its cached domain token, never `~/.aws/sso/cache`, and cannot revoke on the server, since tokens have no revocation. The retry mints again. If the AWS session itself has expired and `interactive` is `false`, the retry answers `other` ("run aws sso login"); with `interactive: true` it starts an SSO login only after a check of its own (`sts:GetCallerIdentity` fails), not because of the 401.
 
+**A 401 that no new token can answer.** [rejection-sso-lapsed.jsonl](aws-codeartifact/rejection-sso-lapsed.jsonl). The IAM Identity Center session behind the profile has lapsed in the middle of the day. AWS documents that the CLI renews expired AWS credentials by itself only while the Identity Center session is alive, and that once that session expires the user must sign in again ([CLI SSO](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)). The cached domain token has also run out, so npm erases it and retries; the provider's check of its own (`sts:GetCallerIdentity`) fails, and `GetAuthorizationToken` cannot be called without credentials:
+
+```json
+{"v":1,"kind":"erase","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"read","granularity":"registry"}
+{"Ok":{"kind":"erase"}}
+{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}
+{"Err":{"kind":"other","message":"The AWS IAM Identity Center session for profile dev has expired, so no new CodeArtifact token can be issued. Run aws sso login --profile dev, or npm login."}}
+```
+
+The erase succeeds and drops only the provider's domain token. The retry ends in an error because `interactive` is `false`, which forbids the browser flow that would renew the session; the request fails, naming the provider and the cure. It is `other`, not `not-found`, since a login exists and has lapsed: `not-found` would let the stale `_authToken` that `aws codeartifact login` left in `~/.npmrc` answer ([non-interactive](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). The lifetime of an Identity Center session is set by the administrator and is not stated in the CLI pages, so the transcript gives no time.
+
 A 403 is different. An authenticated identity that lacks the permission presumably gets 403 (unverified in AWS's documents), and the token is an identity snapshot, so a re-minted token from the same identity is refused the same way. npm sends no erase and one retry with `httpStatus: 403`. A provider with only one identity answers it `other` and does not call `GetAuthorizationToken` again ([publish-forbidden.jsonl](aws-codeartifact/publish-forbidden.jsonl)):
 
 ```json
@@ -121,6 +132,17 @@ Only a provider configured with a second, more privileged identity for that oper
 ```
 
 `login` runs `aws sso login --profile dev` with the child's output on the controlling terminal, never on protocol stdout (it prints the authorization URL and code). For a profile with static, instance or environment credentials it answers `operation-not-supported`. It refuses a supplied `token` with `other`: a CodeArtifact token lasts at most 12 hours, and storing it recreates the standing secret. It never does what `aws codeartifact login --tool npm` does, which writes `registry=` and `_authToken` into `~/.npmrc` ([login.py](https://raw.githubusercontent.com/aws/aws-cli/v2/awscli/customizations/codeartifact/login.py)), which the RFC forbids a provider to do.
+
+[login-not-completed.jsonl](aws-codeartifact/login-not-completed.jsonl). The user starts `npm login` and does not finish the sign-in in the browser. The provider ran `aws sso login --profile dev`, whose browser or device-code step AWS describes without saying how long the CLI waits or how it fails when the step is abandoned ([CLI SSO](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html); not verified), so the provider takes the child's non-zero exit, or its own limit on the wait, as the outcome and answers `other`:
+
+```json
+{"v":1,"kind":"login","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","interactive":true}
+{"Err":{"kind":"other","message":"aws sso login --profile dev was not completed, so no AWS session exists. Nothing was stored. Run npm login again and finish the sign-in in the browser."}}
+```
+
+Nothing is stored (the CLI keeps its own cache, which the provider neither reads nor clears), so the next `get` finds no session. The answer is not `not-found`, which would let a listed `npm:token` run `npm login` and save a plaintext token ([login](../phase-2-credential-provider.md#login-authenticate-with-a-registry)).
+
+**No transcript for a repository the principal cannot read.** `not-found` means the provider holds nothing for the registry; this provider holds an AWS identity, and the token it mints is valid for the whole domain, so it answers `Ok` for any repository of it. Whether the principal may read a repository is decided when the request is made, against the identity's policies and the repository policy ([tokens](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html), [repository policies](https://docs.aws.amazon.com/codeartifact/latest/ug/repo-policies.html)), and AWS lists a refusal as a 403 error (`AccessDeniedException`, `NotAuthorized`) in its [common errors](https://docs.aws.amazon.com/codeartifact/latest/APIReference/CommonErrors.html), which does not hide the repository. The refusal reaches the provider as a 403 retry, shown above ([publish-forbidden.jsonl](aws-codeartifact/publish-forbidden.jsonl)). The API error list is for the service API; that the npm endpoint answers 403 and not 404 for a repository that exists is recalled, not verified.
 
 `logout` drops the provider's own cached tokens and answers `Ok`, warning on stderr that issued tokens stay valid until they expire. It never calls `aws sso logout`: that signs the user out of every SSO profile. A stale `_authToken` that an earlier `aws codeartifact login` left in `~/.npmrc` under the same key makes npm warn on every command, and the user removes it.
 

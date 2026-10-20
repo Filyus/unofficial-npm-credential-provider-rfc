@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"aws sso login --profile dev was not completed, so no AWS session exists. Nothing was stored. Run npm login again and finish the sign-in in the browser."}}}
+{"from":"client","event":"close"}

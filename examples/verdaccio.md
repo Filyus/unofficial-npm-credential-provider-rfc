@@ -2,7 +2,7 @@
 
 A hypothetical `npm-credential-provider-verdaccio` for [Verdaccio](https://verdaccio.org/), the self-hosted npm registry. Verdaccio has no vendor hostname, no short-lived tokens and only two token tiers, so the provider cannot work like the [GitLab](gitlab.md) one: it mints its tokens once, at login, and decides on each request which of the two to release. This example shows a provider for a registry whose tokens are long-lived, how user presence gates the write tier, and where a rejection says little. Verdaccio facts come from its source on `master` (the 9.x line, where staging and 2FA live) and its docs, linked below; the provider itself, its name and its behaviour are not real. The hostname `npm.example.test` and every token in the transcripts are fake.
 
-Transcripts: [install](verdaccio/install.jsonl), [publish](verdaccio/publish.jsonl), [stage-approve](verdaccio/stage-approve.jsonl), [rejection](verdaccio/rejection.jsonl), [escalation](verdaccio/escalation.jsonl), [login](verdaccio/login.jsonl), [logout](verdaccio/logout.jsonl), [ci](verdaccio/ci.jsonl). The repository's tests check every one against the protocol model.
+Transcripts: [install](verdaccio/install.jsonl), [publish](verdaccio/publish.jsonl), [stage-approve](verdaccio/stage-approve.jsonl), [rejection](verdaccio/rejection.jsonl), [escalation](verdaccio/escalation.jsonl), [login](verdaccio/login.jsonl), [logout](verdaccio/logout.jsonl), [ci](verdaccio/ci.jsonl), and below, the refused and provisioned cases. The repository's tests check every one against the protocol model.
 
 ## Registry and credentials
 
@@ -86,6 +86,15 @@ The provider releases the read-only token it minted at login. Both Verdaccio tie
 
 The provider shows a presence prompt on the controlling terminal that names the package, the version and the registry, and releases the full generated token. The answer is bound to the package and the operation, as npm would bind it anyway ([Caching](../phase-2-credential-provider.md#5-caching)); the packument fetch that precedes the upload carries the same operation and is served from that entry. Under the `auth-and-writes` 2FA mode the registry then answers 401 with `WWW-Authenticate: otp`; npm treats that as its one-time-password prompt, sends no erase and asks the provider nothing ([require-otp.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/api/src/require-otp.ts), [erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)).
 
+[unsupported-operation.jsonl](verdaccio/unsupported-operation.jsonl) is `npm access list packages`, which asks for `access`. Verdaccio's API router registers whoami, profile, search, user, dist-tags, publish, ping, token, package routes, and `/-/stage` and web login only under their flags, and no access, team, org, owner or trust route ([api/index.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/api/src/index.ts), read 2026-10; the file alone cannot rule out a route defined inside a module, so this rests on the router, not on a statement by Verdaccio). The provider therefore answers before any presence prompt and without releasing a credential:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"access","command":"access","interactive":true}
+{"Err":{"kind":"operation-not-supported"}}
+```
+
+A `trust` request gets the same answer. A request that reached the registry would fall through to the package routes or a 404, after a write credential had been released for nothing. (`owner` is different: `owner add` is a packument write and has a mapping above.)
+
 Staging is the other write path. [stage-approve.jsonl](verdaccio/stage-approve.jsonl) shows `npm stage approve <id>`: the lookup of the record asks for `stage-read` with no package and gets the read-only token, with no prompt, since every `/-/stage` read is a `GET` that token passes. npm then asks for `publish` with the scope, package and version from the record. `npm stage publish` asks for `stage`, which needs a full token of a user in a `stage` group and no OTP ([stage.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/api/src/stage.ts)). Approve and reject need an OTP under `auth-and-writes`.
 
 ## Rejection
@@ -128,6 +137,15 @@ The provider started with the read-only token, which lists tokens and reads the 
 {"v":1,"kind":"login","registry":"https://npm.example.test/verdaccio/","interactive":true}
 {"Ok":{"kind":"login"}}
 ```
+
+[login-wrong-password.jsonl](verdaccio/login-wrong-password.jsonl). The user types a wrong password:
+
+```json
+{"v":1,"kind":"login","registry":"https://npm.example.test/verdaccio/","interactive":true}
+{"Err":{"kind":"other","message":"Verdaccio refused the login at https://npm.example.test/verdaccio/: bad username or password. Nothing was stored. Run npm login again."}}
+```
+
+With the default htpasswd plugin an existing user with a wrong password gets 401 from the add-user path, which is the one `npm login` takes after its first attempt ([htpasswd utils.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/plugins/htpasswd/src/utils.ts), [user.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/api/src/user.ts); the exact message text is defined elsewhere and was not read). Other auth plugins answer as they choose, so the provider reads the status, not the text. The provider stops at the first refusal, mints no token, stores nothing and does not prompt again in the same request; a second attempt is a new `npm login`. The answer is `other`, not `not-found`, since a `not-found` would let a listed `npm:token` run `npm login` and save a plaintext token ([login](../phase-2-credential-provider.md#login-authenticate-with-a-registry)). The message does not repeat the username or any part of the password.
 
 The password path, all on the controlling terminal:
 
@@ -172,7 +190,16 @@ No one is present, so by default the provider holds or is given only the read-on
 {"Err":{"kind":"other","message":"publish to https://npm.example.test/verdaccio/ needs a full Verdaccio token and a user to approve it; none is available in CI"}}
 ```
 
-The operator can provision more on purpose, and the transcript shows the best case: a separate Verdaccio account that is only in the `stage` groups of the `packages` rules, whose full token the CI machine image gives the provider. `npm stage publish` needs no OTP, so staging works in CI, and a human then approves the version. Publishing directly from CI is not possible for a user under `auth-and-writes` 2FA: Verdaccio has no bypass-2FA tokens and ignores `bypass_2fa` ([two-factor authentication](https://verdaccio.org/docs/two-factor-authentication)).
+The operator can provision more on purpose. [ci-publish.jsonl](verdaccio/ci-publish.jsonl) is `npm publish` from a pipeline whose machine image holds a full generated token of a separate CI account that is in the `publish` group of the `packages` rule for `@acme/*`. The provider's own configuration says so (an argument naming the CI account, for example), and that is the operator's decision, never the project's:
+
+```json
+{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","version":"2.4.1","operation":"publish","command":"publish","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-full-token"},"cache":"session","granularity":"package","operationIndependent":false}}
+```
+
+The answer is bound to the package and the operation, as any non-read answer is, and `cache` is `session` because the token is the opaque one that never expires. Without that provisioning the same request is [ci-publish-refused.jsonl](verdaccio/ci-publish-refused.jsonl) above. The token is a standing secret on the CI machine and, in AES mode, the account's password in reversible form ([credentials](#registry-and-credentials)); an account restricted to `publish` on one scope, and a `cidr_whitelist` on the generated token, narrow it, and nothing makes it short-lived. It only works where the account is not under `auth-and-writes` 2FA, below.
+
+The staging case is the best one: a separate Verdaccio account that is only in the `stage` groups of the `packages` rules, whose full token the CI machine image gives the provider. `npm stage publish` needs no OTP, so staging works in CI, and a human then approves the version. Publishing directly from CI is not possible for a user under `auth-and-writes` 2FA: Verdaccio has no bypass-2FA tokens and ignores `bypass_2fa` ([two-factor authentication](https://verdaccio.org/docs/two-factor-authentication)).
 
 ## Where it is easy to go wrong
 
@@ -183,6 +210,7 @@ The operator can provision more on purpose, and the transcript shows the best ca
 - **CIDR tokens and `server.trustProxy`.** The address Verdaccio checks is `req.ip`, which is the real client only if `trustProxy` is set. Behind a proxy without it, a CIDR-bound token always passes or always fails; with it set too broadly, a client can spoof its address. CI runners with changing addresses turn a CIDR-bound read-only token into intermittent 403s ([token-auth.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/middleware/src/middlewares/token-auth.ts)).
 - **Returning `basic`.** Since the htpasswd store is a username and password, `{"type":"basic",...}` is tempting. The bundled middleware accepts only `Bearer` and answers 401 to every request, which npm erases and retries ([utils.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/auth/src/utils.ts)).
 - **Mapping `stage-reject` to `publish` or to the read-only token.** Reject is a `DELETE`, so it needs a full token, and the account that staged a version may reject it without being a publisher ([stage.ts](https://github.com/verdaccio/verdaccio/blob/master/packages/api/src/stage.ts)). A publish policy that refuses a stage-only user is the wrong policy for it.
+- **Expecting a hidden package.** A package the user's groups may not read does not answer 404. For a named user the default `access` check is 403 ("user ... is not allowed to access package ...") and for an anonymous request 401 ("authorization required ...") ([auth utils](https://github.com/verdaccio/verdaccio/blob/master/packages/auth/src/utils.ts), read 2026-10; [packages](https://verdaccio.org/docs/packages) shows `E403` for a restricted package and does not document the 401 or a 404). Also, `not-found` is the provider's answer about what it holds, and this provider holds the user's two tokens for the whole registry, so it never answers it for a package the user may not see; the refusal arrives as a 403 retry, handled under "A 403" above. That is why this page has no `not-found` transcript. An auth plugin may return a different status.
 - **Widening `stage-read` on a 404.** `GET /-/stage/<id>` answers 404 for a record that does not exist, one the caller may not see, and any id when `flags.stage` is off. Visibility is the user's, so a full token sees no more than the read-only one; widening never helps and the RFC forbids it ([Staged versions](../phase-2-credential-provider.md#4-operations)).
 - **Dropping the read token on a `stage-read` erase.** The same read-only token serves `read` and `stage-read`. An erase that names `stage-read` ends that binding, and the provider's own state must keep the token it still serves for `read`.
 - **Thinking `owner` is below `publish`.** `owner add` is gated by `unpublish`. Ownership is cosmetic and the rules decide.

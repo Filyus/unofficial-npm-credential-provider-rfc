@@ -11,15 +11,15 @@ A cell is `n/a` or `task N` only because [coverage.json](coverage.json) says so,
 | logout | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
 | publish | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
 | ci-read | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| ci-publish | n/a | ● | ● | ○ | ○ | task 509 | task 510 | ○ | task 512 |
+| ci-publish | n/a | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
 | 401-erase | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| 401-dead | ● | task 505 | task 506 | ○ | task 508 | task 509 | ○ | task 511 | ○ |
+| 401-dead | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
 | 403-retry | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| stage | ● | task 505 | n/a | n/a | n/a | n/a | n/a | n/a | ○ |
-| unsupported | n/a | task 505 | task 506 | ○ | task 508 | ○ | ○ | ○ | task 512 |
-| other-write | ● | task 505 | task 506 | task 507 | task 508 | ○ | ○ | ○ | ○ |
-| login-refused | ● | ● | ● | task 507 | task 508 | task 509 | task 510 | task 511 | task 512 |
-| not-found | ● | ● | n/a | ○ | task 508 | ○ | task 510 | task 511 | task 512 |
+| stage | ● | n/a | n/a | n/a | n/a | n/a | n/a | n/a | ○ |
+| unsupported | n/a | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
+| other-write | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
+| login-refused | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
+| not-found | ● | ● | n/a | ○ | n/a | ○ | n/a | n/a | n/a |
 
 ## Situations
 
@@ -42,37 +42,15 @@ A cell is `n/a` or `task N` only because [coverage.json](coverage.json) says so,
 
 - npmjs, ci-publish: n/a: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token; trusted publishing is held by npm, not by a provider
 - npmjs, unsupported: n/a: every operation of the protocol has an endpoint on this registry, so there is nothing for the provider to refuse
-- GitLab, 401-dead: task 505: a revoked refresh token
-- GitLab, stage: task 505: GitLab's documentation is not read for staging yet
-- GitLab, unsupported: task 505: which operations GitLab has no endpoint for
-- GitLab, other-write: task 505: dist-tag, deprecate, unpublish
-- SSO gateway, 401-dead: task 506: the IdP session is gone when the retry comes
+- GitLab, stage: n/a: GitLab's npm registry page documents no staging or approval step (an absence in the docs, not a documented refusal); a publish is live at once (the page, Staging)
 - SSO gateway, stage: n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)
-- SSO gateway, unsupported: task 506: the page says the answer is operation-not-supported, no transcript shows it
-- SSO gateway, other-write: task 506: dist-tag, deprecate, unpublish follow the publish policy
 - SSO gateway, not-found: n/a: the gateway answers `other`, never `not-found`, so that a refusal does not reveal that a package exists (the page)
-- GitHub, stage: n/a: no staging endpoints (the page, recalled and not documented; task 507 rechecks it)
-- GitHub, other-write: task 507: unpublish is documented, dist-tag is unverified
-- GitHub, login-refused: task 507: the device flow expires or is refused
-- Google AR, 401-dead: task 508: the gcloud login lapsed and the provider cannot renew it
-- Google AR, stage: n/a: the pages read for the example describe no staging model (an absence, not a documented refusal; task 508 keeps that wording)
-- Google AR, unsupported: task 508: operations the pages do not describe
-- Google AR, other-write: task 508: dist-tag and deprecate
-- Google AR, login-refused: task 508: the gcloud sign-in is refused
-- Google AR, not-found: task 508: a repository the identity cannot see
-- JFrog, ci-publish: task 509: a publish with interactive false
-- JFrog, 401-dead: task 509: the stored identity token itself is rejected (the page, Rejection)
+- GitHub, stage: n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)
+- Google AR, stage: n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)
+- Google AR, not-found: n/a: the docs read do not say the registry hides a repository from an identity that cannot see it; the provider's not-found means nothing stored, and hello registries stops npm asking for unconfigured ones (the page, Rejection)
 - JFrog, stage: n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer
-- JFrog, login-refused: task 509: the web login is not completed
-- Azure, ci-publish: task 510: a pipeline job token or workload identity that may write
-- Azure, stage: n/a: no staged-publishing endpoints (the page, recalled; task 510 rechecks it)
-- Azure, login-refused: task 510: the Entra sign-in is not completed
-- Azure, not-found: task 510: a feed the identity cannot see
-- AWS, 401-dead: task 511: the SSO session has lapsed and the provider cannot issue a token
+- Azure, stage: n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)
+- Azure, not-found: n/a: the provider holds an organization-wide credential and feed visibility is decided by feed roles at request time; no page says an unreadable feed is hidden, a refusal reaches the provider as a 401 or 403 retry (the page, Rejection)
 - AWS, stage: n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations
-- AWS, login-refused: task 511: `aws sso login` is not completed
-- AWS, not-found: task 511: a repository the principal cannot read
-- Verdaccio, ci-publish: task 512: a token the operator provisioned for CI (the page, operations table)
-- Verdaccio, unsupported: task 512: access and trust have no endpoints here
-- Verdaccio, login-refused: task 512: a wrong password
-- Verdaccio, not-found: task 512: a package the user's group may not see
+- AWS, not-found: n/a: AWS documents a refusal as 403 (AccessDeniedException, NotAuthorized), not as a hidden repository (the page, Rejection)
+- Verdaccio, not-found: n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)

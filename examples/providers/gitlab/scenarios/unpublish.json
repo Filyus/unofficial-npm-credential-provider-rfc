@@ -1,0 +1,42 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://gitlab.example.com": {
+      "oauth": {
+        "refreshToken": "refresh-1",
+        "accessToken": "access-1",
+        "accessExpiresAt": 1792202400
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "refreshToken": "refresh-1",
+      "accessToken": "access-1",
+      "next": []
+    },
+    "tokens": [],
+    "nextId": 1
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": {
+        "oauth": {
+          "refreshToken": "refresh-1"
+        }
+      }
+    },
+    "state": {
+      "deployTokens": []
+    }
+  }
+}

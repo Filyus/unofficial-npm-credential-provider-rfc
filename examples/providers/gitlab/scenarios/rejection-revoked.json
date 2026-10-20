@@ -1,0 +1,64 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "clock": [
+    1792195200,
+    1792198800,
+    1792202400
+  ],
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://gitlab.example.com": {
+      "oauth": {
+        "refreshToken": "refresh-1",
+        "accessToken": "access-1",
+        "accessExpiresAt": 1792202400
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "refreshToken": "refresh-revoked",
+      "accessToken": "access-1",
+      "next": [
+        {
+          "accessToken": "access-2",
+          "refreshToken": "refresh-2"
+        }
+      ]
+    },
+    "tokens": [
+      "example-read-deploy-token",
+      "example-read-deploy-token-new"
+    ],
+    "nextId": 1
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": {
+        "oauth": {
+          "refreshToken": "refresh-1"
+        },
+        "minted": {
+          "https://gitlab.example.com/api/v4/projects/42/packages/npm/|read|@acme": null
+        }
+      }
+    },
+    "state": {
+      "deployTokens": [],
+      "deleted": [
+        1
+      ],
+      "oauth": {
+        "refreshToken": "refresh-revoked"
+      }
+    }
+  }
+}

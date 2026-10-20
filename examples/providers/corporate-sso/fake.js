@@ -9,7 +9,7 @@
 //                slowDown (the first poll is answered slow_down; after it a poll
 //                sooner than interval + 5 s is answered slow_down again, and a
 //                second such poll expired_token, as RFC 8628 allows),
-//                userCode, verificationUri, sessions { refreshToken: { lapsed } },
+//                userCode, verificationUri, sessions { refreshToken: { lapsed, lapseAfter } },
 //                clients { id: { secret, roles } }, groups
 // state.gateway: tokens { "read:@corp": [{ token, expires_at, groups }] }, a queue
 //                per key that each mint takes from
@@ -44,10 +44,13 @@ const createFake = (state) => {
   const tokenEndpoint = ({ body, clock }) => {
     if (body.grant_type === 'refresh_token') {
       const session = idp.sessions[body.refresh_token]
-      if (!session || session.lapsed) {
+      // `lapseAfter: n`: the IdP ends the session after n refreshes, as when
+      // an administrator disables the user between two requests
+      if (!session || session.lapsed || (session.lapseAfter !== undefined && (session.refreshes ?? 0) >= session.lapseAfter)) {
         return json(400, { error: 'invalid_grant' })
       }
       idp.refreshes += 1
+      session.refreshes = (session.refreshes ?? 0) + 1
       return json(200, { access_token: issueAccess(), expires_in: 600 })
     }
     if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
@@ -88,8 +91,11 @@ const createFake = (state) => {
     if (!idp.accessTokens.includes(token)) {
       return json(401, { error: 'invalid_token' })
     }
+    // a read is minted per scope, a write per package (and version, if sent)
     const subject =
-      body.operation === 'publish' ? `${body.scope}/${body.package}@${body.version}` : body.scope || 'unscoped'
+      body.operation === 'read'
+        ? body.scope || 'unscoped'
+        : `${body.scope}/${body.package}${body.version ? `@${body.version}` : ''}`
     const key = `${body.operation}:${subject}`
     const entry = (gateway.tokens[key] || []).shift()
     if (!entry) {

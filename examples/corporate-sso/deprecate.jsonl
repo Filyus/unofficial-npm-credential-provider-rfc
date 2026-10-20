@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","version":"2.3.0","operation":"deprecate","command":"deprecate","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-deprecate-token-ui-kit"},"cache":"expires","expiresAt":1792196400,"operationIndependent":false,"granularity":"package"}}}
+{"from":"client","event":"close"}

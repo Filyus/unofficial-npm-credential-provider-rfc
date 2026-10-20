@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://pkgs.dev.azure.com/contoso/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The Microsoft Entra sign-in for the contoso organization was not completed within 90 seconds. Nothing was stored. Run npm login again."}}}
+{"from":"client","event":"close"}

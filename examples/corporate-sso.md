@@ -84,7 +84,7 @@ A machine where nobody ever logged in and no service identity exists has nothing
 
 ## Publish
 
-[publish.jsonl](corporate-sso/publish.jsonl). The gateway supports `npm publish` and the writes that follow the same policy (`dist-tag`, `deprecate`, `unpublish`); it has no staging, no tokens, no teams and no trust endpoints, so a provider answers those operations `operation-not-supported`. A workspace publish of two packages from a terminal:
+[publish.jsonl](corporate-sso/publish.jsonl). The gateway supports `npm publish` and the writes that follow the same policy (`dist-tag`, `deprecate`, `unpublish`); it has no staging, no tokens, no teams and no trust endpoints, so a provider answers `stage` and the operations of those surfaces `operation-not-supported` ([unsupported-trust.jsonl](corporate-sso/unsupported-trust.jsonl) shows an `npm trust` refused with the bare `Err` and no credential, the provider logged in and the request interactive; `stage`, `access`, `owner` and `account` get the same answer). A workspace publish of two packages from a terminal:
 
 ```json
 {"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","version":"2.4.1","operation":"publish","command":"publish","interactive":true}
@@ -103,6 +103,8 @@ The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so i
 {"Err":{"kind":"other","message":"Publishing @corp/ui-kit@2.4.1 needs a device-code confirmation, and no terminal is available. Run npm publish from a terminal, or from the release runner."}}
 ```
 
+**The other writes.** `dist-tag`, `deprecate` and `unpublish` follow the same policy, one command and so one transcript each: [dist-tag.jsonl](corporate-sso/dist-tag.jsonl) (npm sends no version), [deprecate.jsonl](corporate-sso/deprecate.jsonl) and [unpublish.jsonl](corporate-sso/unpublish.jsonl) (both name one). The IdP step-up is current in these, so there is no device flow; the provider asks `[y/N]` naming the package and the version where there is one, then answers with a 5-minute token bound to the package: `granularity: "package"`, `operationIndependent: false`. Each operation gets its own token, so the `dist-tag` token is not what a later `unpublish` finds. In CI the same operations need the `npm-publisher` role, and without a terminal or a service identity they are `other`, as for `publish`.
+
 `npm publish --dry-run` sends `read`, so it asks for none of this ([Operations](../phase-2-credential-provider.md#4-operations)).
 
 ## Rejection
@@ -118,6 +120,8 @@ The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so i
 ```
 
 Erase drops the gateway token and any copy the provider kept. It does not touch the refresh token in the keychain, which `login` stored. The retry mints a new token from the same session. If the IdP answers the refresh with `invalid_grant`, the provider's own check has confirmed that its login is dead; only then, and only if `interactive` is `true`, does it start a device flow. With `interactive` false it answers `other`. A 401 alone never starts a login.
+
+**A session that is gone ([rejection-session-gone.jsonl](corporate-sso/rejection-session-gone.jsonl)).** The same 401 and erase, but the IdP ended the session between the two requests (the user was disabled), and `interactive` is `false`. The retry has nothing to replace the token with: the erase dropped the cached access token, the refresh gets `invalid_grant`, and the provider answers `other` with the expired-session message, not the token just refused and not `not-found`. The refresh token stays in the keychain, since only `logout` removes it, and the next `npm login` replaces it. With `interactive` `true` the same check would start a device flow instead.
 
 **A 403, `insufficient_scope`.** The token for `@corp-secure` was minted before the user joined the group that entitles them to it. npm sends no erase, only the retry with `httpStatus: 403`:
 

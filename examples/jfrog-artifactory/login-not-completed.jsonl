@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://acme.jfrog.io/artifactory/api/npm/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Stopped waiting for the web login after 4 minutes 30 seconds. Run npm login again."}}}
+{"from":"client","event":"close"}

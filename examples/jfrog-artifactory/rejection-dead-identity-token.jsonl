@@ -1,0 +1,8 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-identity-token"},"cache":"session","operationIndependent":true,"granularity":"registry"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","granularity":"registry","authChallenges":["Basic realm=\"Artifactory Realm\""]}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401,"authChallenges":["Basic realm=\"Artifactory Realm\""]}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Artifactory rejected the stored identity token. Run npm logout and npm login for https://acme.jfrog.io/artifactory/api/npm/."}}}
+{"from":"client","event":"close"}

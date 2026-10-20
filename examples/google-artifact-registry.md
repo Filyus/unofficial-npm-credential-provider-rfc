@@ -63,7 +63,25 @@ Per-registry, for three reasons. The token is a whole-cloud credential valid on 
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-writer-token"},"cache":"expires","expiresAt":1792233000,"granularity":"registry","operationIndependent":false}}
 ```
 
-`operationIndependent` is `false`, so the writer token never answers a later `read`. `deprecate` takes the same path; the role it needs is not stated in the documentation (`packages.update`, which `writer` has, or `versions.update`, which only `repoAdmin` has), so a provider that serves it must be tested against the real registry first. A republish of the same name and version is refused by the registry, and no credential changes that.
+`operationIndependent` is `false`, so the writer token never answers a later `read`. `deprecate` takes the same path ([deprecate.jsonl](google-artifact-registry/deprecate.jsonl)); the role it needs is not stated in the documentation (`packages.update`, which `writer` has, or `versions.update`, which only `repoAdmin` has), so a provider that serves it must be tested against the real registry first:
+
+```json
+{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-private/","scope":"@acme","package":"web-ui","version":"2.4.0","operation":"deprecate","command":"deprecate","interactive":true}
+{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-writer-token"},"cache":"expires","expiresAt":1792233000,"granularity":"registry","operationIndependent":false}}
+```
+
+That `npm deprecate` works is documented: the [manage packages](https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages) page recommends it and says installing a deprecated version shows a warning (read again on 2026-10-20). The writer token is the provider's start; if the registry answers 403 because the call needs `repoAdmin`, the 403 rule in [Rejection](#rejection) lets the provider move up under its write policy, at the cost of one refused request.
+
+`dist-tag` has no transcript on purpose. The same page documents tags only through the console and `gcloud artifacts tags create`, `delete`, `list` and `update`, and names no role for them; it does not mention `npm dist-tag`, and it documents only `npm publish --tag` and installing `@scope/package@tag`. The two IAM tiers below (`tags.create` on `writer`, `tags.delete` on `repoAdmin`, from the [roles reference](https://docs.cloud.google.com/iam/docs/roles-permissions/artifactregistry) as this page already cites it) apply to those gcloud calls; that npm's `dist-tag add` and `rm` reach Artifact Registry through the npm endpoint is **not verified**, so a transcript of either would show an endpoint nothing documents.
+
+[owner-unsupported.jsonl](google-artifact-registry/owner-unsupported.jsonl). An operation the pages describe nothing for is answered `operation-not-supported`, here `owner`. This is an absence in the pages read, not a documented refusal, and the message says so; no write-capable token was released for it:
+
+```json
+{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-private/","scope":"@acme","package":"web-ui","operation":"owner","command":"owner","interactive":true}
+{"Err":{"kind":"operation-not-supported","message":"The Artifact Registry pages describe no npm owners; this provider serves none."}}
+```
+
+`access`, `trust`, `account`, `stage`, `stage-read` and `stage-reject` are answered the same way. A republish of the same name and version is refused by the registry, and no credential changes that.
 
 An honest limit: on a workstation, a script run during `npm publish` can call `gcloud auth print-access-token --impersonate-service-account=...` itself, and on a VM or in Cloud Build any process can query the metadata server. The presence prompt stops none of that. The control that works is IAM: developers' everyday identity cannot impersonate the writer account, and publishing runs only in CI.
 
@@ -88,9 +106,29 @@ A 403 follows no erase. The retry is `{"v":1,"kind":"get",...,"retry":true,"http
 
 npm then fails the request, naming the provider ([rejection-403.jsonl](google-artifact-registry/rejection-403.jsonl)). The status codes are recalled, not verified against live responses.
 
+**A 401 that no new token can fix.** [rejection-login-lapsed.jsonl](google-artifact-registry/rejection-login-lapsed.jsonl). The retry above assumes the provider can mint again. It cannot when the sign-in behind it has lapsed: Google lets an organization set a session length of 0 s or 1 to 24 hours for the Google Cloud SDK, and when it ends gcloud asks the user to run `gcloud auth login` ([session controls](https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication), [Workspace admin help](https://knowledge.workspace.google.com/admin/security/set-session-length-for-google-cloud-services)); a service account has no such session. What gcloud prints and which exit code it gives is not documented on the pages read, so the provider treats any refusal to mint after an erase as a lapsed login. The 401 does not prove it, so the provider tries the mint first; when it fails, the provider starts no sign-in (the request is not a `login`, and `interactive` is `false` here) and answers `other`, naming `npm login`. The stored login is left alone, as `erase` must:
+
+```json
+{"v":1,"kind":"erase","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","granularity":"registry"}
+{"Ok":{"kind":"erase"}}
+{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}
+{"Err":{"kind":"other","message":"The sign-in behind this provider's gcloud configuration has lapsed and needs a new one. Run npm login for https://us-central1-npm.pkg.dev/acme-prod/npm-all/."}}
+```
+
+The request fails and the session goes on. `not-found` would be wrong here, since the provider holds a lapsed login and `not-found` would let a listed `npm:token` answer in its place.
+
+**No `not-found` for an invisible repository.** The pages read say nothing about Artifact Registry hiding a repository from a principal who may not see it: the [troubleshooting](https://docs.cloud.google.com/artifact-registry/docs/nodejs/troubleshoot) and [access control](https://docs.cloud.google.com/artifact-registry/docs/access-control) pages document no 401, 403 or 404 for npm (read again on 2026-10-20). Whether such a request gets a 403 or a 404 is not verified. A 404 would send no retry and no `erase`, so the provider would never hear of it, and a 403 is answered `other` as above. The provider's own `not-found` answers "nothing stored", and the hello `registries` list means npm never asks it about a repository it was not configured for, so this page has no `not-found` transcript.
+
 ## Login and logout
 
-[login.jsonl](google-artifact-registry/login.jsonl) and [logout.jsonl](google-artifact-registry/logout.jsonl). `npm login --registry https://us-central1-npm.pkg.dev/acme-prod/npm-all/` sends `{"v":1,"kind":"login","registry":"...","interactive":true}`. The provider runs `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG` directory, with gcloud attached to the controlling terminal (`/dev/tty`, or `CONIN$`/`CONOUT$` on Windows), never to npm's pipe, since `--no-launch-browser` reads the code from stdin. It answers `{"Ok":{"kind":"login"}}`. A supplied `token` is a one-hour access token and not worth storing, so a provider given one answers `other` with a message saying so.
+[login.jsonl](google-artifact-registry/login.jsonl) and [logout.jsonl](google-artifact-registry/logout.jsonl). `npm login --registry https://us-central1-npm.pkg.dev/acme-prod/npm-all/` sends `{"v":1,"kind":"login","registry":"...","interactive":true}`. The provider runs `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG` directory, with gcloud attached to the controlling terminal (`/dev/tty`, or `CONIN$`/`CONOUT$` on Windows), never to npm's pipe, since `--no-launch-browser` reads the code from stdin. It answers `{"Ok":{"kind":"login"}}`. When the sign-in is not completed ([login-refused.jsonl](google-artifact-registry/login-refused.jsonl)) it answers `other`:
+
+```json
+{"v":1,"kind":"login","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","interactive":true}
+{"Err":{"kind":"other","message":"gcloud auth login did not finish: no sign-in was completed in 4 minutes 30 seconds, so gcloud was stopped. Nothing was stored. Run npm login again."}}
+```
+
+What gcloud does when the user denies access or never returns is not documented ([gcloud auth login](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login) says nothing on denial or timeouts), so the provider ends the flow itself, at 4.5 minutes because npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)), and a gcloud that exits non-zero earlier gets the same answer with its own reason. A supplied `token` is a one-hour access token and not worth storing, so a provider given one answers `other` with a message saying so.
 
 `npm logout` removes only what the provider created: its own directory and its remembered identity mapping. It never runs `gcloud auth revoke` on the shared configuration and never deletes `application_default_credentials.json`. A provider that only borrows ambient ADC has nothing to remove and answers `not-found`.
 

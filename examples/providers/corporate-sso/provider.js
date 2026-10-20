@@ -26,6 +26,17 @@ const STEP_UP_SECONDS = 5 * 60
 const ACCESS_MARGIN_SECONDS = 60
 // inside npm's 5-minute budget for `login` and an interactive `get`
 const WAIT_MS = 4.5 * 60 * 1000
+// What the gateway's publish policy covers: user presence and a step-up no
+// older than 5 minutes (the npm-publisher role in CI), and a token bound to
+// the package. The page says `dist-tag`, `deprecate` and `unpublish` follow
+// it; every other operation (`stage`, `trust`, `access`, ...) is not in the
+// gateway.
+const WRITE_VERBS = {
+  publish: 'Publish',
+  'dist-tag': 'Change the dist-tags of',
+  deprecate: 'Deprecate',
+  unpublish: 'Unpublish',
+}
 
 
 const minutes = (ms) => {
@@ -195,7 +206,7 @@ const start = (args) => {
       cache: 'expires',
       expiresAt: minted.expires_at,
       operationIndependent: false,
-      granularity: req.operation === 'publish' ? 'package' : 'scope',
+      granularity: req.operation === 'read' ? 'scope' : 'package',
     })
   }
 
@@ -210,21 +221,24 @@ const start = (args) => {
     if (!REGISTRIES.includes(req.registry)) {
       return err('url-not-supported')
     }
-    if (req.operation !== 'read' && req.operation !== 'publish') {
+    const write = Object.hasOwn(WRITE_VERBS, req.operation)
+    if (req.operation !== 'read' && !write) {
       return err('operation-not-supported')
     }
-    const publish = req.operation === 'publish'
     const name = nameOf(req)
-    if (publish && !req.version) {
+    if (req.operation === 'publish' && !req.version) {
       return err('other', `A publish request for ${name} must name a version.`)
     }
-    const label = publish ? `${name}@${req.version}` : name
+    // `dist-tag`, `deprecate` and `unpublish` may come without a version
+    const label = write && req.version ? `${name}@${req.version}` : name
+    const what = req.operation === 'publish' ? `publishing ${label}` : `${req.operation} of ${label}`
+    const subject = req.operation === 'publish' ? `Publishing ${label}` : `The ${req.operation} of ${label}`
 
     const identity = serviceIdentity()
     if (identity) {
       let granted = await identityAccess(identity)
-      if (publish && !granted.roles.includes('npm-publisher')) {
-        return err('other', `The service identity lacks the npm-publisher role that publishing ${label} needs.`)
+      if (write && !granted.roles.includes('npm-publisher')) {
+        return err('other', `The service identity lacks the npm-publisher role that ${what} needs.`)
       }
       return mint(req, granted.token, async () => (granted = await identityAccess(identity, { force: true })).token)
     }
@@ -233,11 +247,11 @@ const start = (args) => {
       // nobody ever signed in here: nothing to withhold, and no login opened
       return err('not-found')
     }
-    if (publish) {
+    if (write) {
       if (!req.interactive) {
         return err(
           'other',
-          `Publishing ${label} needs a device-code confirmation, and no terminal is available. Run npm publish from a terminal, or from the release runner.`,
+          `${subject} needs a device-code confirmation, and no terminal is available. Run npm ${req.operation} from a terminal, or from the release runner.`,
         )
       }
       if (ctx.now() - (readSession().interactiveAt ?? 0) > STEP_UP_SECONDS) {
@@ -256,14 +270,14 @@ const start = (args) => {
       }
     }
 
-    if (publish) {
-      const question = `Publish ${label} to ${new URL(req.registry).host}?`
+    if (write) {
+      const question = `${WRITE_VERBS[req.operation]} ${label} ${req.operation === 'publish' ? 'to' : 'on'} ${new URL(req.registry).host}?`
       const answer = await confirmWithin(question, WAIT_MS)
       if (answer === null) {
-        return err('other', `Publishing ${label} was not confirmed within 4 minutes 30 seconds.`)
+        return err('other', `${subject} was not confirmed within 4 minutes 30 seconds.`)
       }
       if (!answer) {
-        return err('other', `Publishing ${label} was not confirmed.`)
+        return err('other', `${subject} was not confirmed.`)
       }
     }
     return mint(req, access, () => sessionAccess(req, { force: true }))

@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"access","command":"access","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"operation-not-supported"}}}
+{"from":"client","event":"close"}
