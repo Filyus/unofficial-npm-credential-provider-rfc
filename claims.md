@@ -8,7 +8,7 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/token-helper.js`; `co
 
 | Claim | Source | How it was checked |
 |---|---|---|
-| Shai-Hulud (September 2025) spread by stealing maintainer tokens and publishing infected versions; RFC 0054 records it | [RFC 0054](https://github.com/npm/rfcs/blob/main/accepted/0054-make-scripts-install-opt-in.md) | read: Motivation names it, dated September 2025, 500+ packages |
+| Shai-Hulud (September 2025) spread by stealing maintainer tokens and publishing infected versions; RFC 0054 records it | [RFC 0054](https://github.com/npm/rfcs/blob/f291deccbb4c0d244a8b71f321de9042626922cb/accepted/0054-make-scripts-install-opt-in.md) | read: Motivation names it, dated September 2025, 500+ packages |
 | CodeArtifact tokens: 12 h default, 15 min to 12 h | [GetAuthorizationToken](https://docs.aws.amazon.com/codeartifact/latest/APIReference/API_GetAuthorizationToken.html) | read: "between 900 (15 minutes) and 43200 (12 hours)" |
 | Artifact Registry access tokens last 60 minutes | [GAR npm auth](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication) | read |
 | `vsts-npm-auth` writes a token into the user `.npmrc`; Azure feeds use username + base64 PAT | [Azure Artifacts npmrc](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops) | read |
