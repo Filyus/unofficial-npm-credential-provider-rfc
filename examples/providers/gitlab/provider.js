@@ -20,6 +20,9 @@ const { loadContext } = require('../lib/context.js')
 const READ_LIFETIME = 3600
 // An access token with less than this left is refreshed before use.
 const ACCESS_MARGIN = 60
+// Inside npm's 5-minute budget for `login` and an interactive `get`: the
+// provider ends a login or a presence prompt itself, first.
+const WAIT_MS = 4.5 * 60 * 1000
 const WRITE_OPERATIONS = new Set(['publish', 'dist-tag'])
 const READ_OPERATIONS = new Set(['read'])
 
@@ -175,8 +178,15 @@ const start = async (args) => {
       if (!req.interactive) {
         return err('other', 'a write credential needs the person to confirm, and this request is not interactive')
       }
-      const what = `${req.scope ? `${req.scope}/` : ''}${req.package}`
-      if (!(await ctx.confirm(`Create a deploy token that can write packages to project ${target.projectId} (${what})?`))) {
+      const what = `${req.scope ? `${req.scope}/` : ''}${req.package}${req.version ? `@${req.version}` : ''}`
+      const answer = await ctx.confirmWithin(
+        `Create a deploy token that can write packages to project ${target.projectId}, for ${req.operation} of ${what}?`,
+        WAIT_MS,
+      )
+      if (answer === null) {
+        return err('other', 'the person did not answer within 4 minutes 30 seconds')
+      }
+      if (!answer) {
         return err('other', 'the person declined a write credential')
       }
     }
@@ -206,10 +216,14 @@ const start = async (args) => {
     if (!parseTarget(req.registry, instance)) {
       return err('url-not-supported')
     }
-    const tier = WRITE_OPERATIONS.has(req.operation) ? 'write' : 'read'
-    const granularity = req.granularity || (tier === 'write' ? 'package' : req.scope ? 'scope' : 'registry')
+    // an operation this provider never answers a `get` for has nothing to erase,
+    // and is never taken for a read
+    const write = WRITE_OPERATIONS.has(req.operation)
+    if (!write && !READ_OPERATIONS.has(req.operation)) {
+      return err('operation-not-supported')
+    }
     // the refresh token stays: that is logout's
-    await release(readAccount(), mintedKey(req.registry, tier, granularity, req.scope, req.package))
+    await release(readAccount(), mintedKey(req.registry, write ? 'write' : 'read', req.granularity, req.scope, req.package))
     return ok('erase')
   }
 
@@ -228,8 +242,9 @@ const start = async (args) => {
     }
     ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)
     let wait = (device.json.interval ?? 5) * 1000
-    // the device code lives as long as the server says; polling past it is no use
-    const until = ctx.clockMs() + (device.json.expires_in ?? 300) * 1000
+    // the device code lives as long as the server says, and npm gives a login
+    // five minutes; polling past either is no use
+    const until = ctx.clockMs() + Math.min((device.json.expires_in ?? 300) * 1000, WAIT_MS)
     for (let attempt = 0; attempt < 120 && ctx.clockMs() + wait <= until; attempt += 1) {
       await ctx.sleep(wait)
       const res = await ctx.request('POST', `${instance}/oauth/token`, {

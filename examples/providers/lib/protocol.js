@@ -37,6 +37,9 @@ const parseArgs = (argv) => {
     if (!argv[i].startsWith('--') || argv[i + 1] === undefined) {
       throw new Error(`unexpected argument ${argv[i]}`)
     }
+    if (Object.hasOwn(args, argv[i].slice(2))) {
+      throw new Error(`${argv[i]} given twice`)
+    }
     args[argv[i].slice(2)] = argv[i + 1]
   }
   return args
@@ -205,13 +208,23 @@ const parseRequest = (line) => {
 // with no handler, or an operation the handler does not know, is answered
 // `operation-not-supported`, never treated as a read.
 const serve = async (start) => {
-  const args = parseArgs(process.argv.slice(2))
-  if (!args) {
-    log(`run by npm with ${SENTINEL}; this provider has no standalone mode`)
+  let args
+  let hello
+  let handlers
+  try {
+    args = parseArgs(process.argv.slice(2))
+    if (!args) {
+      log(`run by npm with ${SENTINEL}; this provider has no standalone mode`)
+      process.exitCode = 2
+      return
+    }
+    ;({ hello, handlers } = await start(args))
+  } catch (error) {
+    // a provider that cannot start says why on stderr and exits non-zero, with no stack
+    log(`cannot start: ${error.message}`)
     process.exitCode = 2
     return
   }
-  const { hello, handlers } = await start(args)
   // a client that has gone away is the end of the session, not a crash
   process.stdout.on('error', () => process.exit(0))
   const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`)

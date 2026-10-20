@@ -1,0 +1,73 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/"
+  },
+  "env": {},
+  "presence": [],
+  "clock": [
+    1792196100
+  ],
+  "store": {
+    "https://npm.example.test/verdaccio/": {
+      "account": "example-user",
+      "tokens": {
+        "read": {
+          "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTU2NTIxMDAsIm5hbWUiOiJleGFtcGxlLXVzZXIifQ.example-signature",
+          "key": "example-key-read"
+        }
+      }
+    }
+  },
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ],
+    "tokens": {
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTU2NTIxMDAsIm5hbWUiOiJleGFtcGxlLXVzZXIifQ.example-signature": {
+        "user": "example-user",
+        "readonly": true,
+        "key": "example-key-read"
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "https://npm.example.test/verdaccio/": {
+        "account": "example-user",
+        "tokens": {
+          "read": {
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTU2NTIxMDAsIm5hbWUiOiJleGFtcGxlLXVzZXIifQ.example-signature",
+            "key": "example-key-read"
+          }
+        }
+      }
+    }
+  }
+}

@@ -94,6 +94,9 @@ const start = async (args) => {
     ...(json.expires_in === undefined ? {} : { expiresAt: ctx.now() + json.expires_in }),
   })
 
+  const rejectedIdentity = (req) =>
+    err('other', `Artifactory rejected the stored identity token. Run npm logout and npm login for ${req.registry}.`)
+
   const mint = async (req, login) => {
     const common = { expires_in: EXPIRES_IN, refreshable: false }
     const res = login.type === 'refresh'
@@ -115,7 +118,11 @@ const start = async (args) => {
       throw new Answer(err('other', `Artifactory refused the stored login. Run npm login for ${req.registry}.`))
     }
     if (res.status === 403 && login.type === 'identity') {
-      // no right to create tokens: the identity token is all there is
+      // no right to create tokens: the identity token is all there is, unless the
+      // registry has just refused it, and then it is not handed out again
+      if (identityRejected) {
+        throw new Answer(rejectedIdentity(req))
+      }
       return { identity: login.token }
     }
     throw new Answer(err('other', `Artifactory answered ${res.status} to creating a token`))
@@ -164,11 +171,12 @@ const start = async (args) => {
   }
 
   const whoami = async () => {
-    if (!held || !held.auth) {
+    const token = held && (held.identity || (held.auth && held.auth.token))
+    if (!token) {
       return null
     }
     try {
-      const res = await ctx.request('GET', `${root}/access/api/v1/users/me`, { token: held.auth.token })
+      const res = await ctx.request('GET', `${root}/access/api/v1/users/me`, { token })
       return res.status === 200 && res.json && res.json.username ? res.json.username : null
     } catch {
       return null
@@ -194,7 +202,7 @@ const start = async (args) => {
       return err('other', `${user ? `User ${user}` : 'The user'} has no ${permission} permission on the repository that ${where}. The provider holds no other identity.`)
     }
     if (req.retry && identityRejected) {
-      return err('other', `Artifactory rejected the stored identity token. Run npm logout and npm login for ${req.registry}.`)
+      return rejectedIdentity(req)
     }
     if (req.retry) {
       held = null
@@ -221,7 +229,8 @@ const start = async (args) => {
       return err('url-not-supported')
     }
     // the login stays: it is logout's. A stored identity token that was itself
-    // the rejected credential is not minted again, and not handed out again
+    // the rejected credential is not handed out again, by the retry or by any
+    // later `get`, until a `login` stores another
     identityRejected = Boolean(held && held.identity)
     held = null
     return ok('erase')

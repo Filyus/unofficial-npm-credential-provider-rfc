@@ -26,6 +26,7 @@
 //                                 is slow_down again, a second one expired_token
 //   sso.userCode, verificationUri what the device authorization shows
 //   throttle                      GetAuthorizationToken answers 429 this many times
+//   expirationFraction            added to the expiration a token answer gives
 //   minted, assumed, checked      what the fake saw: authorization tokens issued
 //                                 (with caller, duration and domain), roles
 //                                 assumed (with duration, session policy and
@@ -103,7 +104,9 @@ const createFake = (state) => {
       return { status: 429, json: { message: 'Rate exceeded', retryAfterSeconds: 2 }, headers: { 'retry-after': '2' } }
     }
     // with 0 the token ends with the caller's role session
-    const expiration = duration === 0 ? who.expiresAt : seconds + duration
+    const ends = duration === 0 ? who.expiresAt : seconds + duration
+    // AWS's JSON timestamps are epoch seconds and may carry a fraction
+    const expiration = ends === undefined ? undefined : ends + (state.expirationFraction ?? 0)
     if (expiration === undefined) {
       return json(400, { message: 'duration 0 needs credentials of a role session' })
     }

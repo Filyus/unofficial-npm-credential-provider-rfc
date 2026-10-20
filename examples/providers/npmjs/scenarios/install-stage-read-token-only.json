@@ -1,0 +1,32 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "store": {
+    "tokens": [
+      {
+        "tier": "stage-read",
+        "token": "example-pasted-stage-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1792238400
+      }
+    ]
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "stage-read",
+          "token": "example-pasted-stage-token",
+          "selects": {
+            "all": true
+          },
+          "issuedAt": 1792238400
+        }
+      ]
+    }
+  }
+}

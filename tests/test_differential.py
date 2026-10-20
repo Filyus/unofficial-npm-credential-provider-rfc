@@ -32,6 +32,36 @@ class DifferentialTests(unittest.TestCase):
         )
         self.assertEqual(found, [], f"{len(found)} disagreements:\n{report}")
 
+    def test_every_reader_takes_a_message_nested_as_deep_as_the_rfc_lets_a_sender_go(self) -> None:
+        """Phase 2: a sender stays within 64 levels of nesting and a reader may
+        refuse more, so at exactly 64 no reader may refuse (the object counts as
+        the first level; the deep value sits in a member nobody reads)."""
+        nested = []
+        for _ in range(62):
+            nested = [nested]
+        cases = []
+        for role in d.ROLES:
+            base = json.loads(json.dumps(self.pool[role][0]))
+            base["x-depth"] = nested
+            cases.append(d.Case(role, base, []))
+        self.assertTrue(all(json.loads(case.text)["x-depth"] is not None for case in cases))
+        depth = 0
+        probe = json.loads(cases[0].text)["x-depth"]
+        while probe:
+            probe, depth = probe[0], depth + 1
+        self.assertEqual(depth + 2, 64, "the probe is 64 levels deep")
+        lines = [case.line() for case in cases]
+        validators = d.schema_validators()
+        rust, js = d.rust_verdicts(lines), d.js_verdicts(lines)
+        for case, rust_verdict, js_verdict in zip(cases, rust, js):
+            message = json.loads(case.text)
+            with self.subTest(role=case.role):
+                self.assertEqual(d.verdict_schema(validators, case.role, message), "ok")
+                self.assertEqual(d.verdict_python(case.role, message), "ok")
+                self.assertEqual(d.short(rust_verdict), "ok", rust_verdict)
+                if case.role == "request":
+                    self.assertEqual(d.short(js_verdict), "ok", js_verdict)
+
     def test_the_messages_are_not_all_refused_or_all_accepted(self) -> None:
         """Agreement on nothing but errors would prove nothing."""
         counts: collections.Counter[tuple[str, str]] = collections.Counter()

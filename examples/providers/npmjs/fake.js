@@ -2,7 +2,7 @@
 // A fake of the registry.npmjs.org endpoints the provider uses, answering
 // from the scenario's state:
 //   tokens: { <token>: { valid, username } }   accepted by /-/whoami
-//   login:  { pending, token, retryAfter }     the web login; `pending` polls answer 202 first,
+//   login:  { pending, token, retryAfter, doneUrl }  the web login; `pending` polls answer 202 first,
 //                                              each with Retry-After, and a poll sooner than
 //                                              that is answered 429
 // It records `revoked` (tokens deleted), `logins` (web logins started) and
@@ -38,7 +38,8 @@ const createFake = (state) => {
         status: 200,
         json: {
           loginUrl: 'https://www.npmjs.com/login?next=/login/cli/example',
-          doneUrl: 'https://registry.npmjs.org/-/v1/done?sessionId=example',
+          // `login.doneUrl` sets another one, as a hostile registry could
+          doneUrl: state.login.doneUrl || 'https://registry.npmjs.org/-/v1/done?sessionId=example',
         },
       }
     }

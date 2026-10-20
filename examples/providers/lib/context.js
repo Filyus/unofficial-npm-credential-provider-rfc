@@ -9,6 +9,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const loadContext = (configPath) => {
+  if (typeof configPath !== 'string') {
+    throw new Error('--config <file> is required: the settings of a reference provider are in a JSON file')
+  }
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
   const storePath = path.resolve(path.dirname(configPath), config.store)
   const scripted = config.person && config.person.mode === 'scripted'

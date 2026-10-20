@@ -13,13 +13,14 @@
 // `vso.packaging_manage` token for unpublish, basic for session tokens and
 // PATs and bearer for Entra and job tokens, the authority found from the
 // feed's X-VSS-ResourceTenant and WWW-Authenticate headers and checked
-// against an allowlist, the 90 seconds of the device flow, a 403 answered
+// against an allowlist of the provider's own (credprovider's cover the feed
+// and SPS hosts), the 90 seconds of the device flow, a 403 answered
 // `other` and never by a wider token, and a retry that would get the same
 // Entra token again answered with a diagnosis.
 // Recalled, not read, and so unverified here: the SessionTokens paths, query
 // and fields and the way a token is revoked (DELETE with `authorizationId`),
 // the Entra v2.0 device-code and token endpoint shapes (these are the
-// documented OAuth 2.0 ones), the host allowlist's members, `SYSTEM_COLLECTIONURI`
+// documented OAuth 2.0 ones), the members of the authority allowlist, `SYSTEM_COLLECTIONURI`
 // as the organization a job token belongs to, that the registry URL answers an
 // unauthenticated request with the tenant headers and an authenticated one
 // with 200, and `az account get-access-token`'s output. ILLUSTRATIVE: the
@@ -360,6 +361,16 @@ const start = (args) => {
     const identity = await identityToken()
     if (!identity) {
       return err('not-found')
+    }
+    // The bare Entra token is not packaging-scoped and works in every
+    // organization of the tenant: it is handed out only where nothing else can
+    // exist (a pipeline's identity, `interactive` false). A person at a
+    // terminal signs in with `npm login`, which mints a packaging token.
+    if (req.interactive) {
+      return err(
+        'other',
+        `The only credential on this machine for the ${org} organization is an Entra token that is not limited to packaging, and this provider hands such a token out only where no person can sign in. Run npm login.`,
+      )
     }
     if (retried && rejected === identity.token) {
       return err(

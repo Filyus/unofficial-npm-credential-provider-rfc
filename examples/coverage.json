@@ -1,17 +1,18 @@
 {
   "npmjs": {
     "ci-publish": "n/a: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token; trusted publishing is held by npm, not by a provider",
-    "unsupported": "n/a: every operation of the protocol has an endpoint on this registry, so there is nothing for the provider to refuse"
+    "unsupported": "n/a: every operation of the protocol has an endpoint on this registry, so there is nothing for the provider to refuse",
+    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
   },
   "gitlab": {
     "stage": "n/a: GitLab's npm registry page documents no staging or approval step (an absence in the docs, not a documented refusal); a publish is live at once (the page, Staging)"
   },
   "corporate-sso": {
-    "stage": "n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)",
-    "not-found": "n/a: the gateway answers `other`, never `not-found`, so that a refusal does not reveal that a package exists (the page)"
+    "stage": "n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)"
   },
   "github-packages": {
-    "stage": "n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)"
+    "stage": "n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)",
+    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
   },
   "google-artifact-registry": {
     "stage": "n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)",
@@ -26,9 +27,10 @@
   },
   "aws-codeartifact": {
     "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations",
-    "not-found": "n/a: AWS documents a refusal as 403 (AccessDeniedException, NotAuthorized), not as a hidden repository (the page, Rejection)"
+    "not-found": "n/a: AWS documents a refusal as 403 (AccessDeniedException) or 401 (NotAuthorized), not as a hidden repository (the page, Rejection)"
   },
   "verdaccio": {
-    "not-found": "n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)"
+    "not-found": "n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)",
+    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
   }
 }

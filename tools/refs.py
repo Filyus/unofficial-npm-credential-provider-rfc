@@ -10,12 +10,12 @@ that file on or before a day, through the GitHub API. Copies of the pages live
 in .refs/ (not tracked); see `fetch`.
 
     python tools/refs.py check
-    python tools/refs.py init            add addresses the list lacks
+    python tools/refs.py init            add addresses the list lacks, drop those nobody cites
     python tools/refs.py pin YYYY-MM-DD  pin branch links to commits
     python tools/refs.py fetch N         save the text of up to N pages not yet saved
 
 `fetch` reads only addresses the documents already cite, one request each,
-never follows a link, obeys robots.txt, waits two seconds between requests to a
+never follows a link or a redirect to another host, obeys robots.txt, waits two seconds between requests to a
 host, and gives up on a host that answers 403 or 429. It keeps the text without
 markup in .refs/ and records the day and sha256 in refs.json.
 """
@@ -94,13 +94,19 @@ def first_cited(url: str) -> str:
 
 
 def init() -> int:
-    manifest, added = load(), 0
-    for url in cited():
+    """Adds the addresses the list lacks and drops, with their saved copy, those nobody cites."""
+    manifest, found, added, dropped = load(), cited(), 0, 0
+    for url in found:
         if url not in manifest:
-            manifest[url] = {"kind": kind(url), "cited": first_cited(url)}
+            manifest[url] = {"kind": kind(url), "cited": first_cited(url) or time.strftime("%Y-%m-%d")}
             added += 1
+    for url in [url for url in manifest if url not in found]:
+        copy = ROOT / manifest.pop(url).get("file", "")
+        if copy.is_file():
+            copy.unlink()
+        dropped += 1
     save(manifest)
-    print(f"{added} added, {len(manifest)} in all")
+    print(f"{added} added, {dropped} dropped, {len(manifest)} in all")
     return 0
 
 
@@ -172,6 +178,16 @@ def text_of(body: bytes, content_type: str) -> str:
     return "\n".join(line for line in lines if line) + "\n"
 
 
+class SameHost(urllib.request.HTTPRedirectHandler):
+    """A redirect to another host is not followed: robots.txt was read for the host cited, not for that one."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(req.full_url).netloc:
+            raise urllib.error.HTTPError(req.full_url, code, f"redirect to another host: {newurl}", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(SameHost)
 USER_AGENT = "npm-auth-rfc-refs/1 (a private copy of pages this repository cites)"
 
 
@@ -208,7 +224,7 @@ def fetch(limit: int) -> int:
         last[host] = time.monotonic()
         try:
             request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain"})
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with OPENER.open(request, timeout=60) as response:
                 body, content_type = response.read(), response.headers.get("Content-Type", "")
         except urllib.error.HTTPError as error:
             manifest[url]["status"] = f"HTTP {error.code}"

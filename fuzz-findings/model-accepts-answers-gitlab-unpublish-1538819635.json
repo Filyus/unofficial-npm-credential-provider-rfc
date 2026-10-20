@@ -1,0 +1,19 @@
+{
+  "scenario": [
+    "gitlab",
+    "unpublish.jsonl"
+  ],
+  "seed": 1538819635,
+  "hostile": true,
+  "steps": [
+    8
+  ],
+  "invariant": "model-accepts-answers",
+  "violation": "gitlab/unpublish.jsonl seed 1538819635: the session is not a valid transcript: npm sends a provider nothing about https://elsewhere.example.test/: its hello leaves it out",
+  "lines": [
+    "eyJ2IjogMSwgImtpbmQiOiAiZ2V0IiwgInJlZ2lzdHJ5IjogImh0dHBzOi8vZWxzZXdoZXJlLmV4YW1wbGUudGVzdC8iLCAib3BlcmF0aW9uIjogInJlYWQiLCAiY29tbWFuZCI6ICJwdWJsaXNoIiwgImludGVyYWN0aXZlIjogZmFsc2V9",
+    "eyJ2IjogMSwgImtpbmQiOiAiZXJhc2UiLCAicmVnaXN0cnkiOiAiaHR0cHM6Ly9lbHNld2hlcmUuZXhhbXBsZS50ZXN0LyIsICJvcGVyYXRpb24iOiAicmVhZCIsICJncmFudWxhcml0eSI6ICJyZWdpc3RyeSJ9",
+    "eyJ2IjogMSwgImtpbmQiOiAibG9naW4iLCAicmVnaXN0cnkiOiAiaHR0cHM6Ly9lbHNld2hlcmUuZXhhbXBsZS50ZXN0LyIsICJpbnRlcmFjdGl2ZSI6IGZhbHNlfQ==",
+    "eyJ2IjogMSwgImtpbmQiOiAibG9nb3V0IiwgInJlZ2lzdHJ5IjogImh0dHBzOi8vZWxzZXdoZXJlLmV4YW1wbGUudGVzdC8ifQ=="
+  ]
+}

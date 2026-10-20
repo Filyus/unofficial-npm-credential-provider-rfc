@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"AWS answered 429 to GetAuthorizationToken for domain my-domain."}}}
+{"from":"client","event":"close"}

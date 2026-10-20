@@ -34,13 +34,13 @@
     "sts": {
       "audience": "//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/providers/ci-oidc",
       "subjectToken": "example-oidc-subject-token",
-      "principal": "principal://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/subject/release",
+      "principal": "principal://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/subject/build",
       "roles": [
-        "roles/artifactregistry.writer"
+        "roles/artifactregistry.reader"
       ],
       "expiresIn": 1800,
       "tokens": [
-        "example-federated-token"
+        "example-federated-reader-token"
       ]
     },
     "iam": {
@@ -75,9 +75,9 @@
       "sts": {
         "issued": [
           {
-            "principal": "principal://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/subject/release",
+            "principal": "principal://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/subject/build",
             "roles": [
-              "roles/artifactregistry.writer"
+              "roles/artifactregistry.reader"
             ]
           }
         ]

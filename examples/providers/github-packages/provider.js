@@ -180,9 +180,11 @@ const start = async (args) => {
     const accountName = accountFor(req.scope)
     const account = readAccounts()[accountName] || {}
     const held = account[`${tier}Token`]
-    // a write token can be asked for here: the sign-in is the person's presence
+    // a write token can be obtained here by a device flow, which needs the person: an
+    // interactive request, and the presence prompt below asks first
     const obtainable = tier === 'write' && req.interactive
-    if (!held && !obtainable) {
+    // a retry never starts a flow: a 401 or a 403 is no reason to log in, and nothing is stored to check
+    if (!held && (!obtainable || req.retry)) {
       return req.retry ? err('other', `The ${accountName} account has no ${tier} token stored. Run npm login for ${registryRoot}.`) : err('not-found')
     }
     if (req.retry && req.httpStatus === 403) {
@@ -196,6 +198,10 @@ const start = async (args) => {
       if (user.status !== 200) {
         return err('other', `GitHub rejected the stored token for the ${accountName} account. Run npm logout and npm login for ${registryRoot}.`)
       }
+      // alive: the 401 came from the URL or the registry, not from the token, and the provider
+      // holds no other credential it would release for this request, so handing it out again
+      // could only fail the same way
+      return err('other', `GitHub says the ${accountName} account's token is still valid, so the 401 did not come from the token but from the registry or the URL. The provider holds no other credential it would release for this request, and no token is handed out again. Check the registry URL and the package's access settings.`)
     }
 
     if (tier !== 'read') {

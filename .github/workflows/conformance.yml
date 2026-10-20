@@ -16,6 +16,7 @@ on:
       - 'poc/rust/**'
       - '**.md'
       - 'examples/**'
+      - 'refs.json'
       - '.github/workflows/conformance.yml'
   workflow_dispatch:
 

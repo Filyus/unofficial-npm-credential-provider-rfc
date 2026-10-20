@@ -19,6 +19,10 @@ const { loadContext } = require('../lib/context.js')
 
 const REGISTRY = 'https://registry.npmjs.org/'
 const SESSION_SECONDS = 7200 // the session token's two hours; the API gives no expiry
+// inside npm's 5-minute budget for `login` and an interactive `get`: the provider
+// ends a presence prompt itself, first
+const WAIT_MS = 4.5 * 60 * 1000
+const WAIT_TEXT = '4 minutes 30 seconds'
 
 const HELLO = {
   v: [1],
@@ -129,7 +133,10 @@ const create = async (args) => {
     }
     if (op.write) {
       if (request.interactive) {
-        const granted = await ctx.confirm(`Allow ${describe(request)} on ${REGISTRY}?`)
+        const granted = await ctx.confirmWithin(`Allow ${describe(request)} on ${REGISTRY}?`, WAIT_MS)
+        if (granted === null) {
+          return err('other', `Presence was not given for ${describe(request)} within ${WAIT_TEXT}.`)
+        }
         if (!granted) {
           return err('other', `Presence was declined for ${describe(request)}.`)
         }
@@ -149,10 +156,16 @@ const create = async (args) => {
     }
     if (request.retry && request.httpStatus === 401) {
       const found = candidates(op.tiers, request)
-      if (found.length && !(await tokenIsLive(found[0].entry.token))) {
+      if (found.length) {
+        const what = `${request.operation} token${request.scope ? ` for ${request.scope}` : ''}`
+        if (!(await tokenIsLive(found[0].entry.token))) {
+          return err('other', `The stored ${what} was rejected. Run npm logout and npm login.`)
+        }
+        // alive: the 401 came from the URL or the registry, not from the token, and no other
+        // credential is released for this request, so the same token again could only fail the same way
         return err(
           'other',
-          `The stored ${request.operation} token${request.scope ? ` for ${request.scope}` : ''} was rejected. Run npm logout and npm login.`,
+          `npm says the stored ${what} is still valid, so the 401 did not come from the token but from the registry or the URL. No other credential is released for this request, and no token is handed out again.`,
         )
       }
     } else if (request.retry && request.httpStatus === 403) {
@@ -186,6 +199,8 @@ const create = async (args) => {
   // write token stored as the read credential would go out with every
   // install. It is stored for the whole registry: its package selection is
   // not readable either, and the registry refuses what it does not select.
+  // A read-only token the person keeps for the staged-version lookup, and not
+  // for installs, is stored as `stage-read`: that lookup names no package.
   const PASTED_TIERS = [
     ['read', 'a read-only token'],
     ['stage-only', 'a stage-only token'],
@@ -195,8 +210,27 @@ const create = async (args) => {
     if (!request.interactive) {
       return err('other', 'A pasted token is stored only after the person says what it is for; this request is not interactive.')
     }
-    for (const [tier, label] of PASTED_TIERS) {
-      if (await ctx.confirm(`Is the pasted token ${label}?`)) {
+    // one deadline for the questions of this request
+    const until = ctx.clockMs() + WAIT_MS
+    const ask = (question) => {
+      const left = until - ctx.clockMs()
+      return left > 0 ? ctx.confirmWithin(question, left) : null
+    }
+    const unanswered = () => err('other', `The pasted token was not stored: nobody answered within ${WAIT_TEXT}.`)
+    for (const [asked, label] of PASTED_TIERS) {
+      const answer = await ask(`Is the pasted token ${label}?`)
+      if (answer === null) {
+        return unanswered()
+      }
+      if (answer) {
+        let tier = asked
+        if (asked === 'read') {
+          const aside = await ask('Does it select all packages, and is it to be kept for the lookup of staged versions only, not for installs?')
+          if (aside === null) {
+            return unanswered()
+          }
+          tier = aside ? 'stage-read' : 'read'
+        }
         const store = ctx.readStore()
         const tokens = [...(store.tokens || []), { tier, token: request.token, selects: { all: true }, issuedAt: ctx.now() }]
         ctx.writeStore({ ...store, tokens })
@@ -223,8 +257,9 @@ const create = async (args) => {
       return err('other', 'The registry named a doneUrl outside its own origin; not following it.')
     }
     ctx.showToPerson(`Open ${loginUrl} to log in to npmjs.com`)
-    // the registry's Retry-After decides the wait; without one, the
-    // configured interval
+    // the registry's Retry-After decides the wait; without one, the interval.
+    // `pollMs`, `loginSeconds` and `pollLimit` are knobs of the configuration
+    // for a run (a poll of 20 ms, a shorter login); the page does not name them
     const interval = ctx.config.pollMs ?? 2000
     // npm gives a login five minutes; a poll that must wait longer than what is left
     // would fail anyway, and a delay beyond 2^31 ms makes a timer fire at once

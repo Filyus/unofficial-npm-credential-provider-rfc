@@ -96,7 +96,7 @@ const start = (args) => {
     const exp = expiryOf(token)
     const now = ctx.now()
     if (exp !== null && exp - now <= MARGIN_SECONDS) {
-      return err('other', `The Verdaccio token for ${registry} has expired. Run npm logout, then npm login.`)
+      return err('other', `The Verdaccio token for ${registry} has expired or has less than a minute left. Run npm logout, then npm login.`)
     }
     return ok('get', {
       auth: { type: 'bearer', token },
@@ -126,8 +126,8 @@ const start = (args) => {
     let probed = null
     if (retry) {
       // The retry says only the status. A 401 on a token that still answers
-      // whoami was specific to the request or the node: the same token goes
-      // again. A 403 does not say why, so whoami decides: 200 means the
+      // whoami was specific to the request or the node: no token goes again,
+      // since the same one could only fail the same way. A 403 does not say why, so whoami decides: 200 means the
       // registry's rules (or, for a read, nothing a bigger token changes);
       // anything else means the key is revoked or the address is outside its list.
       const current = tokenOf(tier)
@@ -135,6 +135,11 @@ const start = (args) => {
         probed = await whoami(current)
         if (probed.status !== 200) {
           return err('other', rejected)
+        }
+        if (req.httpStatus === 401) {
+          // alive: the 401 was specific to the request or the node, not to the token, and no
+          // other token is released for this request, so the same one again could only fail the same way
+          return err('other', `Verdaccio says the token for ${registry} is still valid, so the 401 did not come from the token but from the registry or the URL. The provider holds no other credential it would release for this request, and no token is handed out again.`)
         }
         if (req.httpStatus === 403) {
           if (req.operation !== 'account') {
@@ -180,6 +185,9 @@ const start = (args) => {
   // they are what is handed out and only logout removes them; `stage-read` is
   // served by the read-only token that `read` is still bound to.
   const erase = async (req) => {
+    if (req.registry !== registry) {
+      return err('url-not-supported')
+    }
     if (req.operation === 'account') {
       TIERS.forEach((tier) => held.delete(tier))
     } else if (req.operation === 'read') {
@@ -235,6 +243,11 @@ const start = (args) => {
       // the static-token flow: its tier and key cannot be learned without a write probe
       writeAccount({ tokens: { full: { token: req.token } } })
       held.clear()
+      // the tokens this replaces are revoked, as a password login revokes its
+      // predecessor's (unless the user hands back the very token already held)
+      if (previous && !(previous.tokens && previous.tokens.full && previous.tokens.full.token === req.token)) {
+        await revokeAll(previous)
+      }
       return ok('login')
     }
     const typed = ctx.config.scriptedLogin
@@ -280,7 +293,10 @@ const start = (args) => {
     const account = readAccount()
     if (account) {
       await revokeAll(account)
-      log('verdaccio: the login token cannot be revoked (DELETE /-/user/token/* does nothing); it works until the password or the server secret changes')
+      // only a password login made a login token; a supplied token made none
+      if (account.account) {
+        log('verdaccio: the login token cannot be revoked (DELETE /-/user/token/* does nothing); it works until the password or the server secret changes')
+      }
       writeAccount(null)
       held.clear()
     }

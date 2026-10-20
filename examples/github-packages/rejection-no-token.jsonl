@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","granularity":"package"}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":true,"retry":true,"httpStatus":401}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The work account has no write token stored. Run npm login for https://npm.pkg.github.com/."}}}
+{"from":"client","event":"close"}

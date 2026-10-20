@@ -38,7 +38,7 @@
     "deployTokens": [
       {
         "id": 3,
-        "token": "r",
+        "token": "example-read-secret",
         "scopes": [
           "read_package_registry"
         ],
@@ -46,7 +46,7 @@
       },
       {
         "id": 4,
-        "token": "w",
+        "token": "example-write-secret",
         "scopes": [
           "write_package_registry"
         ],

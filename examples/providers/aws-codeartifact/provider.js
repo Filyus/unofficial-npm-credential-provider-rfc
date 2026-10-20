@@ -18,7 +18,7 @@
 // sts:GetCallerIdentity and sts:AssumeRole, as AWS documents them. Simplified
 // for the run, as in fake.js: a caller is its access key id sent as the
 // bearer token where the SDK would sign with SigV4, and the secret half of a
-// credential is never read. Recalled, not read: the IAM Identity Center
+// credential is never used or sent (in CI its presence is checked). Recalled, not read: the IAM Identity Center
 // device-authorization and token calls and the portal's role-credentials call.
 //
 // Differences from the page's provider, each because the run has no AWS CLI
@@ -46,6 +46,8 @@ const CREDENTIAL_MARGIN_SECONDS = 300
 // inside npm's 5-minute budget for `login` and an interactive `get`
 const WAIT_MS = 4.5 * 60 * 1000
 const THROTTLE_TRIES = 3
+const PLAIN_NAME = /^[A-Za-z0-9._~-]+$/
+const PLAIN_SCOPE = /^@[A-Za-z0-9._~-]+$/
 const MAX_RETRY_AFTER_SECONDS = 10
 
 // IAM actions per write operation. The page says `deprecate` needs an action
@@ -236,11 +238,14 @@ const start = (args) => {
       if (res.status !== 200 || !issued || typeof issued.authorizationToken !== 'string') {
         throw refuse(`AWS answered ${res.status} to GetAuthorizationToken for domain ${target.domain}.`)
       }
-      // integer Unix seconds; a millisecond value would be a token npm never expires
-      if (!Number.isInteger(issued.expiration) || issued.expiration >= 1e11) {
+      // integer Unix seconds, as the page says: AWS's JSON timestamps are epoch
+      // seconds and may carry a fraction, which is cut (the earlier second, so
+      // the token is never kept past its end); a millisecond value would be a
+      // token npm never expires, and is refused
+      if (!Number.isFinite(issued.expiration) || issued.expiration <= 0 || issued.expiration >= 1e11) {
         throw refuse('AWS gave an expiry that is not in Unix seconds.')
       }
-      return { token: issued.authorizationToken, expiresAt: issued.expiration }
+      return { token: issued.authorizationToken, expiresAt: Math.floor(issued.expiration) }
     }
   }
 
@@ -296,6 +301,12 @@ const start = (args) => {
     }
     const name = nameOf(req)
     const label = write && req.version ? `${name}@${req.version}` : name
+    // A write names the package in an IAM Resource ARN, where `*`, `?` and
+    // `${` mean something: a name with anything but plain characters is
+    // refused before a person is asked, rather than widening the session policy.
+    if (write && !(PLAIN_NAME.test(req.package ?? '') && (req.scope === undefined || PLAIN_SCOPE.test(req.scope)))) {
+      return err('other', `${write.subject} a package whose name has characters that this provider will not put in an IAM policy was refused.`)
+    }
 
     // The token is an identity snapshot and each request is authorized when it
     // is made: a new token from the same identity would be refused the same
@@ -409,7 +420,7 @@ const start = (args) => {
   }
 
   // The provider's own tokens go. Tokens already issued stay valid until they
-  // expire, since CodeArtifact has no revocation, and `aws sso logout` is
+  // expire, since CodeArtifact has no per-token revocation, and `aws sso logout` is
   // never run: it signs the user out of every profile.
   const logout = async (req) => {
     const target = registries.includes(req.registry) ? parseTarget(req.registry) : null

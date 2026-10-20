@@ -8,7 +8,10 @@
 // service. The registry itself is not here: the provider never calls it.
 //
 // state.oauth: interval, userCode, verificationUrl, pending (polls answered
-//              authorization_pending, across both device flows), account,
+//              authorization_pending, across both device flows), denied
+//              (access_denied), expired (expired_token), slowDown (a first poll
+//              answered slow_down; a poll less than 10 s after it is slow_down again, a
+//              second expired_token), account,
 //              sessions { refreshToken: { account, lapsed, lapseAfter } }
 //              (`lapseAfter: n` ends the session after n refreshes, as when
 //              an administrator's session length runs out between two requests)
@@ -41,7 +44,7 @@ const createFake = (state) => {
     return token
   }
 
-  const tokenEndpoint = ({ body }) => {
+  const tokenEndpoint = ({ body, clock }) => {
     if (body.grant_type === 'refresh_token') {
       const session = oauth.sessions[body.refresh_token]
       if (!session || session.lapsed || (session.lapseAfter !== undefined && (session.refreshes ?? 0) >= session.lapseAfter)) {
@@ -54,6 +57,25 @@ const createFake = (state) => {
     if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
       if (!/^device-code-\d+$/.test(body.device_code || '') || Number(body.device_code.slice(12)) > oauth.devices) {
         return json(400, { error: 'invalid_grant' })
+      }
+      if (oauth.slowDown) {
+        // the first poll is told to slow down; a poll sooner than that by the interval
+        // given (5 s more) is told again, a second one that the code has expired
+        if (oauth.notBefore === undefined) {
+          oauth.notBefore = clock + 10000
+          oauth.tooSoon = 0
+          return json(400, { error: 'slow_down' })
+        }
+        if (clock < oauth.notBefore) {
+          oauth.tooSoon += 1
+          return json(400, { error: oauth.tooSoon >= 2 ? 'expired_token' : 'slow_down' })
+        }
+      }
+      if (oauth.denied) {
+        return json(400, { error: 'access_denied' })
+      }
+      if (oauth.expired) {
+        return json(400, { error: 'expired_token' })
       }
       if (oauth.pending > 0) {
         oauth.pending -= 1

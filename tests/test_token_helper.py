@@ -11,7 +11,7 @@ from tests.protocol_model import (
 
 
 class TokenHelperOutputTests(unittest.TestCase):
-    """Phase 1 reads a `tokenHelper`'s stdout exactly as pnpm does, so one
+    """Phase 1 reads a `tokenHelper`'s stdout as the Phase 1 table says (pnpm trims the end only, npm trims the start too), so one
     helper serves both package managers."""
 
     def test_raw_token_is_sent_as_bearer(self) -> None:

@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The Verdaccio token for https://npm.example.test/verdaccio/ has expired or has less than a minute left. Run npm logout, then npm login."}}}
+{"from":"client","event":"close"}

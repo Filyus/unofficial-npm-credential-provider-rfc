@@ -12,13 +12,17 @@
 // of every other operation, no revoke on `erase`, no widening on a 403, a
 // lapsed sign-in answered `other`, and the expiry taken from Google's answer,
 // never from `now + 3600`.
-// SIMPLIFIED, so that it can run without gcloud: the page has the provider
-// run `gcloud auth login` and `gcloud auth application-default login` against
-// its own configuration; here each is Google's device authorization flow
-// against the configured endpoints, and a token is made through a refresh
-// grant of the stored sign-in (the library call the page names) and the IAM
-// Credentials API. The endpoint paths and fields are recalled, not read
-// (see fake.js); the client id is invented.
+// SIMPLIFIED, so that it can run without gcloud (the page says so, under
+// Configuration): the page has the provider run `gcloud auth login` and
+// `gcloud auth application-default login` against its own configuration; here
+// each is Google's device authorization flow against the configured endpoints,
+// and a token is made through a refresh grant of the stored sign-in (the
+// library call the page names) and the IAM Credentials API. In CI only the
+// federated identity of a credentials file the configuration names is used,
+// not the metadata server's, and a 403 retry is answered `other` for every
+// operation: there is no `repoAdmin` identity to move up to. The endpoint
+// paths and fields are recalled, not read (see fake.js); the client id is
+// invented.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -152,7 +156,10 @@ const start = (args) => {
 
   // CI: the federated identity the job holds, named by this configuration and
   // never by the environment's GOOGLE_APPLICATION_CREDENTIALS. The variable
-  // `CI` only says that nobody is at a terminal.
+  // `CI` does switch it on, and with it the end of the presence prompt, so the
+  // identity is used only if the file the configuration names exists: on a
+  // workstation it must not, and a `CI=true` that a script exports then gets
+  // nothing from here.
   const federatedIdentity = () => {
     const file = ctx.config.adc
     if (!file || !process.env.CI || process.env.CI === 'false') {
@@ -187,8 +194,6 @@ const start = (args) => {
   }
 
   // --- handlers ----------------------------------------------------------------
-
-  const confirmWithin = (question, ms) => ctx.withDeadline((signal) => ctx.confirm(question, signal), ms)
 
   const get = async (req) => {
     if (!Object.hasOwn(repositories, req.registry)) {
@@ -227,7 +232,7 @@ const start = (args) => {
         if (!write) {
           readTokens.set(req.registry, minted)
         }
-        return granted(minted, write)
+        return granted(minted)
       }
 
       if (!gcloud()) {
@@ -245,7 +250,7 @@ const start = (args) => {
         }
         const label = req.version ? `${name}@${req.version}` : name
         const question = `${WRITE_VERBS[req.operation]} ${label} ${req.operation === 'publish' ? 'to' : 'in'} ${new URL(req.registry).host}${new URL(req.registry).pathname}?`
-        const answer = await confirmWithin(question, WAIT_MS)
+        const answer = await ctx.confirmWithin(question, WAIT_MS)
         if (answer === null) {
           return err('other', `The ${req.operation} of ${name} was not confirmed within 4 minutes 30 seconds.`)
         }
@@ -255,14 +260,14 @@ const start = (args) => {
       } else {
         const held = readTokens.get(req.registry)
         if (!forced && held && held.expiresAt - ctx.now() > ACCESS_MARGIN_SECONDS) {
-          return granted(held, false)
+          return granted(held)
         }
       }
       const minted = await impersonate(tier, forced)
       if (!write) {
         readTokens.set(req.registry, minted)
       }
-      return granted(minted, write)
+      return granted(minted)
     } catch (error) {
       if (error instanceof Lapsed) {
         return err('other', lapsedMessage(req))
@@ -274,19 +279,26 @@ const start = (args) => {
     }
   }
 
-  const granted = (minted, write) =>
+  // `operationIndependent: false` on every answer: the writes are bound to their
+  // operation anyway, and a `read` answer left at the default would be found by a
+  // later `publish` on the same repository, which a reader token cannot serve
+  // (and which, for a person, would skip the presence prompt)
+  const granted = (minted) =>
     ok('get', {
       auth: { type: 'bearer', token: minted.token },
       cache: 'expires',
       expiresAt: minted.expiresAt,
       granularity: 'registry',
-      ...(write ? { operationIndependent: false } : {}),
+      operationIndependent: false,
     })
 
   // Drops what this process holds. No revoke call: revoking an access token
   // that has a refresh token behind it would sign the user out of gcloud, and
   // the stored sign-in is `login`'s, which only `logout` removes.
-  const erase = async () => {
+  const erase = async (req) => {
+    if (!Object.hasOwn(repositories, req.registry)) {
+      return err('url-not-supported')
+    }
     readTokens.clear()
     userAccess = null
     return ok('erase')
@@ -325,9 +337,11 @@ const start = (args) => {
       return err('url-not-supported')
     }
     const { gcloud: removed, ...rest } = ctx.readStore()
-    if (removed) {
-      ctx.writeStore(rest)
+    if (!removed) {
+      // nothing was ever signed in here: nothing to remove, which is what `not-found` says
+      return err('not-found')
     }
+    ctx.writeStore(rest)
     readTokens.clear()
     userAccess = null
     return ok('logout')

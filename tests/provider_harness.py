@@ -61,7 +61,7 @@ INVARIANTS = {
     "model-accepts-answers": "the Python model accepts every answer, and the whole session as a transcript",
     "no-prompt-unattended": "a request that is not interactive asks the person nothing",
     "unknown-is-unsupported": "an unknown operation or kind is operation-not-supported, never served as a read",
-    "foreign-registry": "a registry the provider does not serve is url-not-supported",
+    "foreign-registry": "a registry the provider does not serve is url-not-supported, for get, erase, login and logout",
     "erase-keeps-the-login": "the 401 retry after an erase is not not-found",
     "retry-403-not-found": "a 403 retry is not not-found: nothing else to release is `other`, saying so",
     "no-write-credential-for-a-read": "a 403 on a read does not move to a credential handed out for a write",
@@ -224,19 +224,23 @@ class Session:
         self.model.receive_hello(hello)
         self.hello = hello
 
-        # the transcripts' own get requests: realistic registries, scopes and packages
-        self.pool = [
-            event["message"]
-            for event in load_transcript(str(transcript))
-            if event.get("from") == "client" and event.get("message", {}).get("kind") == "get"
-        ]
+        # the transcripts' own get requests: realistic registries, scopes and packages, and only
+        # those of registries the hello names (a transcript may show the provider refusing one it
+        # does not serve); a transcript with none borrows the others of its example
+        served = tuple(hello.get("registries") or ())
+
+        def gets_of(path: Path) -> list[dict]:
+            found = [
+                event["message"]
+                for event in load_transcript(str(path))
+                if event.get("from") == "client" and event.get("message", {}).get("kind") == "get"
+            ]
+            return [request for request in found if request["registry"].startswith(served)] if served else found
+
+        self.pool = gets_of(transcript)
         if not self.pool:
             for other in sorted(transcript.parent.glob("*.jsonl")):
-                self.pool += [
-                    event["message"]
-                    for event in load_transcript(str(other))
-                    if event.get("from") == "client" and event.get("message", {}).get("kind") == "get"
-                ]
+                self.pool += gets_of(other)
         self.write_tokens: set[str] = set()
         # a session is one npm command, whatever the requests it was drawn from said
         self.command = self.random.choice(["install", "ci", "publish", "view"])
@@ -260,6 +264,9 @@ class Session:
 
     def send(self, request: dict, raw: bytes | None = None, *, record: bool = True) -> dict:
         validate_request(request)
+        # npm sends a provider nothing about a registry its hello leaves out: the harness does, to see the
+        # answer, and that exchange is no part of a transcript
+        record = record and self.model.serves(request.get("registry", ""))
         if record:
             self.events.append({"from": "client", "message": request})
         asked_before = self.asked()
@@ -363,6 +370,16 @@ class Session:
             answer = self.send(request)
             if answer != {"Err": {"kind": "url-not-supported"}}:
                 raise Violation("foreign-registry", f"{self.label}: {FOREIGN} answered {answer}")
+            # every kind decides it from the registry alone, before it looks at anything else
+            others = [
+                {"v": 1, "kind": "erase", "registry": FOREIGN, "operation": "read", "granularity": "registry"},
+                {"v": 1, "kind": "login", "registry": FOREIGN, "interactive": False},
+                {"v": 1, "kind": "logout", "registry": FOREIGN},
+            ]
+            for other in others:
+                answer = self.send(other)
+                if answer.get("Err", {}).get("kind") != "url-not-supported":
+                    raise Violation("foreign-registry", f"{self.label}: {other['kind']} on {FOREIGN} answered {answer}")
             return
         if roll < 0.12:
             registry = self.random.choice(self.pool)["registry"]

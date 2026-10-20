@@ -240,7 +240,7 @@ So a global provider starts with any command that goes to the network, to send i
 
 The provider process then lives for the rest of the npm command and serves every request for it. Requests within a session are strictly sequential: the client sends a request only after reading the response to the previous one, and messages carry no request id. npm fetches in parallel, so the client serializes provider requests, and a request waiting its turn looks the cache up again before it is sent: when the answer to the request ahead of it covers it, as a `scope`-level credential covers every package of that scope, it sends no `get`; when an erase ahead of it evicted the credential it would have used, it does not leave with that credential.
 
-The client closes stdin to end the session, and the provider exits. npm need not wait for it to exit and sets no deadline, so a provider must not depend on work after stdin closes, such as revoking a credential it minted: that rests on an expiry the provider chose, since `erase` is sent only after a rejection. Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1 output limit; an oversized line is rejected whole, not partially processed. A provider that receives such a line, or any line that is not a request the schema allows (not UTF-8, not JSON, not an object), answers it with one `Err` (`other`: it is "anything else" in the table above) and serves the next line: it never answers `Ok` to it, and it does not exit for it. A line of nothing but spaces, tabs and carriage returns is skipped.
+The client closes stdin to end the session, and the provider exits. npm need not wait for it to exit and sets no deadline, so a provider must not depend on work after stdin closes, such as revoking a credential it minted: that rests on an expiry the provider chose, since `erase` is sent only after a rejection. Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1 output limit; an oversized line is rejected whole, not partially processed. A provider that receives such a line, or any line that is not a request the schema allows (not UTF-8, not JSON, not an object), answers it with one `Err` (`other`: it is "anything else" in the table above) and serves the next line: it never answers `Ok` to it, and it does not exit for it. A line that is empty or holds nothing but spaces, tabs and carriage returns is skipped.
 
 **Timeouts** are part of the conformance policy ([`spec/policy-v1.json`](spec/policy-v1.json)):
 
@@ -632,7 +632,7 @@ No phase changes behavior for anyone who has not configured a provider. Phase 1 
 
 ## Unresolved Questions
 
-None. The last one, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test: a read-only token does, under the account's default publishing setting; the stricter setting that disallows tokens was not tried ([stage-tiers-test.md](stage-tiers-test.md)).
+None in the protocol. Facts not verified yet are listed in [claims.md](claims.md#not-verified). The last open question, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test: a read-only token does, under the account's default publishing setting; the stricter setting that disallows tokens was not tried ([stage-tiers-test.md](stage-tiers-test.md)).
 
 ## Future possibilities
 

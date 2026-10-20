@@ -117,7 +117,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
     // that checks stderr itself
     secrets: () => [
       ...new Set([
-        ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env }),
+        ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config }),
         ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
         ...collectSecrets(JSON.parse(fs.readFileSync(storeFile, 'utf8'))),
         ...collectSecrets(fakeState),
@@ -146,7 +146,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
         // A masked or partial value is not looked for, and neither is a secret of fewer
         // than six characters (see collectSecrets)
         const secrets = new Set([
-          ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env }),
+          ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config }),
           ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
           ...collectSecrets(JSON.parse(fs.readFileSync(storeFile, 'utf8'))),
           ...collectSecrets(fakeState),

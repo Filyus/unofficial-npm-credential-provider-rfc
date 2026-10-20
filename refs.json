@@ -517,6 +517,14 @@
     "sha256": "62a02076072e95b443ce0414676ce41fdb946248664834346a4922bfaddc3812",
     "file": ".refs/github.com/GoogleCloudPlatform_artifact-registry-npm-tools.txt"
   },
+  "https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/config.js": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/update.js": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
   "https://github.com/NuGet/NuGet.Client": {
     "kind": "page",
     "cited": "2026-10-15",
@@ -577,19 +585,45 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
-  "https://github.com/microsoft/ado-npm-auth": {
-    "kind": "page",
-    "cited": "2026-10-17",
-    "fetched": "2026-10-20",
-    "sha256": "33f77c46268a00fb5eb1ad03a7d0b1ca3ba1a1bc4062ed2d987013ae365aa0be",
-    "file": ".refs/github.com/microsoft_ado-npm-auth.txt"
+  "https://github.com/microsoft/ado-npm-auth/blob/aadffcc6807c73a6ec0113e25ac6a7f350ae420b/packages/ado-npm-auth-lib/src/npmrc/generate-npmrc-pat.ts": {
+    "kind": "source",
+    "cited": "2026-10-20"
   },
-  "https://github.com/microsoft/artifacts-credprovider": {
-    "kind": "page",
-    "cited": "2026-10-17",
-    "fetched": "2026-10-20",
-    "sha256": "da183ca50b023b9392e682ea00185e87ffec5a23912d9b338a4a655d311df5bd",
-    "file": ".refs/github.com/microsoft_artifacts-credprovider.txt"
+  "https://github.com/microsoft/ado-npm-auth/blob/aadffcc6807c73a6ec0113e25ac6a7f350ae420b/packages/ado-npm-auth-lib/src/npmrc/npmrcFileProvider.ts": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/ado-npm-auth/blob/aadffcc6807c73a6ec0113e25ac6a7f350ae420b/packages/ado-npm-auth-lib/src/utils/get-organization-from-feed-url.ts": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/ado-npm-auth/blob/aadffcc6807c73a6ec0113e25ac6a7f350ae420b/packages/ado-npm-auth/README.md": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/IAuthUtil.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/VstsCredentialProvider.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/VstsEndpointPolicy.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/VstsSessionTokenClient.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/VstsSessionTokenFromBearerTokenProvider.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
+  "https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/Util/EnvUtil.cs": {
+    "kind": "source",
+    "cited": "2026-10-20"
   },
   "https://github.com/microsoft/azure-pipelines-tasks/blob/952b2f72d356677dae10cf535dacc0d752ca4cb9/Tasks/NpmAuthenticateV0/npmauthutils.ts": {
     "kind": "source",
@@ -705,6 +739,10 @@
     "kind": "source",
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
+  },
+  "https://github.com/verdaccio/verdaccio/blob/5009e4d760373859b279d55ceaf66604d94b2a19/packages/api/src/whoami.ts": {
+    "kind": "source",
+    "cited": "2026-10-20"
   },
   "https://github.com/verdaccio/verdaccio/blob/5009e4d760373859b279d55ceaf66604d94b2a19/packages/auth/src/auth.ts": {
     "kind": "source",

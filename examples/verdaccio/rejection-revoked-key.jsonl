@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIyODI1MDAsIm5hbWUiOiJleGFtcGxlLXVzZXIifQ.example-signature"},"cache":"expires","expiresAt":1792282500,"granularity":"registry","operationIndependent":false}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The Verdaccio token for https://npm.example.test/verdaccio/ was rejected. Run npm logout, then npm login."}}}
+{"from":"client","event":"close"}

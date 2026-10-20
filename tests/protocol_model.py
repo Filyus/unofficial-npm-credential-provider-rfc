@@ -889,6 +889,10 @@ def validate_transcript(path: str, config: ProviderConfig | None = None) -> Cred
                 continue
             message = event.get("message")
             validate_request(message)
+            if not client.serves(message["registry"]):
+                raise ProtocolViolation(
+                    f"npm sends a provider nothing about {message['registry']}: its hello leaves it out"
+                )
             if "command" in message:
                 if session_command not in (None, message["command"]):
                     raise ProtocolViolation(

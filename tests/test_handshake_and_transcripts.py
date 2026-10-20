@@ -168,6 +168,30 @@ class TranscriptTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate(transcript("ci", "publish"))
 
+    def test_npm_sends_a_provider_nothing_about_a_registry_its_hello_leaves_out(self) -> None:
+        """Phase 2, hello `registries`: npm treats a registry outside the list as
+        answered `url-not-supported` and sends that provider nothing about it,
+        so a transcript with such a request is not a trace of any client."""
+        ok = {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "t"}, "cache": "session"}}
+
+        def run(registry: str) -> None:
+            events = [
+                {"from": "provider", "message": {"v": [1], "registries": ["https://registry.example.test/"]}},
+                {"from": "client", "message": {"v": 1, "kind": "get", "registry": registry, "operation": "read",
+                                               "command": "install", "interactive": False}},
+                {"from": "provider", "message": ok},
+                {"from": "client", "event": "close"},
+            ]
+            with tempfile.TemporaryDirectory() as scratch:
+                path = Path(scratch) / "t.jsonl"
+                path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+                validate_transcript(str(path))
+
+        run("https://registry.example.test/a/b")
+        for outside in ("http://registry.example.test/", "https://other.example.test/"):
+            with self.subTest(registry=outside), self.assertRaises(ProtocolViolation):
+                run(outside)
+
     def test_not_found_leaves_the_session_usable_for_the_chain(self) -> None:
         client = validate_transcript(str(TRANSCRIPTS / "not-found.jsonl"))
 

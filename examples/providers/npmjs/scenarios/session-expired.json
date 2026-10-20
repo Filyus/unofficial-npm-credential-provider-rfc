@@ -1,0 +1,52 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "store": {
+    "tokens": [
+      {
+        "tier": "read",
+        "token": "example-read-token",
+        "selects": {
+          "scopes": [
+            "@acme"
+          ]
+        },
+        "issuedAt": 1790000000
+      },
+      {
+        "tier": "session",
+        "token": "example-session-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1792230000
+      }
+    ]
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "read",
+          "token": "example-read-token",
+          "selects": {
+            "scopes": [
+              "@acme"
+            ]
+          },
+          "issuedAt": 1790000000
+        },
+        {
+          "tier": "session",
+          "token": "example-session-token",
+          "selects": {
+            "all": true
+          },
+          "issuedAt": 1792230000
+        }
+      ]
+    }
+  }
+}

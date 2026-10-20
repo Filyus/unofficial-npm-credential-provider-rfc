@@ -4,7 +4,5 @@
 {"from":"client","message":{"v":1,"kind":"erase","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}}
 {"from":"provider","message":{"Ok":{"kind":"erase"}}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}}
-{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
-{"from":"client","message":{"v":1,"kind":"erase","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}}
-{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"npm says the stored read token for @acme is still valid, so the 401 did not come from the token but from the registry or the URL. No other credential is released for this request, and no token is handed out again."}}}
 {"from":"client","event":"close"}

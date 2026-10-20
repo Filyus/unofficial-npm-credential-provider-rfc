@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTU2NTIxMDAsIm5hbWUiOiJleGFtcGxlLXVzZXIifQ.example-signature"},"cache":"expires","expiresAt":1794788100,"granularity":"registry","operationIndependent":false}}}
+{"from":"client","event":"close"}

@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Publishing @corp/ui-kit@2.4.1 was not confirmed within 4 minutes 30 seconds."}}}
+{"from":"client","event":"close"}

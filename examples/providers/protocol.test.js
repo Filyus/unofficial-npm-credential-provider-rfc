@@ -195,3 +195,29 @@ test('a scenario that cannot be set up fails with its reason and leaves nothing 
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+const runProvider = (...args) =>
+  new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'gitlab', 'provider.js'), ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
+    child.on('close', (code) => resolve({ code, stdout, stderr }))
+    child.stdin.end()
+  })
+
+test('a provider that cannot start says why on stderr, exits non-zero and writes nothing to stdout', async () => {
+  const missing = await runProvider('--npm-credential-provider')
+  assert.equal(missing.code, 2)
+  assert.equal(missing.stdout, '')
+  assert.match(missing.stderr, /cannot start: --config <file> is required/)
+  assert.doesNotMatch(missing.stderr, /\bat .*\.js:\d+/, 'no stack trace')
+  const twice = await runProvider('--npm-credential-provider', '--config', 'a', '--config', 'b')
+  assert.equal(twice.code, 2)
+  assert.match(twice.stderr, /--config given twice/)
+})

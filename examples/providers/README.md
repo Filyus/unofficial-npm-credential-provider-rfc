@@ -37,6 +37,19 @@ The transcripts check what someone thought to record. [`tests/test_provider_sess
 
 The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. None of this has run against a live registry: no secret is needed, and none is in the repository.
 
+## What the reference providers simplify
+
+Each of these is a limit of the example, not a gap in the protocol: the pages describe a fuller provider, and say where the reference one is simpler.
+
+| Simplification | Why | Widened when |
+|---|---|---|
+| A sign-in that a vendor's CLI would run (`gcloud auth login`, `aws sso login`, the Entra device flow, JFrog web login) is the vendor's device flow spoken in-process against the fake | a run cannot depend on a CLI being installed or on a browser | never for the CLIs; the device flows themselves are what the fakes model |
+| Prompts are yes or no; a password comes from `scriptedLogin` in the settings (Verdaccio) and no one-time password or MFA code is sent (`npm-otp`, AWS `TokenCode`) | `lib/context.js` has no text prompt and `request` takes no headers | `lib/context.js` gets a text prompt and `request` gets headers |
+| With no controlling terminal a provider still polls its device flow to the deadline | `showToPerson` does not say whether it showed anything | `showToPerson` reports whether it showed the step, and every provider with a device flow answers `other` at once |
+| Azure's `az account get-access-token` is an HTTP address of the fake; AWS's SSO cache is the provider's own store; Google's sign-in is not a `gcloud` configuration directory | the same: no CLI in a run | never |
+| A pasted JFrog identity token is not validated; GitHub's `dist-tag` is served on the page's unverified word; Verdaccio sends a password over `http:` | no documented call to check it with; the operator's own configuration | a documented validation call; the vendor documents the endpoint; an opt-in setting |
+| Some branches have no transcript and are reached only by random sessions or by hand | each needs a scenario of its own | a scenario and a transcript per branch; the list of branches is the one the random sessions reach and no transcript does |
+
 ## What the transcripts pin
 
 Every behaviour the providers' authors found unpinned on a first pass now has an exchange of its own, and each was seen to fail when the code behind it was broken: a GitLab job token asked about another project, the deploy token `erase` deletes, a read and a stage-only credential refused with 403 on npmjs.com, a package with no read token, a pasted token in `npm login`, `access` in CI, `Retry-After` on the web-login poll, the corporate gateway refusing a revoked IdP access token, a 403 with the user's groups unchanged, a CI identity without the publisher role, `slow_down` in the device flow, a device sign-in nobody approves and a presence prompt nobody answers, both ended by the provider's 4 minutes 30 seconds of synthetic time.

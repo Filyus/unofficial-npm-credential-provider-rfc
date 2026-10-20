@@ -1,0 +1,23 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "presence": [
+    "silent"
+  ],
+  "store": {
+    "tokens": [
+      {
+        "tier": "publish",
+        "token": "example-publish-token",
+        "selects": {
+          "packages": [
+            "@acme/widgets"
+          ]
+        },
+        "issuedAt": 1790000000
+      }
+    ]
+  }
+}

@@ -29,9 +29,10 @@
     "store": {
       "https://acme.jfrog.io": {
         "login": {
+          "type": "refresh",
+          "accessToken": "example-login-access-token",
           "refreshToken": "example-refresh-token"
-        },
-        "minted": null
+        }
       }
     },
     "state": {

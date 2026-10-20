@@ -44,6 +44,15 @@ class RefsTests(unittest.TestCase):
         if not checked:
             self.skipTest("no copies in .refs/ on this machine")
 
+    def test_a_redirect_to_another_host_is_not_followed(self) -> None:
+        import urllib.error
+        import urllib.request
+        handler = refs.SameHost()
+        request = urllib.request.Request("https://docs.example.test/a")
+        self.assertIsNotNone(handler.redirect_request(request, None, 301, "", {}, "https://docs.example.test/b"))
+        with self.assertRaises(urllib.error.HTTPError):
+            handler.redirect_request(request, None, 301, "", {}, "https://elsewhere.example.test/a")
+
     def test_a_branch_link_and_a_commit_link_are_told_apart(self) -> None:
         self.assertTrue(refs.BRANCH_SOURCE.match("https://github.com/o/r/blob/master/a/b.go"))
         self.assertTrue(refs.BRANCH_SOURCE.match("https://github.com/o/r/blob/main/a.md"))

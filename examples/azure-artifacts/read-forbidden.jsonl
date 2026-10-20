@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"basic","username":"VssSessionToken","password":"example-session-token-1"},"cache":"expires","expiresAt":1792213200,"operationIndependent":true,"granularity":"registry"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Azure Artifacts refused the read of @contoso/ui with 403. The credential the provider holds for the contoso organization is the widest it releases for this request, and no other is released. Ask a feed owner for the role the operation needs."}}}
+{"from":"client","event":"close"}

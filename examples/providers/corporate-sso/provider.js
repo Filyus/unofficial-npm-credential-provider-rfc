@@ -24,7 +24,8 @@ const CLIENT_ID = 'corp-npm-credential-provider'
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 const STEP_UP_SECONDS = 5 * 60
 const ACCESS_MARGIN_SECONDS = 60
-// inside npm's 5-minute budget for `login` and an interactive `get`
+// inside npm's 5-minute budget for `login` and an interactive `get`: one
+// deadline per request, shared by a device sign-in and a presence prompt
 const WAIT_MS = 4.5 * 60 * 1000
 // What the gateway's publish policy covers: user presence and a step-up no
 // older than 5 minutes (the npm-publisher role in CI), and a token bound to
@@ -42,6 +43,13 @@ const WRITE_VERBS = {
 const minutes = (ms) => {
   const seconds = Math.max(0, Math.round(ms / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+// 270000 -> "4 minutes 30 seconds"
+const spoken = (ms) => {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  const part = (n, unit) => (n ? [`${n} ${unit}${n === 1 ? '' : 's'}`] : [])
+  return [...part(Math.floor(seconds / 60), 'minute'), ...part(seconds % 60, 'second')].join(' ') || '0 seconds'
 }
 
 const start = (args) => {
@@ -65,7 +73,8 @@ const start = (args) => {
 
   // --- device flow (RFC 8628, sections 3.1 to 3.5) -------------------------
 
-  const deviceLogin = async () => {
+  // `until`: the request's deadline, in clock milliseconds
+  const deviceLogin = async (until) => {
     const started = await ctx.request('POST', `${idp}/device_authorization`, {
       form: { client_id: CLIENT_ID, scope: 'openid offline_access' },
     })
@@ -74,7 +83,7 @@ const start = (args) => {
     }
     const { device_code: deviceCode, user_code: userCode, verification_uri: uri } = started.json
     let interval = started.json.interval ?? 5
-    const budget = Math.min((started.json.expires_in ?? 270) * 1000, WAIT_MS)
+    const budget = Math.min((started.json.expires_in ?? 270) * 1000, Math.max(0, until - ctx.clockMs()))
     const deadline = ctx.clockMs() + budget
     ctx.showToPerson(`Open ${uri} and enter the code ${userCode}\nWaiting for approval (${minutes(budget)} left) ...`)
     for (;;) {
@@ -98,14 +107,14 @@ const start = (args) => {
         throw new Error(`The identity provider refused the sign-in (HTTP ${polled.status}).`)
       }
       if (ctx.clockMs() >= deadline) {
-        throw new Error('Stopped waiting for the sign-in after 4 minutes 30 seconds.')
+        throw new Error(`Stopped waiting for the sign-in after ${spoken(budget)}.`)
       }
     }
   }
 
   // a device login: the person has just confirmed at the IdP
-  const signIn = async () => {
-    const granted = await deviceLogin()
+  const signIn = async (until) => {
+    const granted = await deviceLogin(until ?? ctx.clockMs() + WAIT_MS)
     const now = ctx.now()
     saveSession({
       refreshToken: granted.refresh_token,
@@ -121,7 +130,7 @@ const start = (args) => {
   // The access token of the stored session: the cached one while it has
   // time left, else a refresh. `invalid_grant` means the login is dead:
   // a device flow where a person is there, `other` where not.
-  const sessionAccess = async (req, { force = false } = {}) => {
+  const sessionAccess = async (req, { force = false, until } = {}) => {
     const session = readSession()
     const now = ctx.now()
     if (!force && session.accessToken && session.accessExpiresAt - now > ACCESS_MARGIN_SECONDS) {
@@ -143,13 +152,15 @@ const start = (args) => {
       if (!req.interactive) {
         throw new Error(expiredMessage(req))
       }
-      return signIn()
+      return signIn(until)
     }
     throw new Error(`The identity provider could not renew the session (HTTP ${refreshed.status}).`)
   }
 
   // CI: the service identity file is the image's, named by this
-  // configuration; never the environment or a project file
+  // configuration; never the environment or a project file. The environment
+  // only says that this is a CI run (`CI` is set, as npm's own detection
+  // reads it), so a developer machine with the setting does not use it.
   const serviceIdentity = () => {
     const file = ctx.config.serviceIdentity
     if (!file || !process.env.CI || process.env.CI === 'false') {
@@ -234,6 +245,10 @@ const start = (args) => {
     const what = req.operation === 'publish' ? `publishing ${label}` : `${req.operation} of ${label}`
     const subject = req.operation === 'publish' ? `Publishing ${label}` : `The ${req.operation} of ${label}`
 
+    // one deadline for everything in this request that waits on the person: a
+    // device sign-in, then the prompt
+    const until = ctx.clockMs() + WAIT_MS
+
     const identity = serviceIdentity()
     if (identity) {
       let granted = await identityAccess(identity)
@@ -255,13 +270,13 @@ const start = (args) => {
         )
       }
       if (ctx.now() - (readSession().interactiveAt ?? 0) > STEP_UP_SECONDS) {
-        await signIn()
+        await signIn(until)
       }
     }
 
     // a 403 says the entitlement may have changed: renew the IdP claims first
     const rejected = req.retry === true && req.httpStatus === 403
-    const access = await sessionAccess(req, { force: rejected })
+    const access = await sessionAccess(req, { force: rejected, until })
     if (rejected) {
       const info = await ctx.request('GET', `${idp}/userinfo`, { token: access })
       const current = JSON.stringify([...((info.json && info.json.groups) || [])].sort())
@@ -272,7 +287,9 @@ const start = (args) => {
 
     if (write) {
       const question = `${WRITE_VERBS[req.operation]} ${label} ${req.operation === 'publish' ? 'to' : 'on'} ${new URL(req.registry).host}?`
-      const answer = await confirmWithin(question, WAIT_MS)
+      // a sign-in that has used the budget leaves nothing to ask in
+      const left = until - ctx.clockMs()
+      const answer = left > 0 ? await confirmWithin(question, left) : null
       if (answer === null) {
         return err('other', `${subject} was not confirmed within 4 minutes 30 seconds.`)
       }
@@ -285,7 +302,10 @@ const start = (args) => {
 
   // Drops what was handed to npm and the access token kept for it; the
   // refresh token is `login`'s and only `logout` removes it.
-  const erase = async () => {
+  const erase = async (req) => {
+    if (!REGISTRIES.includes(req.registry)) {
+      return err('url-not-supported')
+    }
     const session = readSession()
     if (session) {
       saveSession({ ...session, accessToken: null, accessExpiresAt: null })
@@ -300,7 +320,7 @@ const start = (args) => {
     if (!req.interactive) {
       return err('other', 'Signing in needs a terminal, and none is available.')
     }
-    await signIn()
+    await signIn(ctx.clockMs() + WAIT_MS)
     return ok('login')
   }
 
@@ -310,19 +330,21 @@ const start = (args) => {
       return err('url-not-supported')
     }
     const session = readSession()
-    if (session) {
-      try {
-        const revoked = await ctx.request('POST', `${idp}/revoke`, {
-          form: { token: session.refreshToken, client_id: CLIENT_ID },
-        })
-        if (revoked.status !== 200) {
-          log(`could not revoke the session at the identity provider (HTTP ${revoked.status})`)
-        }
-      } catch (error) {
-        log(`could not reach the identity provider to revoke the session: ${error.message}`)
-      }
-      saveSession(null)
+    if (!session) {
+      // nothing was stored for either host: nothing to remove
+      return err('not-found')
     }
+    try {
+      const revoked = await ctx.request('POST', `${idp}/revoke`, {
+        form: { token: session.refreshToken, client_id: CLIENT_ID },
+      })
+      if (revoked.status !== 200) {
+        log(`could not revoke the session at the identity provider (HTTP ${revoked.status})`)
+      }
+    } catch (error) {
+      log(`could not reach the identity provider to revoke the session: ${error.message}`)
+    }
+    saveSession(null)
     return ok('logout')
   }
 

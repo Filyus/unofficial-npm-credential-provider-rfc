@@ -31,11 +31,24 @@ const corpus = {
   spec: () => read(path.join(rfc, 'spec', 'policy-v1.json')),
 }
 const loaded = {}
+const specKeys = new Set()
+const collectKeys = (value) => {
+  if (value && typeof value === 'object') {
+    for (const [key, inner] of Object.entries(value)) {
+      specKeys.add(key)
+      collectKeys(inner)
+    }
+  }
+}
+collectKeys(JSON.parse(read(path.join(rfc, 'spec', 'policy-v1.json'))))
 const found = (kind, text) => {
   if (kind === 'py') {
     return fs.existsSync(path.join(rfc, 'tests', `${text}.py`))
   }
   loaded[kind] ??= corpus[kind]()
+  if (kind === 'spec') {
+    return specKeys.has(text)
+  }
   return loaded[kind].includes(text)
 }
 
