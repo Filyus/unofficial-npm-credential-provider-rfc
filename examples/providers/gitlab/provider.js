@@ -240,7 +240,11 @@ const start = async (args) => {
     if (device.status !== 200 || !device.json || !device.json.device_code) {
       return err('other', `GitLab answered ${device.status} to the device authorization request`)
     }
-    ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)
+    // with no terminal to show the code on nobody can approve it: stop before polling,
+    // with nothing stored; the unused device code expires at GitLab on its own
+    if (!ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)) {
+      return err('other', 'There is no terminal to show the sign-in on; run npm login from a terminal.')
+    }
     let wait = (device.json.interval ?? 5) * 1000
     // the device code lives as long as the server says, and npm gives a login
     // five minutes; polling past either is no use

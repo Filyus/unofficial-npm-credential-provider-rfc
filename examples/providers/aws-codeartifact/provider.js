@@ -100,6 +100,7 @@ const start = (args) => {
   // the arguments of the provider's own configuration line, never the environment
   const { profile, allowOwner, registries = [] } = config
   const lapsedMessage = `The AWS IAM Identity Center session for profile ${profile} has expired, so no new CodeArtifact token can be issued. Run aws sso login --profile ${profile}, or npm login.`
+  const noTerminalMessage = `There is no terminal to show the aws sso login --profile ${profile} sign-in on, so it was not started and nothing was stored. Run npm login from a terminal.`
   const notCompletedMessage = `aws sso login --profile ${profile} was not completed, so no AWS session exists. Nothing was stored. Run npm login again and finish the sign-in in the browser.`
 
   // what the SDK holds in memory: the role credentials of the sign-in
@@ -138,7 +139,10 @@ const start = (args) => {
     const { deviceCode, userCode, verificationUri } = started.json
     let interval = started.json.interval ?? 5
     const deadline = ctx.clockMs() + Math.min((started.json.expiresIn ?? 270) * 1000, WAIT_MS)
-    ctx.showToPerson(`Open ${verificationUri} and enter the code ${userCode}`)
+    // nothing can be finished when the step cannot be shown: stop before polling, and store nothing
+    if (!ctx.showToPerson(`Open ${verificationUri} and enter the code ${userCode}`)) {
+      throw refuse(noTerminalMessage)
+    }
     for (;;) {
       await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
       const polled = await ctx.request('POST', `${oidc}/token`, {

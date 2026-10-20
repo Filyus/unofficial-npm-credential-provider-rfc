@@ -6,7 +6,8 @@
 //                                              each with Retry-After, and a poll sooner than
 //                                              that is answered 429
 // It records `revoked` (tokens deleted), `logins` (web logins started) and
-// `doneAuth` (the credential, if any, a done poll carried).
+// `doneAuth` (the credential, if any, a done poll carried) and
+// `polls` (done polls answered).
 
 const createFake = (state) => {
   state.tokens ||= {}
@@ -45,6 +46,7 @@ const createFake = (state) => {
     }
     if (method === 'GET' && path === '/-/v1/done' && state.login) {
       state.doneAuth = request.token
+      state.polls = (state.polls || 0) + 1
       const retryAfter = state.login.retryAfter
       if (retryAfter && request.clock < notBefore) {
         state.tooSoon = (state.tooSoon || 0) + 1

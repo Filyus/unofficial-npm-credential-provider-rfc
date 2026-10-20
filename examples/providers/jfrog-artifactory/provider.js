@@ -254,7 +254,10 @@ const start = async (args) => {
     if (started.status !== 200) {
       return err('other', 'This Artifactory did not start a web login (7.64.0 or later has it). Run npm login with an identity token from the Artifactory UI.')
     }
-    ctx.showToPerson(`Open ${root}/ui/login?jfClientSession=${session} and check that the code is ${session.slice(-4)}`)
+    if (!ctx.showToPerson(`Open ${root}/ui/login?jfClientSession=${session} and check that the code is ${session.slice(-4)}`)) {
+      // the session started at Artifactory is left to lapse; nothing was stored
+      return err('other', 'There is no terminal to show the web login on; run npm login from a terminal.')
+    }
     const until = ctx.clockMs() + WAIT_MS
     while (ctx.clockMs() + POLL_MS <= until) {
       await ctx.sleep(POLL_MS)

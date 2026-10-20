@@ -146,7 +146,10 @@ const start = (args) => {
     const { device_code: deviceCode, user_code: userCode, verification_uri: uri } = started.json
     let interval = started.json.interval ?? 5
     const deadline = ctx.clockMs() + Math.min((started.json.expires_in ?? 90) * 1000, DEVICE_WAIT_MS)
-    ctx.showToPerson(`Open ${uri} and enter the code ${userCode}`)
+    // nothing can be finished when the step cannot be shown: stop before polling, and store nothing
+    if (!ctx.showToPerson(`Open ${uri} and enter the code ${userCode}`)) {
+      throw fail(`There is no terminal to show the Microsoft Entra sign-in for the ${org} organization on, so it was not started. Nothing was stored. Run npm login from a terminal.`)
+    }
     for (;;) {
       await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
       const polled = await ctx.request('POST', `${authority}/oauth2/v2.0/token`, {

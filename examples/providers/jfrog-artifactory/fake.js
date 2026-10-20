@@ -13,6 +13,7 @@
 //   login.confirmed                  false: the person never confirms
 //   login.result                     the token response once they do
 //   login.sessions                   session ids started
+//   login.polls                      web-login polls answered (the fake sets it)
 //   oidc.requestToken, oidc.idToken  the CI's own endpoint and what it gives
 //   oidc.mappings                    provider name to the token the exchange returns
 //   oidc.exchanged                   exchanges done, by provider name
@@ -27,6 +28,7 @@ const createFake = (state) => {
   state.revoked = state.revoked || []
   state.login = state.login || {}
   state.login.sessions = state.login.sessions || []
+  state.login.polls = 0
   state.oidc = state.oidc || {}
   state.oidc.exchanged = state.oidc.exchanged || []
 
@@ -81,6 +83,7 @@ const createFake = (state) => {
     }
     const poll = /^\/access\/api\/v2\/authentication\/jfrog_client_login\/token\/([^/]+)$/.exec(path)
     if (method === 'GET' && poll) {
+      state.login.polls += 1
       if (!state.login.sessions.includes(poll[1])) {
         return json(404, { error: 'no such session' })
       }

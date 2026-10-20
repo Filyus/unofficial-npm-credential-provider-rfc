@@ -221,3 +221,21 @@ test('a provider that cannot start says why on stderr, exits non-zero and writes
   assert.equal(twice.code, 2)
   assert.match(twice.stderr, /--config given twice/)
 })
+
+test('every provider that shows a sign-in step stops when it could not be shown', () => {
+  const fs = require('node:fs')
+  const calls = []
+  for (const name of fs.readdirSync(__dirname)) {
+    const file = path.join(__dirname, name, 'provider.js')
+    if (!fs.existsSync(file)) {
+      continue
+    }
+    fs.readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+      if (line.includes('showToPerson(')) {
+        calls.push({ where: `${name}/provider.js:${index + 1}`, checked: /if \(!ctx\.showToPerson\(/.test(line) })
+      }
+    })
+  }
+  assert.ok(calls.length >= 8, `found ${calls.length} calls`)
+  assert.deepEqual(calls.filter((call) => !call.checked).map((call) => call.where), [], 'a call that ignores whether the step was shown')
+})

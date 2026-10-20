@@ -100,7 +100,11 @@ const start = async (args) => {
     if (device.status !== 200 || !device.json || !device.json.device_code) {
       throw new Answer(err('other', `GitHub answered ${device.status} to the device authorization request`))
     }
-    ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)
+    // with no terminal to show the code on nobody can approve it: stop before polling,
+    // with nothing stored; the unused device code expires at GitHub on its own
+    if (!ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)) {
+      throw new Answer(err('other', 'There is no terminal to show the sign-in on; run npm login from a terminal.'))
+    }
     let wait = Math.max(1, device.json.interval ?? 5) * 1000
     const until = ctx.clockMs() + Math.min(device.json.expires_in ?? 900, DEVICE_LIMIT_MS / 1000) * 1000
     while (ctx.clockMs() + wait <= until) {

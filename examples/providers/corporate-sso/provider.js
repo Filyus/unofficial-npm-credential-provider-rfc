@@ -74,7 +74,7 @@ const start = (args) => {
   // --- device flow (RFC 8628, sections 3.1 to 3.5) -------------------------
 
   // `until`: the request's deadline, in clock milliseconds
-  const deviceLogin = async (until) => {
+  const deviceLogin = async (req, until) => {
     const started = await ctx.request('POST', `${idp}/device_authorization`, {
       form: { client_id: CLIENT_ID, scope: 'openid offline_access' },
     })
@@ -85,7 +85,11 @@ const start = (args) => {
     let interval = started.json.interval ?? 5
     const budget = Math.min((started.json.expires_in ?? 270) * 1000, Math.max(0, until - ctx.clockMs()))
     const deadline = ctx.clockMs() + budget
-    ctx.showToPerson(`Open ${uri} and enter the code ${userCode}\nWaiting for approval (${minutes(budget)} left) ...`)
+    // nobody can finish a sign-in that was not shown: stop before the first
+    // poll, with nothing stored (the unused device code lapses at the IdP)
+    if (!ctx.showToPerson(`Open ${uri} and enter the code ${userCode}\nWaiting for approval (${minutes(budget)} left) ...`)) {
+      throw new Error(`There is no terminal to show the sign-in on; run 'npm login --registry ${req.registry}' from a terminal.`)
+    }
     for (;;) {
       await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
       const polled = await ctx.request('POST', tokenUrl, {
@@ -113,8 +117,8 @@ const start = (args) => {
   }
 
   // a device login: the person has just confirmed at the IdP
-  const signIn = async (until) => {
-    const granted = await deviceLogin(until ?? ctx.clockMs() + WAIT_MS)
+  const signIn = async (req, until) => {
+    const granted = await deviceLogin(req, until ?? ctx.clockMs() + WAIT_MS)
     const now = ctx.now()
     saveSession({
       refreshToken: granted.refresh_token,
@@ -152,7 +156,7 @@ const start = (args) => {
       if (!req.interactive) {
         throw new Error(expiredMessage(req))
       }
-      return signIn(until)
+      return signIn(req, until)
     }
     throw new Error(`The identity provider could not renew the session (HTTP ${refreshed.status}).`)
   }
@@ -270,7 +274,7 @@ const start = (args) => {
         )
       }
       if (ctx.now() - (readSession().interactiveAt ?? 0) > STEP_UP_SECONDS) {
-        await signIn(until)
+        await signIn(req, until)
       }
     }
 
@@ -320,7 +324,7 @@ const start = (args) => {
     if (!req.interactive) {
       return err('other', 'Signing in needs a terminal, and none is available.')
     }
-    await signIn(ctx.clockMs() + WAIT_MS)
+    await signIn(req, ctx.clockMs() + WAIT_MS)
     return ok('login')
   }
 

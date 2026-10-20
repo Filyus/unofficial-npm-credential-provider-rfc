@@ -1,0 +1,43 @@
+{
+  "terminal": false,
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "oauth": {
+      "pending": 5,
+      "next": [
+        {
+          "accessToken": "access-1",
+          "refreshToken": "refresh-1"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": null
+    },
+    "state": {
+      "oauth": {
+        "pending": 5,
+        "next": [
+          {
+            "accessToken": "access-1",
+            "refreshToken": "refresh-1"
+          }
+        ],
+        "tooSoon": null,
+        "revoked": []
+      }
+    }
+  }
+}

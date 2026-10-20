@@ -1,0 +1,41 @@
+{
+  "hosts": [
+    "https://api.github.com",
+    "https://github.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "clientId": "example-oauth-app",
+    "owners": {
+      "@acme": "work",
+      "@octocat": "personal"
+    },
+    "defaultAccount": "work"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "login": {
+      "token": "example-device-token",
+      "pending": 3
+    },
+    "tokens": {}
+  },
+  "expect": {
+    "store": {
+      "https://npm.pkg.github.com/": null
+    },
+    "state": {
+      "revoked": [],
+      "login": {
+        "pending": 3,
+        "tooSoon": null
+      },
+      "tokens": {
+        "example-device-token": null
+      }
+    }
+  },
+  "terminal": false
+}

@@ -256,7 +256,11 @@ const create = async (args) => {
     if (new URL(doneUrl).origin !== REGISTRY.slice(0, -1)) {
       return err('other', 'The registry named a doneUrl outside its own origin; not following it.')
     }
-    ctx.showToPerson(`Open ${loginUrl} to log in to npmjs.com`)
+    // nobody can finish a login that was not shown: stop before the first poll,
+    // with nothing stored (the unused login at the registry lapses on its own)
+    if (!ctx.showToPerson(`Open ${loginUrl} to log in to npmjs.com`)) {
+      return err('other', 'There is no terminal to show the login on; run npm login --registry https://registry.npmjs.org/ from a terminal.')
+    }
     // the registry's Retry-After decides the wait; without one, the interval.
     // `pollMs`, `loginSeconds` and `pollLimit` are knobs of the configuration
     // for a run (a poll of 20 ms, a shorter login); the page does not name them

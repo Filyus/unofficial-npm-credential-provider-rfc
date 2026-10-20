@@ -18,7 +18,7 @@
 // state.iam:   serviceAccounts { email: { roles, tokenCreators, tokens } }, a
 //              queue of tokens per account that each impersonation takes from
 // state.sts:   audience, subjectToken, principal, roles, expiresIn, tokens
-// The fake adds oauth.devices, oauth.refreshes, iam.issued and sts.issued:
+// The fake adds oauth.devices, oauth.polls (device-code polls), oauth.refreshes, iam.issued and sts.issued:
 // the principal and IAM roles each token was minted for, which is what the
 // registry would judge it by.
 
@@ -30,6 +30,7 @@ const createFake = (state) => {
   const sts = (state.sts ??= {})
   oauth.sessions ??= {}
   oauth.devices = 0
+  oauth.polls = 0
   oauth.refreshes = 0
   iam.serviceAccounts ??= {}
   iam.issued = []
@@ -55,6 +56,7 @@ const createFake = (state) => {
       return json(200, { access_token: issueAccess(session.account), expires_in: 3600, token_type: 'Bearer' })
     }
     if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
+      oauth.polls += 1
       if (!/^device-code-\d+$/.test(body.device_code || '') || Number(body.device_code.slice(12)) > oauth.devices) {
         return json(400, { error: 'invalid_grant' })
       }

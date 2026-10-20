@@ -82,7 +82,10 @@ const start = (args) => {
     }
     const { device_code: deviceCode, user_code: userCode, verification_url: url } = started.json
     let interval = started.json.interval ?? 5
-    ctx.showToPerson(`Open ${url} and enter the code ${userCode}`)
+    if (!ctx.showToPerson(`Open ${url} and enter the code ${userCode}`)) {
+      // nothing the person could finish: the code is left to expire at Google
+      throw new Failed(`There is no terminal to show the sign-in on, so ${command} was not run. Nothing was stored. Run npm login from a terminal.`)
+    }
     for (;;) {
       await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
       const polled = await ctx.request('POST', `${OAUTH}/token`, {

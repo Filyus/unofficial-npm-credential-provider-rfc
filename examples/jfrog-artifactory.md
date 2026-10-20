@@ -162,6 +162,8 @@ Username and password are no substitute: SSO and SAML users have no usable passw
 {"Err":{"kind":"other","message":"Stopped waiting for the web login after 4 minutes 30 seconds. Run npm login again."}}
 ```
 
+With no controlling terminal the provider cannot show the login page either, so it does not wait for it: it stops at once, without polling, and answers `other` naming `npm login` to run from a terminal. Nothing is stored, and the session it started at Artifactory lapses unused ([login-no-terminal.jsonl](jfrog-artifactory/login-no-terminal.jsonl)).
+
 An instance older than 7.64.0 answers the request for a session with an error rather than a login page (unverified, from memory); the provider then answers `other` as well, telling the person to paste an identity token ([login-token.jsonl](jfrog-artifactory/login-token.jsonl)).
 
 `logout` ([logout.jsonl](jfrog-artifactory/logout.jsonl)) tries to revoke the stored long-lived token on the server, then deletes the keychain entries, and answers `Ok` even if the revocation failed, with a warning on stderr. Revocation works only on the instance that issued the token, and only for tokens above the revocable threshold. The tokens it hands to npm last an hour, below the revocable threshold, so they cannot be revoked and live until their `expiresAt`.
