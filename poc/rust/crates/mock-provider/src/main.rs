@@ -18,6 +18,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // `hang-<what>` never answers `<what>`, and serves everything else:
+    // hello, get, get-interactive, erase, login, logout
+    if scenario == "hang-hello" {
+        hang();
+    }
+
     if scenario == "version-mismatch" {
         write_json_line(
             &mut io::stdout(),
@@ -84,6 +90,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             continue;
         }
+        if let Some(what) = scenario.strip_prefix("hang-") {
+            let asked = match (&request.kind, request.interactive) {
+                (RequestKind::Get, Some(true)) => "get-interactive",
+                (RequestKind::Get, _) => "get",
+                (RequestKind::Login, _) => "login",
+                (RequestKind::Logout, _) => "logout",
+                (RequestKind::Erase, _) => "erase",
+                (RequestKind::Unsupported, _) => "",
+            };
+            if what == asked {
+                hang();
+            }
+            let response = match request.kind {
+                RequestKind::Get => ProviderOk::bearer("test-token", Granularity::Scope),
+                _ => ProviderOk::done(request.kind.clone()),
+            };
+            write_json_line(&mut io::stdout(), &ProviderResponse::Ok(response))?;
+            continue;
+        }
         if scenario == "invalid-json" {
             println!("{{not-json}}");
             continue;
@@ -136,6 +161,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Waits for the client to kill it.
+fn hang() -> ! {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
 }
 
 fn parse_scenario() -> String {

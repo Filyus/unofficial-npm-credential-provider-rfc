@@ -5,7 +5,70 @@ use credential_provider_protocol::{
 };
 use std::fmt;
 use std::io::{BufReader, Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// The time a provider gets to answer, per kind of wait. The default is the
+/// policy's (`spec/policy-v1.json`, `credentialProvider.timeoutSeconds`, through
+/// the generated constants); a test builds a smaller one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Timeouts {
+    pub hello: Duration,
+    pub get: Duration,
+    pub get_interactive: Duration,
+    pub erase: Duration,
+    pub login: Duration,
+    pub logout: Duration,
+}
+
+impl Timeouts {
+    /// The limits of the policy.
+    pub const fn policy() -> Self {
+        Self {
+            hello: Duration::from_secs(generated::HELLO_TIMEOUT_SECONDS),
+            get: Duration::from_secs(generated::GET_TIMEOUT_SECONDS),
+            get_interactive: Duration::from_secs(generated::GET_INTERACTIVE_TIMEOUT_SECONDS),
+            erase: Duration::from_secs(generated::ERASE_TIMEOUT_SECONDS),
+            login: Duration::from_secs(generated::LOGIN_TIMEOUT_SECONDS),
+            logout: Duration::from_secs(generated::LOGOUT_TIMEOUT_SECONDS),
+        }
+    }
+
+    /// The same limit for every kind: for a test that wants a hang to end fast.
+    pub const fn all(limit: Duration) -> Self {
+        Self {
+            hello: limit,
+            get: limit,
+            get_interactive: limit,
+            erase: limit,
+            login: limit,
+            logout: limit,
+        }
+    }
+
+    /// The budget for a request: an interactive `get` may wait for the user and
+    /// gets the `login` budget. A kind with no budget of its own gets the
+    /// `get` one, as in the Python model.
+    pub fn for_request(&self, kind: &RequestKind, interactive: bool) -> Duration {
+        match kind {
+            RequestKind::Get if interactive => self.get_interactive,
+            RequestKind::Login => self.login,
+            RequestKind::Logout => self.logout,
+            RequestKind::Erase => self.erase,
+            RequestKind::Get | RequestKind::Unsupported => self.get,
+        }
+    }
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self::policy()
+    }
+}
+
+type Line = Result<Option<serde_json::Value>, ProtocolError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientScenario {
@@ -29,6 +92,17 @@ pub enum ExchangeError {
     Provider(String),
     MissingPipe(&'static str),
     ProcessFailed(String),
+    /// The provider did not answer within the limit for `waiting_for` and was
+    /// killed; the session is over.
+    TimedOut {
+        waiting_for: String,
+        limit: Duration,
+    },
+    /// An earlier timeout killed this session's provider: the request fails.
+    SessionEnded,
+    /// The provider was killed for a timeout `TIMEOUT_KILLS_BEFORE_NO_RESTART`
+    /// times in this command, so it is not started again.
+    NotRestarted,
 }
 
 impl fmt::Display for ExchangeError {
@@ -38,6 +112,17 @@ impl fmt::Display for ExchangeError {
             Self::Provider(message) => write!(f, "provider error: {message}"),
             Self::MissingPipe(pipe) => write!(f, "missing provider {pipe} pipe"),
             Self::ProcessFailed(message) => write!(f, "provider process failed: {message}"),
+            Self::TimedOut { waiting_for, limit } => write!(
+                f,
+                "provider killed: no answer to {waiting_for} within {}s",
+                limit.as_secs_f64()
+            ),
+            Self::SessionEnded => write!(f, "provider session ended by a timeout"),
+            Self::NotRestarted => write!(
+                f,
+                "provider killed for a timeout {} times; not started again",
+                generated::TIMEOUT_KILLS_BEFORE_NO_RESTART
+            ),
         }
     }
 }
@@ -66,11 +151,15 @@ impl ProviderCommand {
 
 /// One provider process for the lifetime of an npm command: spawned once,
 /// asked any number of strictly sequential requests, ended by closing stdin.
-/// Dropping a session without `close` kills the process.
+/// Dropping a session without `close` kills the process. A provider that does
+/// not answer within its limit (`Timeouts`) is killed, that request fails, and so
+/// does every later one on the session.
 pub struct ProviderSession {
     child: Child,
     stdin: Option<ChildStdin>,
-    reader: BufReader<ChildStdout>,
+    lines: Receiver<Line>,
+    timeouts: Timeouts,
+    killed: bool,
     pub version: u32,
     pub capabilities: Vec<String>,
     pub hello: Option<Hello>,
@@ -78,6 +167,13 @@ pub struct ProviderSession {
 
 impl ProviderSession {
     pub fn spawn(provider: ProviderCommand) -> Result<Self, ExchangeError> {
+        Self::spawn_with(provider, Timeouts::policy())
+    }
+
+    pub fn spawn_with(
+        provider: ProviderCommand,
+        timeouts: Timeouts,
+    ) -> Result<Self, ExchangeError> {
         let ProviderCommand {
             program: mut command,
             args,
@@ -99,17 +195,39 @@ impl ProviderSession {
             .stdout
             .take()
             .ok_or(ExchangeError::MissingPipe("stdout"))?;
+        // a thread reads the provider's lines so a wait can end at a deadline;
+        // killing the provider closes its stdout, which ends the thread
+        let (sender, lines) = mpsc::channel::<Line>();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let line = read_json_line::<serde_json::Value>(&mut reader);
+                let last = matches!(line, Ok(None) | Err(ProtocolError::Io(_)));
+                if sender.send(line).is_err() || last {
+                    break;
+                }
+            }
+        });
         let mut session = Self {
             child,
             stdin: Some(stdin),
-            reader: BufReader::new(stdout),
+            lines,
+            timeouts,
+            killed: false,
             version: 0,
             capabilities: Vec::new(),
             hello: None,
         };
 
-        let hello = read_json_line::<Hello>(&mut session.reader)?
-            .ok_or_else(|| ExchangeError::Provider("provider exited before hello".into()))?;
+        let limit = timeouts.hello;
+        let hello = session
+            .next_line::<Hello>(limit, "hello")
+            .map_err(|error| match error {
+                ExchangeError::Provider(_) => {
+                    ExchangeError::Provider("provider exited before hello".into())
+                }
+                other => other,
+            })?;
         session.version = negotiate(&hello)?;
         session.capabilities = hello.capabilities.clone().unwrap_or_default();
         session.hello = Some(hello);
@@ -126,7 +244,10 @@ impl ProviderSession {
 
     pub fn request(&mut self, request: &Request) -> Result<ProviderResponse, ExchangeError> {
         request.validate()?;
-        let response = self.exchange(request)?;
+        let limit = self
+            .timeouts
+            .for_request(&request.kind, request.interactive == Some(true));
+        let response = self.exchange(request, limit, kind_name(&request.kind))?;
         response.validate_for(&request.kind)?;
         Ok(response)
     }
@@ -137,7 +258,13 @@ impl ProviderSession {
         &mut self,
         message: &serde_json::Value,
     ) -> Result<ProviderResponse, ExchangeError> {
-        self.exchange(message)
+        let kind = message
+            .get("kind")
+            .and_then(|kind| serde_json::from_value::<RequestKind>(kind.clone()).ok())
+            .unwrap_or(RequestKind::Unsupported);
+        let interactive = message.get("interactive") == Some(&serde_json::Value::Bool(true));
+        let limit = self.timeouts.for_request(&kind, interactive);
+        self.exchange(message, limit, "a raw message")
     }
 
     /// Writes bytes to the provider as they are, newline and all, and reads no
@@ -155,27 +282,76 @@ impl ProviderSession {
 
     /// Reads the provider's next answer, whatever it is an answer to.
     pub fn read_answer(&mut self) -> Result<ProviderResponse, ExchangeError> {
-        read_json_line::<ProviderResponse>(&mut self.reader)?
-            .ok_or_else(|| ExchangeError::Provider("provider exited before response".into()))
+        let limit = self.timeouts.get;
+        self.next_line(limit, "an answer")
+    }
+
+    /// Whether a timeout has killed this session's provider.
+    pub fn killed(&self) -> bool {
+        self.killed
     }
 
     fn exchange<T: serde::Serialize>(
         &mut self,
         message: &T,
+        limit: Duration,
+        waiting_for: &str,
     ) -> Result<ProviderResponse, ExchangeError> {
+        if self.killed {
+            return Err(ExchangeError::SessionEnded);
+        }
         let stdin = self
             .stdin
             .as_mut()
             .ok_or(ExchangeError::MissingPipe("stdin"))?;
         write_json_line(stdin, message)?;
-        read_json_line::<ProviderResponse>(&mut self.reader)?
-            .ok_or_else(|| ExchangeError::Provider("provider exited before response".into()))
+        self.next_line(limit, waiting_for)
+    }
+
+    /// The provider's next line, or the end of it: past `limit` it is killed.
+    fn next_line<T: serde::de::DeserializeOwned>(
+        &mut self,
+        limit: Duration,
+        waiting_for: &str,
+    ) -> Result<T, ExchangeError> {
+        if self.killed {
+            return Err(ExchangeError::SessionEnded);
+        }
+        let deadline = Instant::now() + limit;
+        let exited = || ExchangeError::Provider(format!("provider exited before {waiting_for}"));
+        match self
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            Ok(line) => {
+                let value = line?.ok_or_else(exited)?;
+                Ok(serde_json::from_value(value).map_err(ProtocolError::Json)?)
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                self.kill();
+                Err(ExchangeError::TimedOut {
+                    waiting_for: waiting_for.into(),
+                    limit,
+                })
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(exited()),
+        }
+    }
+
+    fn kill(&mut self) {
+        self.killed = true;
+        drop(self.stdin.take());
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 
     /// Closes stdin, the end-of-session signal, and requires a clean exit.
     /// A test harness waits to check the exit; npm need not wait for the
     /// provider at all, so a provider cannot count on work after this.
     pub fn close(mut self) -> Result<(), ExchangeError> {
+        if self.killed {
+            return Ok(());
+        }
         drop(self.stdin.take());
         let mut stderr = String::new();
         if let Some(mut pipe) = self.child.stderr.take() {
@@ -206,7 +382,15 @@ pub fn run_exchange(
     provider_command: ProviderCommand,
     scenario: ClientScenario,
 ) -> Result<ExchangeSummary, ExchangeError> {
-    let mut session = ProviderSession::spawn(provider_command)?;
+    run_exchange_with(provider_command, scenario, Timeouts::policy())
+}
+
+pub fn run_exchange_with(
+    provider_command: ProviderCommand,
+    scenario: ClientScenario,
+    timeouts: Timeouts,
+) -> Result<ExchangeSummary, ExchangeError> {
+    let mut session = ProviderSession::spawn_with(provider_command, timeouts)?;
     let request = request_for(scenario);
     if !session.serves(&request.registry) {
         let selected_version = session.version;
@@ -229,6 +413,56 @@ pub fn run_exchange(
     })
 }
 
+/// One provider across an npm command: starts a session when a request needs
+/// one, and counts the kills a timeout caused. A timeout fails the request, the
+/// requests queued behind it on that session, and ends the session; the next
+/// request starts a new one, until the provider has been killed
+/// `TIMEOUT_KILLS_BEFORE_NO_RESTART` times, at hello or during a request.
+/// Nothing is cached here, so what a cache keeps across a kill is the caller's.
+pub struct ProviderSupervisor {
+    start: Box<dyn FnMut() -> ProviderCommand>,
+    timeouts: Timeouts,
+    session: Option<ProviderSession>,
+    kills: u32,
+}
+
+impl ProviderSupervisor {
+    pub fn new(start: impl FnMut() -> ProviderCommand + 'static, timeouts: Timeouts) -> Self {
+        Self {
+            start: Box::new(start),
+            timeouts,
+            session: None,
+            kills: 0,
+        }
+    }
+
+    pub fn kills(&self) -> u32 {
+        self.kills
+    }
+
+    pub fn request(&mut self, request: &Request) -> Result<ProviderResponse, ExchangeError> {
+        if self.session.is_none() {
+            if self.kills >= generated::TIMEOUT_KILLS_BEFORE_NO_RESTART {
+                return Err(ExchangeError::NotRestarted);
+            }
+            match ProviderSession::spawn_with((self.start)(), self.timeouts) {
+                Ok(session) => self.session = Some(session),
+                Err(error) => return Err(self.note(error)),
+            }
+        }
+        let session = self.session.as_mut().expect("a session was just ensured");
+        session.request(request).map_err(|error| self.note(error))
+    }
+
+    fn note(&mut self, error: ExchangeError) -> ExchangeError {
+        if matches!(error, ExchangeError::TimedOut { .. }) {
+            self.kills += 1;
+            self.session = None;
+        }
+        error
+    }
+}
+
 /// Which list the providers came from: the unscoped global chain, or a
 /// per-registry list, which the user tied to this registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,10 +482,19 @@ pub fn run_provider_chain(
     scenario: ClientScenario,
     kind: ChainKind,
 ) -> Result<ExchangeSummary, ExchangeError> {
+    run_provider_chain_with(provider_commands, scenario, kind, Timeouts::policy())
+}
+
+pub fn run_provider_chain_with(
+    provider_commands: Vec<ProviderCommand>,
+    scenario: ClientScenario,
+    kind: ChainKind,
+    timeouts: Timeouts,
+) -> Result<ExchangeSummary, ExchangeError> {
     let mut not_found = false;
     let mut selected_version = 0;
     for (provider_index, provider_command) in provider_commands.into_iter().enumerate() {
-        let mut summary = run_exchange(provider_command, scenario)?;
+        let mut summary = run_exchange_with(provider_command, scenario, timeouts)?;
         selected_version = summary.selected_version;
         match summary.outcome.as_str() {
             "try-next-provider" => continue,
