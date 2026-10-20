@@ -15,15 +15,24 @@
   },
   "https://cli.github.com/manual/gh_auth_refresh": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "6eff9cf126f66939ada2be96f17216e50774110a38af633cb8afe2b302d911c3",
+    "file": ".refs/cli.github.com/manual_gh_auth_refresh.txt"
   },
   "https://cli.github.com/manual/gh_auth_token": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "075a35bec72c89358672fe3f16b4596b44b469180cf5347e865448f7b45a99df",
+    "file": ".refs/cli.github.com/manual_gh_auth_token.txt"
   },
   "https://cli.github.com/manual/gh_help_environment": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "2b29fec62b72265eaa9f6612d18146b76921afdc030dcd68a799eacf1eeacc03",
+    "file": ".refs/cli.github.com/manual_gh_help_environment.txt"
   },
   "https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html": {
     "kind": "page",
@@ -41,59 +50,101 @@
   },
   "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "4c35fa22e0e7d224790769c9d4ea02a4e797efab7f0e6bb93b95f6b285c3b656",
+    "file": ".refs/docs.aws.amazon.com/cli_latest_userguide_cli-configure-sso.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/APIReference/API_GetAuthorizationToken.html": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "3488b0fc152358022193295ece98217e0de0ab221dbc974e01e4c39b5992a3eb",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_APIReference_API_GetAuthorizationToken.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/APIReference/API_GetRepositoryEndpoint.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "d503b373916a188e1c1e82bd4ad62d96723729ce04e36dad84925ed0c281badb",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_APIReference_API_GetRepositoryEndpoint.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/APIReference/CommonErrors.html": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "3462601920dad36cf6a01be77ed73830df8174f66d64705ff585acd6d466b91e",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_APIReference_CommonErrors.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/auth-and-access-control-permissions-reference.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "221d77b3741fe7d32909f973041533889a0363d8e435adecc6980bb6668d80a9",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_auth-and-access-control-permissions-reference.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/create-vpc-endpoints.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "8bad6b5421f7db88872e23afd5b73cdf69cb02e7d46d73be5ebc5e18c09c173a",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_create-vpc-endpoints.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/npm-auth.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "6004ea13468fb3008b436e6e5047c2dc175856816668478e0f89b3e4242a9a96",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_npm-auth.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/npm-commands.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a298ce8eebf5e2f48e1721bc9c4ab75867596924a483b0f1c2d90ba87f65717f",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_npm-commands.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/npm-tags.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "20f98fa22757708a22a005eecd28a8e5abaeb991b4d7a41bfdbe33ca205b60f0",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_npm-tags.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/package-origin-controls.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "6bacb45ffb1e9f18908c9a3a8a70203f9fc0c0e257beb65f9bf7caa2351f2be8",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_package-origin-controls.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/repo-policies.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a3e2f225792b6e1a6ddae6478bf6613c0ceae0294e251dd390b2352516c6a184",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_repo-policies.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "081eb7db3d6fab549dfd85976526bee0c4890029f6dfad56eaff0a9d9461f34a",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_tokens-authentication.html.txt"
   },
   "https://docs.aws.amazon.com/codeartifact/latest/ug/use-codeartifact-from-vpc.html": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "954d61e300043442188cd7d09f6b2de9decd9e08ce765fbfb75198b001a05f65",
+    "file": ".refs/docs.aws.amazon.com/codeartifact_latest_ug_use-codeartifact-from-vpc.html.txt"
   },
   "https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/migrate-credential-providers.html": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "5ff27d4dd881c41e15a4e7572943bfa6a509c3775752f1f122e5d15664a79e43",
+    "file": ".refs/docs.aws.amazon.com/sdk-for-javascript_v3_developer-guide_migrate-credential-providers.html.txt"
   },
   "https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication": {
     "kind": "page",
@@ -104,47 +155,80 @@
   },
   "https://docs.cloud.google.com/artifact-registry/docs/access-control": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "8a21d30a5973a296b164d15cf8ed77c70b38f0d9111bc2699471e55e8fbff677",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_access-control.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "152411b070313bfb90aed84c919d2be1f8460b2d272ad1c1a01cd73fc040cbc9",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_nodejs_authentication.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "169af579b110740472919ae379e515aafb14a1a6c2bfc1fcc760a5b4bfee96d3",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_nodejs_manage-packages.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/nodejs/troubleshoot": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "052b1ea1d85d79291d7dea8e373118334ee7fe3b022e5681bf7dfc3627e8c0ab",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_nodejs_troubleshoot.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/repositories/virtual-repo": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "4a0e491001cb518c53731c053ad7e7eea727ea9a8d17eca037a381485606b534",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_repositories_virtual-repo.txt"
   },
   "https://docs.cloud.google.com/docs/authentication/application-default-credentials": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "087b7ff4f79b3822e9b6fb3d3c8404af3dcea38589a12148ecc50400a55c1a37",
+    "file": ".refs/docs.cloud.google.com/docs_authentication_application-default-credentials.txt"
   },
   "https://docs.cloud.google.com/iam/docs/federated-identity-supported-services": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "0190cc1332c65b96e075a6064ed3330f30a15410825afc9d580d7afacb723e0a",
+    "file": ".refs/docs.cloud.google.com/iam_docs_federated-identity-supported-services.txt"
   },
   "https://docs.cloud.google.com/iam/docs/roles-permissions/artifactregistry": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "b64acbf6b1d4844372408a7d061b29232eb3440689d5f94176de874b04258e98",
+    "file": ".refs/docs.cloud.google.com/iam_docs_roles-permissions_artifactregistry.txt"
   },
   "https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "6a3a3c93958cf0155a19a332417b88b31d072633b3d72708fbd1ceca69c6e60d",
+    "file": ".refs/docs.cloud.google.com/iam_docs_workload-identity-federation-with-deployment-pipelines.txt"
   },
   "https://docs.cloud.google.com/sdk/gcloud/reference/auth/login": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "615bd6714ec7b7180581540962ec2c5a67302d623508a44a3e296546a3632046",
+    "file": ".refs/docs.cloud.google.com/sdk_gcloud_reference_auth_login.txt"
   },
   "https://docs.cloud.google.com/sdk/gcloud/reference/auth/print-access-token": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "d60422c04735fb3d5c7c041b2ac088ac297489350b61aa234abe8809c9fc23cb",
+    "file": ".refs/docs.cloud.google.com/sdk_gcloud_reference_auth_print-access-token.txt"
   },
   "https://docs.docker.com/reference/cli/docker/login/": {
     "kind": "page",
@@ -162,43 +246,73 @@
   },
   "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "d4bd4634e71e9e2c18ace4008e079c4800dabac88b5b706c16acfed1894ca30f",
+    "file": ".refs/docs.github.com/en_apps_oauth-apps_building-oauth-apps_authorizing-oauth-apps.txt"
   },
   "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "b25fa3c63ad3b967a3a8494f00d60fc38172073139667edebf4af822b64efd19",
+    "file": ".refs/docs.github.com/en_apps_oauth-apps_building-oauth-apps_scopes-for-oauth-apps.txt"
   },
   "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "cef7a0be94eeb0663eeba5d15825184da18c6968930e7841ca2578d7417edc84",
+    "file": ".refs/docs.github.com/en_authentication_keeping-your-account-and-data-secure_managing-your-personal-access-tokens.txt"
   },
   "https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/feature-overview-for-github-enterprise-cloud-with-data-residency": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "682324a05d68106b244d721b301b08e6437e69f476f058c242415545092d9d05",
+    "file": ".refs/docs.github.com/en_enterprise-cloud_latest_admin_data-residency_feature-overview-for-github-enterprise-cloud-with-data-residency.txt"
   },
   "https://docs.github.com/en/enterprise-server@3.14/packages/working-with-a-github-packages-registry/working-with-the-npm-registry": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "d0c0c4e8a769c717bbe7d013983b07fbc52f4c33fdc8b1e05fc7dae6c20b360d",
+    "file": ".refs/docs.github.com/en_enterprise-server_3.14_packages_working-with-a-github-packages-registry_working-with-the-npm-registry.txt"
   },
   "https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "a60de4d1d7aed5bc645f24ce5fc7cdde2f31bcbaeb8161dbbb62ed909214a7be",
+    "file": ".refs/docs.github.com/en_packages_learn-github-packages_about-permissions-for-github-packages.txt"
   },
   "https://docs.github.com/en/packages/learn-github-packages/deleting-and-restoring-a-package": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "ee3a992f002eeb8f4d9e253a006d19ffdd47f9e9ee09622f0f9c8c0ac4fbebec",
+    "file": ".refs/docs.github.com/en_packages_learn-github-packages_deleting-and-restoring-a-package.txt"
   },
   "https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "a3a17d4a792896f4647ecdf47b8325bef132b0f8471874898ef2776225d68c69",
+    "file": ".refs/docs.github.com/en_packages_working-with-a-github-packages-registry_working-with-the-npm-registry.txt"
   },
   "https://docs.github.com/en/rest/credentials/revoke": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "b15862242721a0988f84182a47ea725d71d7499238359640a48e147a97d77f95",
+    "file": ".refs/docs.github.com/en_rest_credentials_revoke.txt"
   },
   "https://docs.github.com/en/rest/packages/packages": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "090fe41361c963edd5cdff6dc9831a688794a6e0ec3b11557a91bbb4ea853fb9",
+    "file": ".refs/docs.github.com/en_rest_packages_packages.txt"
   },
   "https://docs.gitlab.com/api/deploy_tokens/": {
     "kind": "page",
@@ -209,31 +323,52 @@
   },
   "https://docs.gitlab.com/api/oauth2/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "5b35b74999e6154ae51c3f8f2be8031a312558bb015410de47a9711d9fc0cb50",
+    "file": ".refs/docs.gitlab.com/api_oauth2.txt"
   },
   "https://docs.gitlab.com/api/packages/npm/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "08a81f5112c647714e3ef1028253c88f230de78cf11b44083aa06d00c584e699",
+    "file": ".refs/docs.gitlab.com/api_packages_npm.txt"
   },
   "https://docs.gitlab.com/ci/jobs/ci_job_token/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "da7504199dcdead44379c08439b44445597d1d68535ad303559a81838076fc45",
+    "file": ".refs/docs.gitlab.com/ci_jobs_ci_job_token.txt"
   },
   "https://docs.gitlab.com/cli/artifact-registry/login/": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "297d9b67a9da453314081c0b0a4ae4b82984e79191a82f0f7d32c782f0782d0f",
+    "file": ".refs/docs.gitlab.com/cli_artifact-registry_login.txt"
   },
   "https://docs.gitlab.com/integration/oauth_provider/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a54dc06bbfc21844494bb503c58436280721cc8128b6645302616213fd0e6612",
+    "file": ".refs/docs.gitlab.com/integration_oauth_provider.txt"
   },
   "https://docs.gitlab.com/user/packages/npm_registry/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "ad3ae06dc3539cdbb5cad67ff850f3737c38dc6a0f1b5148193b5fa1d6f446d4",
+    "file": ".refs/docs.gitlab.com/user_packages_npm_registry.txt"
   },
   "https://docs.gitlab.com/user/project/deploy_tokens/": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a9cbe1384eb65331f147ba2e1a2064e333d18890d34ae65b57e2a9c00455acb1",
+    "file": ".refs/docs.gitlab.com/user_project_deploy_tokens.txt"
   },
   "https://docs.jfrog.com/administration/docs/access-tokens": {
     "kind": "page",
@@ -244,27 +379,45 @@
   },
   "https://docs.jfrog.com/administration/docs/security-configuration": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "1e02f8f88421238e28fbbb925e200223f4c583cbd540442936d31534aae82ddc",
+    "file": ".refs/docs.jfrog.com/administration_docs_security-configuration.txt"
   },
   "https://docs.jfrog.com/administration/reference/createToken": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "bf864437303a7fb9927242f5a0ddecf084211899ab9c9ae0e6130c387008b5e2",
+    "file": ".refs/docs.jfrog.com/administration_reference_createToken.txt"
   },
   "https://docs.jfrog.com/administration/reference/oidctokenexchange": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "b71a5f9b53c54acf4f6071a27bfd06fcc7bdca6ceccff7d072e93e3ec4fc7863",
+    "file": ".refs/docs.jfrog.com/administration_reference_oidctokenexchange.txt"
   },
   "https://docs.jfrog.com/artifactory/docs/npm-repositories": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "143286980f1840c006fe7fc8afc47506d9ee381a67da856088d25425db97492e",
+    "file": ".refs/docs.jfrog.com/artifactory_docs_npm-repositories.txt"
   },
   "https://docs.jfrog.com/integrations/docs/jf-access-token-create": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "abba680ceabf3f63030a2aae3ce71932598d7103edfe73b2cdccc1b83758dad5",
+    "file": ".refs/docs.jfrog.com/integrations_docs_jf-access-token-create.txt"
   },
   "https://docs.jfrog.com/user-management/docs/identity-tokens": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "adecf229fe3cebacb503f711c1f0208595529e112bf22ab32158588854e9e9a0",
+    "file": ".refs/docs.jfrog.com/user-management_docs_identity-tokens.txt"
   },
   "https://docs.npmjs.com/about-access-tokens": {
     "kind": "page",
@@ -275,75 +428,129 @@
   },
   "https://docs.npmjs.com/cli/v11/commands/npm-trust/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "7debe29d5ca499bc54ae742388832920982b58fdd1e601fe3e357d1ef152603b",
+    "file": ".refs/docs.npmjs.com/cli_v11_commands_npm-trust.txt"
   },
   "https://docs.npmjs.com/cli/v12/commands/npm-stage/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "1c756f2b47cde5fed79b23f501c2473444d2b2706de1003b1173c50111821602",
+    "file": ".refs/docs.npmjs.com/cli_v12_commands_npm-stage.txt"
   },
   "https://docs.npmjs.com/requiring-2fa-for-package-publishing-and-settings-modification": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "c5dde56381abd694a0d296a09bb9ea7cfe29794c99db925bc32d6fe9a703b9a4",
+    "file": ".refs/docs.npmjs.com/requiring-2fa-for-package-publishing-and-settings-modification.txt"
   },
   "https://docs.npmjs.com/staged-publishing": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "8cbd6ff34c5568267c8e6ae69104f13ba6aa37841ae203addb4bf6f8e9215b9e",
+    "file": ".refs/docs.npmjs.com/staged-publishing.txt"
   },
   "https://docs.npmjs.com/trusted-publishers": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "96784f99adab3102a7a34d407f0f6bc0676fa2bf7843d04a7edbef5660bea034",
+    "file": ".refs/docs.npmjs.com/trusted-publishers.txt"
   },
   "https://git-scm.com/docs/gitcredentials": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "cd97e4ff0492809616a2dc60f064d030a435b40f38a7e48bb7f4e5e8ef4e54ba",
+    "file": ".refs/git-scm.com/docs_gitcredentials.txt"
   },
   "https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "e439df7714904ef1a21b59a60b9902a45bbe7554940f5fa1d363de22d863faff",
+    "file": ".refs/github.blog/changelog_2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management.txt"
   },
   "https://github.blog/changelog/2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes/": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "f121e831cce6a434dd674bd7494752a8c0fe5e4826ef3048e5113c2935170c74",
+    "file": ".refs/github.blog/changelog_2025-11-05-npm-security-update-classic-token-creation-disabled-and-granular-token-changes.txt"
   },
   "https://github.blog/changelog/2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available/": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "96623eedfa64773efa43bc05494b52485df8962e0b6f8e54728345d154595226",
+    "file": ".refs/github.blog/changelog_2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available.txt"
   },
   "https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "0654c1702e9d4f694b5ece46401a9eb675874a10a83ab102afbe22ab52bb8f3a",
+    "file": ".refs/github.blog/changelog_2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation.txt"
   },
   "https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "dd62843e51ba736f3039e46d6ca08ef61fbe2bb1f47f876443917e8da5e6cbb3",
+    "file": ".refs/github.blog/changelog_2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens.txt"
   },
   "https://github.blog/changelog/2026-09-18-stage-only-npm-tokens-for-safer-automation": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "28f6dee79bd57255a48133746e2724e78ec8cb3343c10e67e0dde0fcbc0534e2",
+    "file": ".refs/github.blog/changelog_2026-09-18-stage-only-npm-tokens-for-safer-automation.txt"
   },
   "https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "62a02076072e95b443ce0414676ce41fdb946248664834346a4922bfaddc3812",
+    "file": ".refs/github.com/GoogleCloudPlatform_artifact-registry-npm-tools.txt"
   },
   "https://github.com/NuGet/NuGet.Client": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "430375dcea28eb4203a4497242a2615ffb60c6edd3304d21a043d63dc0113423",
+    "file": ".refs/github.com/NuGet_NuGet.Client.txt"
   },
   "https://github.com/git/git": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "69c3b1425f6980380ec6aae266cb5684c596cdf2400906633c294190a026dcea",
+    "file": ".refs/github.com/git_git.txt"
   },
   "https://github.com/github/roadmap/issues/558": {
     "kind": "discussion",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "ea1a5aa3e8d04889b7fa5336d8b58d1f57e653f1c82a55cf2dfb353bb25a2be6",
+    "file": ".refs/github.com/github_roadmap_issues_558.txt"
   },
   "https://github.com/google-github-actions/auth": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "7e973f1ba1dd6646bc777e40acbd1adc86c7818dbca1cd4850d2957f50d80783",
+    "file": ".refs/github.com/google-github-actions_auth.txt"
   },
   "https://github.com/jfrog/jfrog-cli": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "5d815ff76cd58736b26e0eff043c3f6dc4a2b0e9ca5f8bd3c063e8131179330c",
+    "file": ".refs/github.com/jfrog_jfrog-cli.txt"
   },
   "https://github.com/jfrog/jfrog-cli-core/blob/962c06a76108764450640c3d9c3cb0e010bd048b/artifactory/utils/weblogin.go": {
     "kind": "source",
@@ -372,11 +579,17 @@
   },
   "https://github.com/microsoft/ado-npm-auth": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "33f77c46268a00fb5eb1ad03a7d0b1ca3ba1a1bc4062ed2d987013ae365aa0be",
+    "file": ".refs/github.com/microsoft_ado-npm-auth.txt"
   },
   "https://github.com/microsoft/artifacts-credprovider": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "da183ca50b023b9392e682ea00185e87ffec5a23912d9b338a4a655d311df5bd",
+    "file": ".refs/github.com/microsoft_artifacts-credprovider.txt"
   },
   "https://github.com/microsoft/azure-pipelines-tasks/blob/952b2f72d356677dae10cf535dacc0d752ca4cb9/Tasks/NpmAuthenticateV0/npmauthutils.ts": {
     "kind": "source",
@@ -385,15 +598,24 @@
   },
   "https://github.com/npm/cli/issues/8141": {
     "kind": "discussion",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "970397050ce850b07c9f927e4294397b28a62fc29bc52e656fc0255d98c71058",
+    "file": ".refs/github.com/npm_cli_issues_8141.txt"
   },
   "https://github.com/npm/cli/pull/9729": {
     "kind": "discussion",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "8114a23c61aea5656154ed5296471ce783329ac8992b6a586090424bbc875748",
+    "file": ".refs/github.com/npm_cli_pull_9729.txt"
   },
   "https://github.com/npm/cli/releases/tag/v9.0.0": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "b670ca170c650a0c1b569af5053461bae80938834e7eecdfdc0299d4b1a7dfbc",
+    "file": ".refs/github.com/npm_cli_releases_tag_v9.0.0.txt"
   },
   "https://github.com/npm/rfcs/blob/f291deccbb4c0d244a8b71f321de9042626922cb/accepted/0054-make-scripts-install-opt-in.md": {
     "kind": "source",
@@ -402,31 +624,52 @@
   },
   "https://github.com/npm/rfcs/pull/850": {
     "kind": "discussion",
-    "cited": "2026-05-16"
+    "cited": "2026-05-16",
+    "fetched": "2026-10-20",
+    "sha256": "ee8c8411bb09c8e40c78df4dfd146d8e62c182a87bd99002657ab0a19519adeb",
+    "file": ".refs/github.com/npm_rfcs_pull_850.txt"
   },
   "https://github.com/orgs/community/discussions/63811": {
     "kind": "discussion",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "e62547f475836bddc5c55af25be999dd06f9501c4016bfee6c007e49782fea17",
+    "file": ".refs/github.com/orgs_community_discussions_63811.txt"
   },
   "https://github.com/pnpm/pnpm": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "f71953629439a6a73bc495923a86004c8ed45a363fe95f46a74c4391cb33a6c1",
+    "file": ".refs/github.com/pnpm_pnpm.txt"
   },
   "https://github.com/pnpm/pnpm/issues/12759": {
     "kind": "discussion",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "3b3b7857708d89f80f1252fb3996a6c30372074b61ee7e6a1dcbb4def2780284",
+    "file": ".refs/github.com/pnpm_pnpm_issues_12759.txt"
   },
   "https://github.com/raineorshine/npm-check-updates": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "e4e5b62cad1187db7df223d6be0ea7c71fb2ef5841a1a12b665fab5870269be2",
+    "file": ".refs/github.com/raineorshine_npm-check-updates.txt"
   },
   "https://github.com/rust-lang/cargo": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "4db8f29beb69ef092ed16efec17a92e4164586300942531e9e9a621fb28842dc",
+    "file": ".refs/github.com/rust-lang_cargo.txt"
   },
   "https://github.com/verdaccio/verdaccio": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "5d1af3f25722237627a8dd7fada5806e95c8aa7294f60fda5396eb8aaeec1be7",
+    "file": ".refs/github.com/verdaccio_verdaccio.txt"
   },
   "https://github.com/verdaccio/verdaccio/blob/24c86d6638ca093f9071e379396e1494390df5fd/packages/signature/src/jwt-token.ts": {
     "kind": "source",
@@ -515,150 +758,259 @@
   },
   "https://github.community/t/packages-do-npm-tags-work/17657": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "6a785169c9b4cc196fdc1ed99b7a76572b18bd38f4ee465ac7ee088015fe4931",
+    "file": ".refs/github.community/t_packages-do-npm-tags-work_17657.txt"
   },
   "https://jfrog.com/help/r/artifactory-how-to-modify-the-expiration-date-of-the-token-generated-by-the-npm-login-command": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "status": "the page is built in the browser by JavaScript; no text copy"
   },
   "https://knowledge.workspace.google.com/admin/security/set-session-length-for-google-cloud-services": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "0bdc468ccdb3d786e6d649e1af35d15a7ae121e76430be16f59bdf6c93a4c8b1",
+    "file": ".refs/knowledge.workspace.google.com/admin_security_set-session-length-for-google-cloud-services.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/concepts/upstream-sources?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "acfb39901bda922bb3161c5e985a177b693d571338f4822d9a98e1e0ee073feb",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_concepts_upstream-sources.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/concepts/views?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "861fe281f7fdf41af6f53a2c34d12f2dda04a129dbbfa6aaf4623f628be75370",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_concepts_views.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/feeds/feed-permissions?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "0e4566eec810916963f4d9b9933ddf348d18ec0801bed0b9a9437d7a893b487e",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_feeds_feed-permissions.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/how-to/delete-and-recover-packages?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "ce94f47f661f8ec4c015422f1277aae48266304de3a6264120d39e33526a9414",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_how-to_delete-and-recover-packages.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "27a9665dcf5ff8bcc84f098d33d1114728788b147eb62f4c33ed3be13cb39542",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_npm_npmrc.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/publish?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "13b2b7693348d00b3a047f5d1b06e541e711d245d39c94fc5ab02d5f65deddb1",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_artifacts_npm_publish.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/cli/entra-tokens?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "41840f9e62c78cdc2e2b400931c2a0f0885a6275ee481f632d613bb87892ceb4",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_cli_entra-tokens.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/oauth": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "100b64c01450f219753d69a9c4d3fd3dab40b7dfe591118cb01e8000f4c96363",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_integrate_get-started_authentication_oauth.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/oauth?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "100b64c01450f219753d69a9c4d3fd3dab40b7dfe591118cb01e8000f4c96363",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_integrate_get-started_authentication_oauth.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "867bfb3c10e466080ef168a54b22e1cd03ebe693f4a2a1050aff983074e2eaec",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_integrate_get-started_authentication_service-principal-managed-identity.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/manage-pats-with-policies-for-administrators?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "182ccfeae08fdb494f65f3a12bf5a79e25da66355258cc6593a12d846843823c",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_organizations_accounts_manage-pats-with-policies-for-administrators.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "3ab159c266c6adc6d48c11998686f27491f29106c47b489daa5052d5239bb942",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_organizations_accounts_use-personal-access-tokens-to-authenticate.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/pipelines/artifacts/npm?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "2fea2978dc44d3370b388d84efb19a8d0892e23be710b200df404f6ea62b11f0",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_pipelines_artifacts_npm.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/pipelines/process/access-tokens?view=azure-devops": {
     "kind": "page",
-    "cited": "2026-10-20"
+    "cited": "2026-10-20",
+    "fetched": "2026-10-20",
+    "sha256": "e1ebd009423c8fd8400516a6408e25af6a2253fac3c6b3317aa1bb1f59172ac5",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_pipelines_process_access-tokens.txt"
   },
   "https://learn.microsoft.com/en-us/javascript/api/%40azure/identity/defaultazurecredential": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "94753b628065c5804d4d1be6d51e775e87ca1408ca08836a016777ff1bf13388",
+    "file": ".refs/learn.microsoft.com/en-us_javascript_api_40azure_identity_defaultazurecredential.txt"
   },
   "https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "860451833325bda13d641b361d7742626d8dde39d80b2b3501dd82ab051b0f14",
+    "file": ".refs/learn.microsoft.com/en-us_nuget_reference_extensibility_nuget-cross-platform-authentication-plugin.txt"
   },
   "https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "f581a7d1a81ff139fda02d86fe12dc80a3d334654121939f3577865a7ca61167",
+    "file": ".refs/learn.microsoft.com/en-us_nuget_reference_extensibility_nuget-cross-platform-plugins.txt"
   },
   "https://pip.pypa.io/en/stable/topics/authentication/": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "2f998c9e30bfdaae5c9eb41df7994ae8e7bd6342b7c5db53ec235777a6e987c1",
+    "file": ".refs/pip.pypa.io/en_stable_topics_authentication.txt"
   },
   "https://pnpm.io/blog/releases/11.4": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "168fde7e90cf06a63705a63aa0e38e479340b838727722ad3808a07b66a016c3",
+    "file": ".refs/pnpm.io/blog_releases_11.4.txt"
   },
   "https://pnpm.io/npmrc": {
     "kind": "page",
-    "cited": "2026-10-04"
+    "cited": "2026-10-04",
+    "fetched": "2026-10-20",
+    "sha256": "a3d371feecb5299dcf96ba86ff089f6c08ac7d4fb1a50e4ff020f592601f02cc",
+    "file": ".refs/pnpm.io/npmrc.txt"
   },
   "https://pnpm.io/settings": {
     "kind": "page",
-    "cited": "2026-05-17"
+    "cited": "2026-05-17",
+    "fetched": "2026-10-20",
+    "sha256": "ed1233f7b3dd3c5404e36d8defdaa509a445d6f4f57a20beb264f22187f3327a",
+    "file": ".refs/pnpm.io/settings.txt"
   },
   "https://raw.githubusercontent.com/aws/aws-cli/v2/awscli/customizations/codeartifact/login.py": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "e346fdad1239cf18748263f3dae3f18c7f09efe58d37ee13a95538094d33ffab",
+    "file": ".refs/raw.githubusercontent.com/aws_aws-cli_v2_awscli_customizations_codeartifact_login.py.txt"
   },
   "https://registry.npmjs.org/vsts-npm-auth": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "5d504cb17f4f6979e64b08ad1a9ff1268b7f58b7cdd480b87c7057323b901eea",
+    "file": ".refs/registry.npmjs.org/vsts-npm-auth.txt"
   },
   "https://verdaccio.org/": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "7c741d1b879480c1cd377b8015797891aa8b1b9e2c3a11fdb161de5c717984f9",
+    "file": ".refs/verdaccio.org/index.txt"
   },
   "https://verdaccio.org/docs/packages": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a199b6666411af679798f516374c73ddfd52a38d18bec27d8e98ad91855d494f",
+    "file": ".refs/verdaccio.org/docs_packages.txt"
   },
   "https://verdaccio.org/docs/reverse-proxy": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "8556277b251c989dfa9b425a20811f0770f4dd81b7d133d65cf9e61157f79d04",
+    "file": ".refs/verdaccio.org/docs_reverse-proxy.txt"
   },
   "https://verdaccio.org/docs/staged-publishing": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "5b2a853d382a7cb40f69fcfd66f5a2e1d0e140425f0df77012d84f8eec9c0fe8",
+    "file": ".refs/verdaccio.org/docs_staged-publishing.txt"
   },
   "https://verdaccio.org/docs/two-factor-authentication": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "977923e8e5f91359027e92d2d1b818f09fb866cf66c4451554b397409ab51ff6",
+    "file": ".refs/verdaccio.org/docs_two-factor-authentication.txt"
   },
   "https://verdaccio.org/docs/uplinks": {
     "kind": "page",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "1038ed66894606870e4917d32206e1d7d676e9cf231fcf0f101850b8c46ffcbf",
+    "file": ".refs/verdaccio.org/docs_uplinks.txt"
   },
   "https://verdaccio.org/docs/web-login": {
     "kind": "page",
-    "cited": "2026-10-15"
+    "cited": "2026-10-15",
+    "fetched": "2026-10-20",
+    "sha256": "10e744b71975e60d6adf5e67f37bec7f1218d26836fd87476c082ef8c87122a1",
+    "file": ".refs/verdaccio.org/docs_web-login.txt"
   },
   "https://www.rfc-editor.org/rfc/rfc6749": {
     "kind": "standard",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "808e02f6066ad20cb248d995b1699554cd7fbf6f6b310364fb0211bd6fc5b570",
+    "file": ".refs/www.rfc-editor.org/rfc_rfc6749.txt"
   },
   "https://www.rfc-editor.org/rfc/rfc7009": {
     "kind": "standard",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "a6c84a2322ebcd429c4c6d63f5161f2f8816db8b660ea91feef56e9ecbddef5b",
+    "file": ".refs/www.rfc-editor.org/rfc_rfc7009.txt"
   },
   "https://www.rfc-editor.org/rfc/rfc8628": {
     "kind": "standard",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "85826c69b8316dbc68a7b9bb015297859ce446858f60ec3eaec781103a73cae2",
+    "file": ".refs/www.rfc-editor.org/rfc_rfc8628.txt"
   },
   "https://www.rfc-editor.org/rfc/rfc8693": {
     "kind": "standard",
-    "cited": "2026-10-17"
+    "cited": "2026-10-17",
+    "fetched": "2026-10-20",
+    "sha256": "fa21d7708aed571064ead23966fb338fa969e043ea68f2f2df9aba5b0573835e",
+    "file": ".refs/www.rfc-editor.org/rfc_rfc8693.txt"
   }
 }

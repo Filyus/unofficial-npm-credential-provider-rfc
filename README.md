@@ -68,3 +68,7 @@ node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 - [Git credential helpers](https://git-scm.com/docs/gitcredentials) and [Docker credential helpers](https://docs.docker.com/reference/cli/docker/login/#credential-stores): a decade of external credential programs.
 - [NuGet cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins) and [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin): the closest prior art to Phase 2.
 - [pip keyring support](https://pip.pypa.io/en/stable/topics/authentication/), [AWS SDK credential providers](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/migrate-credential-providers.html), [Azure Identity `DefaultAzureCredential`](https://learn.microsoft.com/en-us/javascript/api/%40azure/identity/defaultazurecredential): credential chains in other ecosystems.
+
+## Sources
+
+Every address the documents cite is in [refs.json](refs.json), with its kind, the day it was first cited and, for a page, the sha256 of the text saved from it. Links to source code name a commit. The saved texts stay on the machine that made them, in `.refs/` (not tracked); `python tools/refs.py fetch N` saves the pages not saved yet, and fetching a page yourself and comparing the hash checks a claim against the page as it was.
