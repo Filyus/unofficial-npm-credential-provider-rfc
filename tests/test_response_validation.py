@@ -102,8 +102,8 @@ class ResponseValidationTests(unittest.TestCase):
                 {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": package}, "granularity": "package"}},
             )
 
-        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client"), self.client.cache)
-        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui"), self.client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "api-client", "read"), self.client.cache)
+        self.assertIn(CacheKey("package", "https://registry.example.test/", "@scope", "ui", "read"), self.client.cache)
 
     # Found by fuzzing the readers of the protocol against each other
     # (tests/differential.py), each where the model said otherwise than the

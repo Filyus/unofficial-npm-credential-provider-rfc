@@ -87,9 +87,9 @@ class TranscriptTests(unittest.TestCase):
         client = validate_transcript(str(TRANSCRIPTS / "get-success.jsonl"))
 
         self.assertEqual(client.state.value, "closed")
-        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope"), client.cache)
+        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope", operation="read"), client.cache)
         self.assertEqual(
-            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope", operation="read")].auth["token"],
             "token-1",
         )
 
@@ -103,7 +103,7 @@ class TranscriptTests(unittest.TestCase):
         client = validate_transcript(str(TRANSCRIPTS / "erase-retry.jsonl"))
 
         self.assertEqual(
-            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope", operation="read")].auth["token"],
             "token-2",
         )
 
@@ -111,7 +111,7 @@ class TranscriptTests(unittest.TestCase):
         client = validate_transcript(str(TRANSCRIPTS / "erase-retry-coarser.jsonl"))
         registry = "https://registry.example.test/"
 
-        self.assertEqual(set(client.cache), {CacheKey("registry", registry)})
+        self.assertEqual(set(client.cache), {CacheKey("registry", registry, operation="read")})
         for package in ("pkg", "other"):
             entry = client.lookup(registry, "@scope", package)
             self.assertEqual(entry.auth["token"], "registry-token-2")
@@ -126,7 +126,7 @@ class TranscriptTests(unittest.TestCase):
         client = validate_transcript(str(TRANSCRIPTS / "erase-other-then-retry.jsonl"))
 
         self.assertEqual(
-            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope")].auth["token"],
+            client.cache[CacheKey("scope", "https://registry.example.test/", "@scope", operation="read")].auth["token"],
             "token-2",
         )
 

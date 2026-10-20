@@ -86,7 +86,7 @@ class CacheEntry:
     package: str | None = None
     operation: str | None = None
     expires_at: int | None = None
-    operation_independent: bool = True
+    operation_independent: bool = OPERATION_INDEPENDENT_DEFAULT
     issuance: int | None = None
 
 

@@ -1,4 +1,4 @@
-From d34217e944485cb0fa7678cc91bfbf2a6658e140 Mon Sep 17 00:00:00 2001
+From 5c1b1c0bc229ea5c1f924acedb71f5869eba9016 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -23,14 +23,23 @@ runs rejects the request without waiting for it. On Windows a .cmd/.bat
 helper runs in its own directory and a path containing `"` or `%` is
 refused.
 
+The credential is sent only over https:, or over http: to localhost, 127.0.0.1
+or [::1]; a request over http: to the registry's host, such as a lockfile's
+resolved URL, goes out without it and does not start the helper. A redirect
+that keeps the host name keeps the credential only while the target may carry
+it, and is followed here, a hop at a time, for that reason. A request that
+carries it takes proxy, https-proxy, noproxy, ca, strict-ssl and local-address
+from opts.tokenHelperTransport when the caller supplies one, instead of its
+own, since only the caller knows which config file a value came from.
+
 Prototype for the credential provider RFC discussed in npm/rfcs#850.
 ---
- README.md            |   64 +++
+ README.md            |   64 ++
  lib/auth.js          |   25 +-
- lib/index.js         |   59 ++-
- lib/token-helper.js  |  450 ++++++++++++++++
- test/token-helper.js | 1203 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1793 insertions(+), 8 deletions(-)
+ lib/index.js         |  142 +++-
+ lib/token-helper.js  |  462 +++++++++++++
+ test/token-helper.js | 1508 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 2183 insertions(+), 18 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -177,18 +186,31 @@ index 9270025..c37bf33 100644
      } else if (auth) {
        this.auth = auth
 diff --git a/lib/index.js b/lib/index.js
-index 91d450f..6f3c3d2 100644
+index 91d450f..86d32aa 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -3,6 +3,7 @@
+@@ -3,6 +3,9 @@
  const { HttpErrorAuthOTP } = require('./errors.js')
  const checkResponse = require('./check-response.js')
  const getAuth = require('./auth.js')
 +const getTokenHelperHeader = require('./token-helper.js')
++const { mayCarryCredential } = getTokenHelperHeader
++const { log } = require('proc-log')
  const fetch = require('make-fetch-happen')
  const JSONStream = require('./json-stream')
  const npa = require('npm-package-arg')
-@@ -71,12 +72,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+@@ -13,6 +16,10 @@ const { Minipass } = require('minipass')
+ 
+ const defaultOpts = require('./default-opts.js')
+ 
++const REDIRECTS = new Set([301, 302, 303, 307, 308])
++// make-fetch-happen's own limit
++const MAX_REDIRECTS = 20
++
+ // WhatWG URL throws if it's not fully resolved
+ const urlIsValid = u => {
+   try {
+@@ -71,12 +78,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
  
    if (opts.gzip) {
      headers['content-encoding'] = 'gzip'
@@ -203,7 +225,102 @@ index 91d450f..6f3c3d2 100644
        body = new zlib.Gzip().end(body).concat()
      }
    }
-@@ -164,7 +161,55 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+@@ -104,34 +107,84 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+     opts.preferOnline = true
+   }
+ 
+-  const doFetch = async fetchBody => {
+-    const p = fetch(uri, {
++  // The request that carries a helper's credential takes its transport (proxy,
++  // certificates, local address) from `opts.tokenHelperTransport` when the
++  // caller supplies it, which the caller fills from sources the project does
++  // not control: here, where a value came from is not known. Every other
++  // request uses the options it was given.
++  let carriesHelperCredential = false
++
++  const sendOnce = (target, requestHeaders, requestMethod, fetchBody, helped) => {
++    const transport = helped && opts.tokenHelperTransport ? opts.tokenHelperTransport : opts
++    return fetch(target, {
+       agent: opts.agent,
+       algorithms: opts.algorithms,
+       body: fetchBody,
+       cache: getCacheMode(opts),
+       cachePath: opts.cache,
+-      ca: opts.ca,
++      ca: transport.ca,
+       cert: auth.cert || opts.cert,
+-      headers,
++      headers: requestHeaders,
+       integrity: opts.integrity,
+       key: auth.key || opts.key,
+-      localAddress: opts.localAddress,
++      localAddress: transport.localAddress,
+       maxSockets: opts.maxSockets,
+       memoize: opts.memoize,
+-      method: method,
+-      noProxy: opts.noProxy,
+-      proxy: opts.httpsProxy || opts.proxy,
++      method: requestMethod,
++      noProxy: transport.noProxy,
++      proxy: transport.httpsProxy || transport.proxy,
++      // redirects of a credentialed request are followed below, a hop at a
++      // time: make-fetch-happen would keep the credential across a redirect
++      // that stays on the host but leaves https
++      ...(helped ? { redirect: 'manual' } : {}),
+       retry: opts.retry ? opts.retry : {
+         retries: opts.fetchRetries,
+         factor: opts.fetchRetryFactor,
+         minTimeout: opts.fetchRetryMintimeout,
+         maxTimeout: opts.fetchRetryMaxtimeout,
+       },
+-      strictSSL: opts.strictSSL,
++      strictSSL: transport.strictSSL,
+       timeout: opts.timeout || 30 * 1000,
+       signal: opts.signal,
+-    }).then(res => checkResponse({
++    })
++  }
++
++  // Follows a redirect of a request that carries a helper's credential for as
++  // long as the credential may go with it: the host name is kept and the
++  // target is https: or loopback http:. Past that point the credential is
++  // dropped and make-fetch-happen follows the rest of the way on its own,
++  // with the options of an ordinary request.
++  const sendHelped = async (target, requestHeaders, requestMethod, fetchBody, hops = 0) => {
++    const res = await sendOnce(target, requestHeaders, requestMethod, fetchBody, true)
++    if (!REDIRECTS.has(res.status) || !res.headers.has('location')) {
++      return res
++    }
++    if (hops >= MAX_REDIRECTS) {
++      throw Object.assign(new Error(`maximum redirect reached at: ${target}`), { code: 'EMAXREDIRECT' })
++    }
++    res.body.resume()
++    const next = new url.URL(res.headers.get('location'), target)
++    let nextMethod = requestMethod
++    let nextBody = fetchBody
++    let nextHeaders = requestHeaders
++    if (res.status === 303 || (requestMethod === 'POST' && [301, 302].includes(res.status))) {
++      nextMethod = 'GET'
++      nextBody = null
++      nextHeaders = Object.fromEntries(Object.entries(nextHeaders).filter(([k]) => k.toLowerCase() !== 'content-length'))
++    }
++    if (next.hostname === new url.URL(target).hostname && mayCarryCredential(next.href)) {
++      return sendHelped(next.href, nextHeaders, nextMethod, nextBody, hops + 1)
++    }
++    const bare = Object.fromEntries(Object.entries(nextHeaders)
++      .filter(([k]) => !['authorization', 'cookie'].includes(k.toLowerCase())))
++    return sendOnce(next.href, bare, nextMethod, nextBody, false)
++  }
++
++  const doFetch = async fetchBody => {
++    const p = (carriesHelperCredential
++      ? sendHelped(uri, headers, method, fetchBody)
++      : sendOnce(uri, headers, method, fetchBody, false)
++    ).then(res => checkResponse({
+       method,
+       uri,
+       res,
+@@ -164,7 +217,62 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
      }
    }
  
@@ -221,8 +338,15 @@ index 91d450f..6f3c3d2 100644
 +  // an offline request makes no network request, so there is nothing to
 +  // authenticate and the helper is not run
 +  if (auth.tokenHelper && !opts.offline) {
++    // a request that may not carry the credential goes out without it and
++    // without running the helper: a lockfile's http: URL on the registry's host
++    if (!mayCarryCredential(uri)) {
++      log.verbose('token-helper', `not sending the credential of ${auth.regKey}:tokenHelper over ${new url.URL(uri).protocol}`)
++      return send()
++    }
 +    return getHelperHeader(auth, body, opts.signal).then(authorization => {
 +      headers.authorization = authorization
++      carriesHelperCredential = true
 +      return send()
 +    })
 +  }
@@ -262,10 +386,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..c627df8
+index 0000000..ea66c49
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,462 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -652,6 +776,17 @@ index 0000000..c627df8
 +
 +const ignore = () => {}
 +
++// A helper's credential goes only where it cannot be read on the wire: over
++// https:, or over http: to the machine itself, which local registries use. A
++// stored token has no such rule (its key carries no scheme), so this is
++// stricter, and the credential is new. WHATWG URL writes an IPv6 host with its
++// brackets.
++const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
++const mayCarryCredential = (target) => {
++  const { protocol, hostname } = new URL(target)
++  return protocol === 'https:' || (protocol === 'http:' && LOOPBACK.has(hostname))
++}
++
 +const isFile = (name) => {
 +  try {
 +    return fs.statSync(name).isFile()
@@ -704,6 +839,7 @@ index 0000000..c627df8
 +}
 +
 +module.exports = getTokenHelperHeader
++module.exports.mayCarryCredential = mayCarryCredential
 +module.exports.refusal = refusal
 +module.exports.toHeader = toHeader
 +module.exports.command = command
@@ -718,10 +854,10 @@ index 0000000..c627df8
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..af646b2
+index 0000000..f4a9b19
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1203 @@
+@@ -0,0 +1,1508 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -729,6 +865,7 @@ index 0000000..af646b2
 +const path = require('path')
 +const util = require('util')
 +const { Minipass } = require('minipass')
++const nock = require('nock')
 +const t = require('tap')
 +const tnock = require('./util/tnock.js')
 +
@@ -1924,6 +2061,310 @@ index 0000000..af646b2
 +  await fetch.json('/pkg', { ...OPTS, cache })
 +  t.same(await fetch.json('/pkg', { ...opts, offline: true }), { cached: true }, 'served from the cache')
 +  t.equal(runs.count(), 0, 'the broken helper was never started')
++})
++
++// Where the credential may go. A stored token has no scheme in its key and
++// goes wherever the key matches; a helper's credential is new and is stricter.
++const seenAuth = (headers) => (headers.authorization === undefined ? '-' : String(headers.authorization))
++
++t.test('a helper credential goes over https', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  tnock(t, 'https://helper.registry').get('/npm/pkg').reply(function () {
++    seen.push(seenAuth(this.req.headers))
++    return [200, { ok: true }]
++  })
++  await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } })
++  t.same(seen, ['Bearer s3cret'])
++})
++
++t.test('a request over http: to the registry host goes out without it, and the helper is not run', async t => {
++  const runs = countRuns(t)
++  const helper = makeHelper(t, `${runs.record}; ${print('s3cret')}`)
++  const logs = logsOf(t)
++  const seen = []
++  tnock(t, 'http://helper.registry').get('/npm/pkg/-/pkg-1.0.0.tgz').reply(function () {
++    seen.push(seenAuth(this.req.headers))
++    return [200, { ok: true }]
++  })
++  // a lockfile's `resolved` URL: a full URL on the registry's host, over http:
++  const res = await fetch.json('http://helper.registry/npm/pkg/-/pkg-1.0.0.tgz', {
++    ...OPTS, tokenHelpers: { [REG_KEY]: helper },
++  })
++  t.same(res, { ok: true })
++  t.same(seen, ['-'], 'no Authorization header')
++  t.equal(runs.count(), 0, 'the helper was not started')
++  t.ok(logs.some(l => l[0] === 'verbose' && l.join(' ').includes('not sending the credential')), 'and the log says so')
++})
++
++t.test('a registry that is itself http: gets no credential either, while a stored token still goes', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  tnock(t, 'http://helper.registry').get('/npm/pkg').times(2).reply(function () {
++    seen.push(seenAuth(this.req.headers))
++    return [200, { ok: true }]
++  })
++  const opts = { ...OPTS, registry: 'http://helper.registry/npm/' }
++  await fetch.json('/pkg', { ...opts, tokenHelpers: { [REG_KEY]: helper } })
++  await fetch.json('/pkg', { ...opts, [`${REG_KEY}:_authToken`]: 'stored' })
++  t.same(seen, ['-', 'Bearer stored'], 'a stored token keeps its behaviour: no scheme check')
++})
++
++for (const host of ['localhost', '127.0.0.1']) {
++  t.test(`http: to ${host} gets the credential, for a local registry`, async t => {
++    const helper = makeHelper(t, print('s3cret'))
++    const seen = []
++    tnock(t, `http://${host}`).get('/npm/pkg').reply(function () {
++      seen.push(seenAuth(this.req.headers))
++      return [200, { ok: true }]
++    })
++    await fetch.json('/pkg', {
++      ...OPTS, registry: `http://${host}/npm/`, tokenHelpers: { [`//${host}/npm/`]: helper },
++    })
++    t.same(seen, ['Bearer s3cret'])
++  })
++}
++
++t.test('http: to a host that only looks like a loopback address gets nothing', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  for (const host of ['localhost.example', '127.0.0.1.example', '127.0.0.2']) {
++    tnock(t, `http://${host}`).get('/npm/pkg').reply(function () {
++      seen.push(seenAuth(this.req.headers))
++      return [200, { ok: true }]
++    })
++    await fetch.json('/pkg', {
++      ...OPTS, registry: `http://${host}/npm/`, tokenHelpers: { [`//${host}/npm/`]: helper },
++    })
++  }
++  t.same(seen, ['-', '-', '-'])
++})
++
++// The redirects of a credentialed request. make-fetch-happen drops the
++// header when the host name changes and keeps it across a change of scheme or
++// port; for a helper's credential a scheme that may not carry it is a reason
++// to drop it too.
++const redirected = async (t, { from = 'https://helper.registry', to, status = 302, method = 'GET', body }) => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  const target = new URL(to)
++  nock(from).intercept('/npm/pkg', method).reply(status, '', { location: to })
++  nock(target.origin).intercept(target.pathname, status === 307 ? method : 'GET')
++    .reply(function (uri, requestBody) {
++      seen.push({ auth: seenAuth(this.req.headers), body: requestBody, length: this.req.headers['content-length'] })
++      return [200, { landed: true }]
++    })
++  t.teardown(() => nock.cleanAll())
++  const res = await fetch.json('/pkg', {
++    ...OPTS, method, ...(body ? { body } : {}), tokenHelpers: { [REG_KEY]: helper },
++  })
++  t.same(res, { landed: true })
++  return seen
++}
++
++t.test('a redirect to https on the same host keeps the credential', async t => {
++  const seen = await redirected(t, { to: 'https://helper.registry/npm/landed' })
++  t.same(seen.map(s => s.auth), ['Bearer s3cret'])
++})
++
++t.test('a redirect on the same host from https to http drops the credential', async t => {
++  const seen = await redirected(t, { to: 'http://helper.registry/npm/landed' })
++  t.same(seen.map(s => s.auth), ['-'])
++})
++
++t.test('a redirect to another host drops the credential', async t => {
++  const seen = await redirected(t, { to: 'https://elsewhere.registry/npm/landed' })
++  t.same(seen.map(s => s.auth), ['-'])
++})
++
++t.test('after the credential is dropped it does not come back on a later hop', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  nock('https://helper.registry').get('/npm/pkg').reply(302, '', { location: 'http://helper.registry/npm/hop' })
++  nock('http://helper.registry').get('/npm/hop').reply(302, '', { location: 'https://helper.registry/npm/landed' })
++  nock('https://helper.registry').get('/npm/landed').reply(function () {
++    seen.push(seenAuth(this.req.headers))
++    return [200, { landed: true }]
++  })
++  t.teardown(() => nock.cleanAll())
++  await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } })
++  t.same(seen, ['-'])
++})
++
++t.test('a redirect from https to http on a loopback address keeps the credential', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const seen = []
++  nock('https://127.0.0.1').get('/npm/pkg').reply(302, '', { location: 'http://127.0.0.1:8080/npm/landed' })
++  nock('http://127.0.0.1:8080').get('/npm/landed').reply(function () {
++    seen.push(seenAuth(this.req.headers))
++    return [200, { landed: true }]
++  })
++  t.teardown(() => nock.cleanAll())
++  await fetch.json('/pkg', {
++    ...OPTS, registry: 'https://127.0.0.1/npm/', tokenHelpers: { '//127.0.0.1/npm/': helper },
++  })
++  t.same(seen, ['Bearer s3cret'])
++})
++
++t.test('a redirect that turns a POST into a GET sends no body and keeps the credential where it may', async t => {
++  const seen = await redirected(t, {
++    method: 'POST', body: { a: 1 }, status: 302, to: 'https://helper.registry/npm/landed',
++  })
++  t.same(seen.map(s => [s.auth, s.body, s.length]), [['Bearer s3cret', '', undefined]])
++})
++
++t.test('a 307 keeps the method and the body', async t => {
++  const seen = await redirected(t, {
++    method: 'POST', body: { a: 1 }, status: 307, to: 'https://helper.registry/npm/landed',
++  })
++  t.same(seen.map(s => [s.auth, s.body]), [['Bearer s3cret', { a: 1 }]])
++})
++
++t.test('a 303 away from the credential also becomes a GET without a content length', async t => {
++  const seen = await redirected(t, {
++    method: 'POST', body: { a: 1 }, status: 303, to: 'http://helper.registry/npm/landed',
++  })
++  t.same(seen.map(s => [s.auth, s.body, s.length]), [['-', '', undefined]])
++})
++
++t.test('a redirect loop ends with EMAXREDIRECT', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  nock('https://helper.registry').get('/npm/pkg').times(25).reply(302, '', { location: 'https://helper.registry/npm/pkg' })
++  t.teardown(() => nock.cleanAll())
++  await t.rejects(fetch('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } }), { code: 'EMAXREDIRECT' })
++})
++
++t.test('a redirect without a location is returned as it is, as for any request', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  tnock(t, 'https://helper.registry').get('/npm/pkg').reply(302, '')
++  const res = await fetch('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper } })
++  t.equal(res.status, 302)
++})
++
++// Transport. npm-registry-fetch cannot tell which config file a proxy or a
++// certificate came from; the caller can, and hands over the values of the
++// sources it trusts. The options make-fetch-happen receives are recorded.
++const TRANSPORT = {
++  proxy: 'http://trusted-proxy:3128',
++  httpsProxy: 'http://trusted-https-proxy:3128',
++  noProxy: 'trusted.no.proxy',
++  ca: ['trusted-ca'],
++  strictSSL: true,
++  localAddress: '127.0.0.9',
++}
++const PROJECT = {
++  proxy: 'http://project-proxy:3128',
++  httpsProxy: 'http://project-https-proxy:3128',
++  noProxy: 'project.no.proxy',
++  ca: ['project-ca'],
++  strictSSL: false,
++  localAddress: '10.0.0.1',
++}
++const fakeResponse = (status, body = '{}', headers = {}) => {
++  const { Response } = require('minipass-fetch')
++  const stream = new Minipass()
++  stream.end(body)
++  return new Response(stream, { status, headers: { 'content-type': 'application/json', ...headers } })
++}
++const recording = (t, respond = () => fakeResponse(200)) => {
++  const calls = []
++  const recorded = t.mock('..', {
++    'make-fetch-happen': async (uri, options) => {
++      calls.push({ uri, ...options })
++      return respond(calls.length)
++    },
++  })
++  return { fetch: recorded, calls }
++}
++const transportOf = (o) => ({
++  proxy: o.proxy,
++  noProxy: o.noProxy,
++  ca: o.ca,
++  strictSSL: o.strictSSL,
++  localAddress: o.localAddress,
++})
++
++t.test('a request that carries a helper credential uses the trusted transport', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t)
++  await recorded.json('/pkg', {
++    ...OPTS, ...PROJECT, tokenHelperTransport: TRANSPORT, tokenHelpers: { [REG_KEY]: helper },
++  })
++  t.equal(calls.length, 1)
++  t.equal(calls[0].headers.authorization, 'Bearer s3cret')
++  t.same(transportOf(calls[0]), {
++    proxy: TRANSPORT.httpsProxy,
++    noProxy: TRANSPORT.noProxy,
++    ca: TRANSPORT.ca,
++    strictSSL: true,
++    localAddress: TRANSPORT.localAddress,
++  }, 'the project\'s values are not used')
++})
++
++t.test('the trusted transport replaces the request\'s values, empty ones too', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t)
++  const transport = { proxy: null, strictSSL: true }
++  await recorded.json('/pkg', {
++    ...OPTS, ...PROJECT, tokenHelperTransport: transport, tokenHelpers: { [REG_KEY]: helper },
++  })
++  t.same(transportOf(calls[0]), {
++    proxy: null, noProxy: undefined, ca: undefined, strictSSL: true, localAddress: undefined,
++  }, 'a setting the trusted sources leave unset is not filled in from the project')
++})
++
++t.test('a request without a helper credential uses its own transport', async t => {
++  const { fetch: recorded, calls } = recording(t)
++  const stored = { [`${REG_KEY}:_authToken`]: 'stored' }
++  await recorded.json('/pkg', { ...OPTS, ...PROJECT, ...stored, tokenHelperTransport: TRANSPORT })
++  await recorded.json('/pkg', { ...OPTS, ...PROJECT, tokenHelperTransport: TRANSPORT })
++  for (const call of calls) {
++    t.same(transportOf(call), {
++      proxy: PROJECT.httpsProxy,
++      noProxy: PROJECT.noProxy,
++      ca: PROJECT.ca,
++      strictSSL: false,
++      localAddress: PROJECT.localAddress,
++    })
++  }
++  t.equal(calls[0].headers.authorization, 'Bearer stored')
++})
++
++t.test('a helper request that is not sent with the credential uses its own transport', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t)
++  await recorded.json('http://helper.registry/npm/pkg', {
++    ...OPTS, ...PROJECT, tokenHelperTransport: TRANSPORT, tokenHelpers: { [REG_KEY]: helper },
++  })
++  t.equal(calls[0].headers.authorization, undefined)
++  t.equal(calls[0].proxy, PROJECT.httpsProxy)
++})
++
++t.test('a helper request without a trusted transport uses its own (other callers of the library)', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t)
++  await recorded.json('/pkg', { ...OPTS, ...PROJECT, tokenHelpers: { [REG_KEY]: helper } })
++  t.equal(calls[0].proxy, PROJECT.httpsProxy)
++})
++
++t.test('a hop that leaves the credential behind goes back to the request\'s own transport', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t, n =>
++    n === 1 ? fakeResponse(302, '', { location: 'http://helper.registry/npm/landed' }) : fakeResponse(200))
++  await recorded.json('/pkg', { ...OPTS, ...PROJECT, tokenHelperTransport: TRANSPORT, tokenHelpers: { [REG_KEY]: helper } })
++  t.equal(calls[0].proxy, TRANSPORT.httpsProxy)
++  t.equal(calls[0].redirect, 'manual')
++  t.equal(calls[1].proxy, PROJECT.httpsProxy, 'the second request carries no credential')
++  t.equal(calls[1].headers.authorization, undefined)
++  t.equal(calls[1].redirect, undefined, 'and is followed by make-fetch-happen')
++})
++
++t.test('http: to [::1] gets the credential, for a local registry', async t => {
++  const helper = makeHelper(t, print('s3cret'))
++  const { fetch: recorded, calls } = recording(t)
++  await recorded.json('/pkg', { ...OPTS, registry: 'http://[::1]/npm/', tokenHelpers: { '//[::1]/npm/': helper } })
++  t.equal(calls[0].uri, 'http://[::1]/npm/pkg')
++  t.equal(calls[0].headers.authorization, 'Bearer s3cret')
 +})
 -- 
 2.52.0.windows.1

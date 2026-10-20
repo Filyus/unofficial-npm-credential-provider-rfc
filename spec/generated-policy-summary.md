@@ -27,7 +27,7 @@ Source: `spec/policy-v1.json`.
 | Default granularity | `registry` |
 | `cache=expires` requires | `expiresAt` |
 | Treat as expired this many seconds before `expiresAt` | `60` |
-| Operation-independent by default | `true` |
+| Operation-independent by default | `false` |
 | Stored policies | `session`, `expires` |
 | Non-stored policies | `never` |
 

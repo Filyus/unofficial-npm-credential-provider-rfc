@@ -224,7 +224,7 @@ class SpecConsistencyTests(unittest.TestCase):
             "interactive": False,
         }
         client.handle_response(request, {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}}})
-        entry = client.cache[CacheKey("registry", "https://registry.example.test/")]
+        entry = client.cache[CacheKey("registry", "https://registry.example.test/", operation="read")]
 
         self.assertEqual(entry.cache, self.policy["cache"]["defaultPolicy"])
         self.assertEqual(entry.granularity, self.policy["cache"]["defaultGranularity"])

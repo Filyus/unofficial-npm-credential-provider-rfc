@@ -17,14 +17,14 @@ class MockProviderSubprocessTests(unittest.TestCase):
         client, request, response = self.exchange("get-success")
 
         self.assertEqual(client.handle_response(request, response), "ok")
-        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope"), client.cache)
+        self.assertIn(CacheKey("scope", "https://registry.example.test/", "@scope", operation="read"), client.cache)
 
     def test_mock_provider_expiring_token_is_reacquired_with_a_plain_get(self) -> None:
         client, request, response = self.exchange("expiring-token")
         registry = "https://registry.example.test/"
 
         self.assertEqual(client.handle_response(request, response), "ok")
-        expires_at = client.cache[CacheKey("scope", registry, "@scope")].expires_at
+        expires_at = client.cache[CacheKey("scope", registry, "@scope", operation="read")].expires_at
         self.assertIsNotNone(client.lookup(registry, "@scope", "pkg", now=expires_at - 3600))
         # Inside the expiry margin the entry stops matching, and what follows is
         # an ordinary `get`: there is no separate refresh request.

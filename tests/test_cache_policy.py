@@ -56,17 +56,17 @@ class CachePolicyTests(unittest.TestCase):
     def test_registry_granularity_uses_registry_key(self) -> None:
         self.client.handle_response(request(), ok("registry"))
 
-        self.assertIn(CacheKey("registry", REGISTRY), self.client.cache)
+        self.assertIn(CacheKey("registry", REGISTRY, operation="read"), self.client.cache)
 
     def test_scope_granularity_uses_registry_and_scope_key(self) -> None:
         self.client.handle_response(request(), ok("scope"))
 
-        self.assertIn(CacheKey("scope", REGISTRY, "@scope"), self.client.cache)
+        self.assertIn(CacheKey("scope", REGISTRY, "@scope", operation="read"), self.client.cache)
 
     def test_package_granularity_uses_registry_scope_and_package_key(self) -> None:
         self.client.handle_response(request(), ok("package"))
 
-        self.assertIn(CacheKey("package", REGISTRY, "@scope", "pkg"), self.client.cache)
+        self.assertIn(CacheKey("package", REGISTRY, "@scope", "pkg", operation="read"), self.client.cache)
 
     def test_operation_dependent_token_includes_operation_in_key(self) -> None:
         self.client.handle_response(request("publish"), ok("scope", operationIndependent=False))
@@ -82,7 +82,7 @@ class CachePolicyTests(unittest.TestCase):
     def test_cache_expires_stores_expiration(self) -> None:
         self.client.handle_response(request(), ok("scope", cache="expires", expiresAt=1893456000))
 
-        self.assertEqual(self.client.cache[CacheKey("scope", REGISTRY, "@scope")].expires_at, 1893456000)
+        self.assertEqual(self.client.cache[CacheKey("scope", REGISTRY, "@scope", operation="read")].expires_at, 1893456000)
 
     def test_default_cache_is_session_and_default_granularity_is_registry(self) -> None:
         self.client.handle_response(
@@ -90,7 +90,7 @@ class CachePolicyTests(unittest.TestCase):
             {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}}},
         )
 
-        entry = self.client.cache[CacheKey("registry", REGISTRY)]
+        entry = self.client.cache[CacheKey("registry", REGISTRY, operation="read")]
         self.assertEqual(entry.cache, "session")
         self.assertEqual(entry.granularity, "registry")
 
@@ -149,8 +149,22 @@ class CacheLookupTests(unittest.TestCase):
         self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="publish"), "write")
         self.assertIsNone(self.token_for(scope="@scope", package="pkg", operation="read"))
 
+    def test_a_read_answer_without_operation_independent_serves_no_other_operation(self) -> None:
+        # the default is `false` (spec/policy-v1.json cache.operationIndependentDefault)
+        self.client.handle_response(request(), ok("scope", token="read-only"))
+
+        self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="read"), "read-only")
+        for operation in ("publish", "stage", "deprecate"):
+            self.assertIsNone(self.token_for(scope="@scope", package="pkg", operation=operation), operation)
+
+    def test_a_read_answer_with_operation_independent_true_serves_another_operation(self) -> None:
+        self.client.handle_response(request(), ok("scope", token="any", operationIndependent=True))
+
+        self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="read"), "any")
+        self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="publish"), "any")
+
     def test_operation_bound_token_wins_over_independent_one_at_the_same_level(self) -> None:
-        self.client.handle_response(request(), ok("scope", token="any"))
+        self.client.handle_response(request(), ok("scope", token="any", operationIndependent=True))
         self.client.handle_response(request("publish"), ok("scope", token="write", operationIndependent=False))
 
         self.assertEqual(self.token_for(scope="@scope", package="pkg", operation="publish"), "write")

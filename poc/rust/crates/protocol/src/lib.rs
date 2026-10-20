@@ -785,6 +785,14 @@ impl ProviderOk {
         }
     }
 
+    /// Whether the answer serves every operation: the field when the answer
+    /// carries it, else the policy's default (`false`: the answer serves only
+    /// the operation it was issued for).
+    pub fn serves_every_operation(&self) -> bool {
+        self.operation_independent
+            .unwrap_or(generated::OPERATION_INDEPENDENT_DEFAULT)
+    }
+
     pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         require(&self.kind == kind, "Ok.kind must match request kind")?;
         // the schema's cache=expires rule carries no kind condition
@@ -1532,6 +1540,26 @@ mod tests {
 
             assert_eq!(request.kind, RequestKind::Unsupported);
         }
+    }
+
+    #[test]
+    fn an_answer_without_operation_independent_serves_only_its_own_operation() {
+        let answer = |extra: serde_json::Value| -> ProviderOk {
+            let mut ok = serde_json::json!({
+                "kind": "get", "auth": {"type": "bearer", "token": "t"}
+            });
+            ok.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(ok).unwrap()
+        };
+
+        const { assert!(!generated::OPERATION_INDEPENDENT_DEFAULT) };
+        assert!(!answer(serde_json::json!({})).serves_every_operation());
+        assert!(
+            !answer(serde_json::json!({"operationIndependent": false})).serves_every_operation()
+        );
+        assert!(answer(serde_json::json!({"operationIndependent": true})).serves_every_operation());
     }
 
     #[test]

@@ -121,7 +121,7 @@ const main = async () => {
   await new Promise((resolve, reject) => elsewhere.once('error', reject).listen(0, '::', resolve))
     .catch(() => new Promise(resolve => elsewhere.listen(0, '127.0.0.1', resolve)))
   const otherPort = elsewhere.address().port
-  const server = http.createServer((req, res) => {
+  const handle = (req, res) => {
     req.resume()
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
@@ -159,8 +159,36 @@ const main = async () => {
         versions: { '1.0.0': { name: 'demo', version: '1.0.0', dist: { tarball: 'http://x/demo.tgz' } } },
       }))
     })
-  })
+  }
+  const server = http.createServer(handle)
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  // the same registry on an address of this machine that is not a loopback
+  // one, where an http: request is not allowed to carry a helper's credential;
+  // a machine with no such address skips the checks that need it
+  const lanAddress = Object.values(os.networkInterfaces()).flat()
+    .find(i => i && i.family === 'IPv4' && !i.internal)?.address
+  const lan = lanAddress && http.createServer(handle)
+  if (lan) {
+    await new Promise(resolve => lan.listen(0, lanAddress, resolve))
+  }
+  // a proxy a repository's .npmrc names: it records what it is asked to
+  // forward and refuses, so nothing it sees is a secret that left npm by
+  // that route
+  const proxySeen = []
+  const proxy = http.createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      proxySeen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
+      res.statusCode = 502
+      res.end('refused')
+    })
+  })
+  proxy.on('connect', (req, socket) => {
+    proxySeen.push({ method: 'CONNECT', url: req.url, authorization: req.headers['proxy-authorization'] || null })
+    socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+  })
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+  const proxyUrl = `http://127.0.0.1:${proxy.address().port}`
   const { port } = server.address()
   const registry = `http://127.0.0.1:${port}/`
   const nerf = `//127.0.0.1:${port}/`
@@ -168,7 +196,7 @@ const main = async () => {
   const helperLine = `${nerf}:tokenHelper=${helper}\n`
 
   const run = async (name, {
-    args = ['view', 'demo', 'version'], user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {},
+    args = ['view', 'demo', 'version'], registryUrl = registry, user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {},
   }) => {
     // the repository, and beside it the user's own files: npm does not trust
     // a user or global config file that lies inside the project
@@ -187,9 +215,10 @@ const main = async () => {
     }
     seen.length = 0
     elsewhereSeen.length = 0
+    proxySeen.length = 0
     const { stdout, stderr, failed } = await new Promise(resolve => execFile(process.execPath, [
       path.join(npmCliDir, 'bin', 'npm-cli.js'), ...args,
-      `--registry=${registry}`,
+      `--registry=${registryUrl}`,
       // a --userconfig flag would outrank a project redirect, so the redirect
       // scenario leaves it out
       ...(userconfigFlag ? [`--userconfig=${path.join(home, 'user.npmrc')}`] : []),
@@ -206,6 +235,7 @@ const main = async () => {
       output: stdout + stderr,
       stdout: stdout.trim(),
       requests: seen.map(s => `${s.method} ${s.authorization || '-'}`),
+      proxy: proxySeen.map(s => `${s.method} ${s.url} ${s.authorization || '-'}`),
       elsewhere: elsewhereSeen.map(s => `${s.method} ${s.url} ${s.authorization || "-"}`),
       notices: stderr.split(/\r?\n/).filter(l =>
         /tokenHelper|token-helper|ETOKENHELPER|Unknown|ENEEDAUTH|leaked/.test(l)),
@@ -229,6 +259,8 @@ const main = async () => {
       restore = null
     }
     server.close()
+    lan?.close()
+    proxy.close()
     elsewhere.close()
     fs.rmSync(root, { recursive: true, force: true })
   }
@@ -462,12 +494,45 @@ const main = async () => {
       }
     }
 
+    // A repository's .npmrc names a proxy, and an http: registry on a network
+    // address: neither may receive a helper's credential. The same files with
+    // a stored token are the control: the proxy is in use, and the token goes.
+    const viaProject = 'https-proxy=<proxy>\nproxy=<proxy>\nstrict-ssl=false\n'.replaceAll('<proxy>', proxyUrl)
+    const proxied = await run('project-proxy-helper', { user: helperLine, project: viaProject })
+    const proxiedToken = await run('project-proxy-token', {
+      user: `${nerf}:_authToken=helper-token\n`, project: viaProject,
+    })
+    const carried = r => r.proxy.filter(line => line.includes('helper-token'))
+    expect(proxied, 'the request reaches the registry with the helper token', proxied.requests.length &&
+      auths(proxied).join() === 'Bearer helper-token' && !proxied.failed)
+    expect(proxied, 'the repository\'s proxy sees no request at all', proxied.proxy.length === 0)
+    expect(proxiedToken, 'control: a stored token goes through the repository\'s proxy, so the proxy is in use',
+      carried(proxiedToken).length > 0)
+    const results2 = [proxied, proxiedToken]
+    if (lan) {
+      const lanRegistry = `http://${lanAddress}:${lan.address().port}/`
+      const lanNerf = `//${lanAddress}:${lan.address().port}/`
+      const plain = await run('http-registry-helper', {
+        registryUrl: lanRegistry, user: `${lanNerf}:tokenHelper=${helper}\n`,
+      })
+      const plainToken = await run('http-registry-token', {
+        registryUrl: lanRegistry, user: `${lanNerf}:_authToken=stored-token\n`,
+      })
+      expect(plain, 'view reaches the registry over http', !plain.failed && plain.requests.length)
+      expect(plain, 'no request carries a credential', auths(plain).join() === '-')
+      expect(plain, 'the helper was not run', !plain.notices.some(l => l.includes('helper says hello')))
+      expect(plainToken, 'control: a stored token goes over the same http: registry', auths(plainToken).join() === 'Bearer stored-token')
+      results2.push(plain, plainToken)
+    } else {
+      notes.push('no network address that is not a loopback one: the http: registry checks were skipped')
+    }
+
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, ...children, login]
+    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, ...children, ...results2, login]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)

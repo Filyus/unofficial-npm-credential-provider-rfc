@@ -71,7 +71,7 @@ pub const ALLOWED_CONFIG_SOURCES: &[&str] = &[
 ];
 pub const DEFAULT_CACHE_POLICY: &str = "session";
 pub const DEFAULT_GRANULARITY: &str = "registry";
-pub const OPERATION_INDEPENDENT_DEFAULT: bool = true;
+pub const OPERATION_INDEPENDENT_DEFAULT: bool = false;
 pub const EXPIRY_MARGIN_SECONDS: u64 = 60;
 pub const UNKNOWN_ERROR_KIND: &str = "other";
 pub const UNKNOWN_CACHE: &str = "never";

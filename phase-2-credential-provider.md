@@ -405,7 +405,7 @@ How some registries split these:
 | Azure Artifacts | Packaging read; read and write; read, write and manage, the last required to delete ([scopes](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/oauth)). |
 | Cargo (prior art) | Operations `read`, `publish`, `yank`, `unyank`, `owners`, plus an `Unknown` fallback for forward compatibility. |
 
-A provider returning a stage-only token for `stage` sets `operationIndependent: false`, so npm never reuses it for `publish`.
+A provider returning a stage-only token for `stage` leaves `operationIndependent` at its default `false`, so npm never reuses it for `publish`; it says `true` only of a credential that may serve every operation.
 
 ### 5. Caching
 
@@ -417,7 +417,7 @@ The client caches credentials in memory, keyed by the `granularity` the provider
 | `"scope"` | registry URL + scope | Different credentials for `@scope-a/*` and `@scope-b/*` on one registry. |
 | `"package"` | registry URL + scope + package | A credential per package. |
 
-The key also records the granularity level itself, and the operation when `operationIndependent` is `false` or the operation is not `read` (below), so entries from different levels never collide (an unscoped package named `read` must not match a scope-level entry bound to operation `read`).
+The key also records the granularity level itself, and the operation when `operationIndependent` is `false` (the default) or the operation is not `read` (below), so entries from different levels never collide (an unscoped package named `read` must not match a scope-level entry bound to operation `read`).
 
 Lookups go from most to least specific: package, then scope, then registry, and at each level an entry bound to the requested operation before an operation-independent one. An entry with `cache: "expires"` stops matching 60 seconds before `expiresAt`, so a request never leaves with a credential about to lapse. If nothing matches, the client sends `get`.
 

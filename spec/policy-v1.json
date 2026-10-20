@@ -167,7 +167,7 @@
       "expiresAt"
     ],
     "expiryMarginSeconds": 60,
-    "operationIndependentDefault": true,
+    "operationIndependentDefault": false,
     "storePolicies": [
       "session",
       "expires"

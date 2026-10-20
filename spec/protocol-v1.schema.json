@@ -180,7 +180,9 @@
           "maximum": 9007199254740991
         },
         "operationIndependent": {
-          "type": "boolean"
+          "description": "Default false: the answer serves only the operation it was issued for.",
+          "type": "boolean",
+          "default": false
         },
         "granularity": {
           "description": "Open: an unknown value is read as package.",

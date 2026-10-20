@@ -1,4 +1,4 @@
-From 194f1b56ef3e0d68171131096ede05de1e47f6e6 Mon Sep 17 00:00:00 2001
+From db76b0bab48fd7e87d0a8804dc655444cd614888 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -32,6 +32,13 @@ stored beside it; profile enable-2fa says it cannot work through a helper;
 an OIDC trusted-publishing token masks a configured helper while in use. An
 error cause without a message no longer prints "cause undefined".
 
+When any tokenHelper is configured, the flat options also carry
+tokenHelperTransport: proxy, https-proxy, noproxy, ca, cafile, strict-ssl and
+local-address taken only from the layers a project cannot write (defaults,
+builtin, environment, command line, and the user and global files the trust
+rules accept), which npm-registry-fetch uses for a request that carries a
+helper's credential instead of the request's own settings.
+
 Pairs with the npm-registry-fetch prototype that runs the helper. Prototype
 for the credential provider RFC discussed in npm/rfcs#850.
 ---
@@ -49,22 +56,22 @@ for the credential provider RFC discussed in npm/rfcs#850.
  test/fixtures/token-helper/helper          |   2 +
  test/fixtures/token-helper/helper.cmd      |   1 +
  test/fixtures/token-helper/index.js        |   5 +
- test/lib/commands/config.js                |  32 ++
+ test/lib/commands/config.js                |  32 +
  test/lib/commands/login.js                 |  27 +
  test/lib/commands/logout.js                |  42 ++
  test/lib/commands/profile.js               |  11 +
- test/lib/commands/publish.js               |  33 ++
+ test/lib/commands/publish.js               |  33 +
  test/lib/commands/unpublish.js             |  29 +
  test/lib/commands/whoami.js                |  11 +
  test/lib/utils/error-message.js            |  10 +
  test/lib/utils/oidc.js                     |  42 ++
  test/lib/utils/publish-config.js           |  26 +
  workspaces/config/lib/definitions/index.js |   7 +
- workspaces/config/lib/index.js             | 265 ++++++++-
+ workspaces/config/lib/index.js             | 294 ++++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 608 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 722 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1311 insertions(+), 21 deletions(-)
+ 29 files changed, 1454 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -813,7 +820,7 @@ index b5b63bf..e54d685 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..90ed3d2 100644
+index 37dfecf..a65162b 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -4,7 +4,7 @@ const ini = require('ini')
@@ -840,7 +847,17 @@ index 37dfecf..90ed3d2 100644
  ]
  
  const fileExists = (...p) => stat(resolve(...p))
-@@ -64,6 +66,11 @@ class Config {
+@@ -54,6 +56,9 @@ const confTypes = new Set([
+   'cli',
+ ])
+ 
++// the settings that decide where a request goes and whom it trusts
++const TRANSPORT_KEYS = ['ca', 'cafile', 'https-proxy', 'local-address', 'noproxy', 'proxy', 'strict-ssl']
++
+ class Config {
+   #loaded = false
+   #flatten
+@@ -64,6 +69,11 @@ class Config {
    // Entries: { where, key, baseKey, source }. `baseKey` is non-null only for scoped keys (e.g. `<nerfdart>:foo`) and holds the trailing segment.
    // `env` and `publishConfig` entries warn instead of error.
    #unknownConfigs = []
@@ -852,7 +869,7 @@ index 37dfecf..90ed3d2 100644
  
    static get typeDefs () {
      return typeDefs
-@@ -159,16 +166,7 @@ class Config {
+@@ -159,16 +169,7 @@ class Config {
      if (!this.loaded) {
        throw new Error('call config.load() before reading values')
      }
@@ -870,7 +887,17 @@ index 37dfecf..90ed3d2 100644
    }
  
    get (key, where) {
-@@ -645,6 +643,17 @@ class Config {
+@@ -223,6 +224,9 @@ class Config {
+     }
+     this.#flatOptions.nodeBin = this.execPath
+     this.#flatOptions.npmBin = this.npmBin
++    if (this.#flatOptions.tokenHelpers) {
++      this.#flatOptions.tokenHelperTransport = this.#tokenHelperTransport()
++    }
+     timeEnd()
+ 
+     return this.#flatOptions
+@@ -645,6 +649,17 @@ class Config {
        conf.raw = obj
        outer: for (const [key, value] of Object.entries(obj)) {
          const k = envReplace(key, this.env)
@@ -888,7 +915,7 @@ index 37dfecf..90ed3d2 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +687,51 @@ class Config {
+@@ -678,6 +693,51 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -940,7 +967,7 @@ index 37dfecf..90ed3d2 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -857,14 +911,195 @@ class Config {
+@@ -857,14 +917,218 @@ class Config {
      }
    }
  
@@ -955,6 +982,29 @@ index 37dfecf..90ed3d2 100644
 +  // pass on to child processes.
 +  get tokenHelperUntrusted () {
 +    return ['user', 'global'].filter(where => !this.#tokenHelperSources.has(where))
++  }
++
++  // What a request that carries a token helper's credential uses to reach the
++  // registry: the proxies, the certificates, strict-ssl and the local address,
++  // as flat options, from the layers a project cannot write. npm-registry-fetch
++  // cannot tell where a value came from, so it is handed these and uses them
++  // instead of the request's own for that request. A project .npmrc could
++  // otherwise send the fresh credential through its own proxy or past a
++  // certificate it chose. The layers are the ones whose values the trust rules
++  // for a helper accept: the defaults, npm's builtin config, the environment,
++  // the command line, and the user and global files that are the user's own.
++  // A setting no such layer sets keeps its default.
++  #tokenHelperTransport () {
++    const transport = {}
++    for (const [where, { data }] of this.data) {
++      const trusted = where === 'user' || where === 'global' ? this.#tokenHelperSources.has(where) : where !== 'project'
++      if (trusted) {
++        // `ca` first: a `cafile` in the same layer replaces it, as in flat
++        this.#flatten(Object.fromEntries(TRANSPORT_KEYS.filter(key => hasOwnProperty(data, key))
++          .map(key => [key, data[key]])), transport)
++      }
++    }
++    return transport
 +  }
 +
    loadUserConfig () {
@@ -1136,7 +1186,7 @@ index 37dfecf..90ed3d2 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1211,14 @@ class Config {
+@@ -976,6 +1240,14 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -1172,7 +1222,7 @@ index 12719b5..e9be8d3 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..c4bbb30 100644
+index 9f83d98..0bc2f73 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,7 +2,7 @@ const t = require('tap')
@@ -1213,7 +1263,7 @@ index 9f83d98..c4bbb30 100644
    readFileSync: (path, ...args) => {
      throwIfExternalNpmrc(path)
      if (path.includes('WEIRD-ERROR')) {
-@@ -2468,3 +2481,596 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2481,710 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -1809,6 +1859,120 @@ index 9f83d98..c4bbb30 100644
 +  const scoped = await warnings('//npm.corp.example/:tokenHelper=/usr/local/bin/token\n')
 +  t.notOk(scoped.warned.some(w => w.includes('tokenHelper')), 'the scoped key gets no warning')
 +  t.equal(scoped.config.getCredentialsByURI('https://npm.corp.example/').tokenHelper, '/usr/local/bin/token')
++})
++
++// The transport a request with a helper's credential uses: from the layers a
++// project cannot write, never from a project .npmrc
++const CERT = (name) => `-----BEGIN CERTIFICATE-----\n${name}\n-----END CERTIFICATE-----\n`
++
++t.test('tokenHelperTransport holds the user\'s transport settings, not the project\'s', async t => {
++  const helper = process.platform === 'win32' ? 'C:\\tools\\token.cmd' : '/usr/local/bin/token'
++  const path = outsideProjects(t, {
++    project: { 'package.json': '{}', '.npmrc': '' },
++    home: { '.npmrc': '' },
++  })
++  fs.writeFileSync(join(path, 'project', 'project-ca.pem'), CERT('PROJECT'))
++  fs.writeFileSync(join(path, 'home', 'user-ca.pem'), CERT('USER'))
++  fs.writeFileSync(join(path, 'project', '.npmrc'), [
++    'https-proxy=http://project.proxy:3128',
++    'proxy=http://project.proxy:3128',
++    'noproxy=project.skip',
++    'strict-ssl=false',
++    `cafile=${join(path, 'project', 'project-ca.pem')}`,
++    '',
++  ].join('\n'))
++  fs.writeFileSync(join(path, 'home', '.npmrc'), [
++    `//helper.registry/:tokenHelper=${helper}`,
++    'https-proxy=http://user.proxy:3128',
++    `cafile=${join(path, 'home', 'user-ca.pem')}`,
++    '',
++  ].join('\n'))
++  const config = new Config({
++    npmPath: `${path}/npm`,
++    env: {},
++    argv: [process.execPath, __filename,
++      `--userconfig=${join(path, 'home', '.npmrc')}`,
++      `--globalconfig=${join(path, 'home', 'global.npmrc')}`,
++      '--noproxy=cli.skip'],
++    cwd: join(path, 'project'),
++    excludeNpmCwd: true,
++    shorthands,
++    definitions,
++    nerfDarts,
++    flatten,
++  })
++  await config.load()
++
++  const { flat } = config
++  t.equal(flat.httpsProxy, 'http://project.proxy:3128', 'a request without a helper still takes the project\'s proxy')
++  t.equal(flat.strictSSL, false)
++  t.same(flat.ca, [CERT('PROJECT').trim()])
++  t.same(flat.tokenHelperTransport, {
++    ca: [CERT('USER').trim()],
++    httpsProxy: 'http://user.proxy:3128',
++    localAddress: null,
++    noProxy: 'cli.skip',
++    proxy: null,
++    strictSSL: true,
++  }, 'the transport has the user\'s files, the command line and the defaults, and nothing from the project')
++
++  config.set('proxy', 'http://cli.proxy:3128', 'cli')
++  t.equal(config.flat.tokenHelperTransport.proxy, 'http://cli.proxy:3128', 'the command line counts, and a change is picked up')
++  config.set('strict-ssl', false, 'project')
++  t.equal(config.flat.tokenHelperTransport.strictSSL, true, 'project config set after loading does not')
++})
++
++t.test('tokenHelperTransport also takes the environment and the global file, and not a file the project chose', async t => {
++  const helper = process.platform === 'win32' ? 'C:\\tools\\token.cmd' : '/usr/local/bin/token'
++  const path = outsideProjects(t, {
++    project: { 'package.json': '{}', '.npmrc': '' },
++    home: { '.npmrc': 'https-proxy=http://user.proxy:3128\n' },
++    global: { etc: { npmrc: `//helper.registry/:tokenHelper=${helper}\nproxy=http://global.proxy:3128\n` } },
++  })
++  fs.writeFileSync(join(path, 'project', '.npmrc'), `userconfig=${join(path, 'home', '.npmrc')}\n`)
++  const config = new Config({
++    npmPath: `${path}/npm`,
++    env: { 'npm_config_local-address': '127.0.0.1' },
++    argv: [process.execPath, __filename, `--globalconfig=${join(path, 'global', 'etc', 'npmrc')}`],
++    cwd: join(path, 'project'),
++    excludeNpmCwd: true,
++    shorthands,
++    definitions,
++    nerfDarts,
++    flatten,
++  })
++  await config.load()
++
++  t.equal(config.flat.httpsProxy, 'http://user.proxy:3128', 'the file the project chose is in effect for ordinary requests')
++  t.same(config.flat.tokenHelperTransport, {
++    ca: null,
++    httpsProxy: null,
++    localAddress: '127.0.0.1',
++    noProxy: '',
++    proxy: 'http://global.proxy:3128',
++    strictSSL: true,
++  }, 'but not for a helper\'s: only the environment and the global file are')
++})
++
++t.test('there is no tokenHelperTransport when no tokenHelper is configured', async t => {
++  const path = outsideProjects(t, {
++    project: { 'package.json': '{}', '.npmrc': 'https-proxy=http://project.proxy:3128\n' },
++    home: { '.npmrc': '' },
++  })
++  const config = new Config({
++    npmPath: `${path}/npm`,
++    env: {},
++    argv: [process.execPath, __filename, `--userconfig=${join(path, 'home', '.npmrc')}`],
++    cwd: join(path, 'project'),
++    excludeNpmCwd: true,
++    shorthands,
++    definitions,
++    nerfDarts,
++    flatten,
++  })
++  await config.load()
++  t.equal(config.flat.httpsProxy, 'http://project.proxy:3128')
++  t.notOk(Object.hasOwn(config.flat, 'tokenHelperTransport'))
 +})
 diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
 index 9426265..e899208 100644

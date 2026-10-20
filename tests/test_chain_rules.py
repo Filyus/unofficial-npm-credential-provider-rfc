@@ -95,7 +95,9 @@ class StageReadCacheTests(unittest.TestCase):
         client = CredentialClientModel()
         client.receive_hello({"v": [1]})
         request = client.build_request(RequestContext(registry=REGISTRY, operation="read"))
-        client.handle_response(request, {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "any"}}})
+        client.handle_response(request, {"Ok": {
+            "kind": "get", "auth": {"type": "bearer", "token": "any"}, "operationIndependent": True,
+        }})
         self.assertEqual(client.lookup(REGISTRY, operation="dist-tag").auth["token"], "any")
 
 
