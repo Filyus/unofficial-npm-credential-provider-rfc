@@ -24,15 +24,20 @@
 // Difference from the page's provider, because the run has no AWS CLI: it
 // speaks the Identity Center device flow itself where the page runs `aws sso
 // login --profile dev` (same sign-in, same outcomes, and what it keeps is the
-// CLI's own cache, which the store here stands in for under `awsSsoCache`).
+// CLI's own cache, which the store here stands in for under `awsSsoCache`; being
+// the provider's own store here, logout removes it, which a build that leaves the
+// CLI's cache alone would have to record in a store of its own instead).
 //
-// A write asks the person twice on the controlling terminal, inside one
-// 4 minute 30 second budget (npm's 5 minutes for an interactive `get`): yes or
+// A write on an `interactive` request asks the person twice on the controlling
+// terminal, inside one 4 minute 30 second budget (npm's 5 minutes for an
+// interactive `get`), the first question before any sign-in is started: yes or
 // no to the operation, then the MFA code of the publish role's trust policy,
 // sent to STS as `TokenCode` beside the device's `SerialNumber`. A code that is
-// not typed in time, or that STS refuses, is `other`; in CI nothing is asked.
+// not typed in time, or that STS refuses, is `other`. A request that is not
+// `interactive` asks nothing, and a write is served to it only where the
+// provider's own configuration says the ambient role is a publisher.
 
-const { serve, ok, err, log } = require('../lib/protocol.js')
+const { serve, ok, err, log, Answer } = require('../lib/protocol.js')
 const { loadContext } = require('../lib/context.js')
 
 const CLIENT_NAME = 'npm-credential-provider-codeartifact'
@@ -59,13 +64,7 @@ const WRITES = {
   deprecate: { action: 'PutPackageMetadata', verb: 'Deprecate', subject: 'Deprecating' },
 }
 
-// A protocol answer raised from deep inside a helper.
-class Answer extends Error {
-  constructor(answer) {
-    super(answer.Err ? answer.Err.kind : 'answer')
-    this.answer = answer
-  }
-}
+// a protocol answer raised from deep inside a helper (lib's `Answer`, which `serve` answers itself)
 const refuse = (message, causedBy) => new Answer(err('other', message, causedBy))
 
 // The domain, owner, region and repository a registry URL names, or null.
@@ -121,6 +120,22 @@ const start = (args) => {
     store.awsSsoCache = { ...store.awsSsoCache, [profile]: entry }
     ctx.writeStore(store)
   }
+  const restoreSsoCache = (entry) => {
+    const store = ctx.readStore()
+    const caches = { ...store.awsSsoCache }
+    if (entry) {
+      caches[profile] = entry
+    } else {
+      delete caches[profile]
+    }
+    if (Object.keys(caches).length) {
+      store.awsSsoCache = caches
+    } else {
+      delete store.awsSsoCache
+    }
+    ctx.writeStore(store)
+    credentials = null
+  }
   // something to mint from: the ambient role in CI, a sign-in otherwise,
   // even a lapsed one; nothing at all is `not-found`
   const hasIdentity = () => (inCi() ? ambient() !== null : ssoCache() !== null)
@@ -129,7 +144,9 @@ const start = (args) => {
 
   // --- sign-in: the Identity Center device flow (RFC 8628) -------------------
 
-  const ssoLogin = async () => {
+  // `until`: the time on the context's clock by which the sign-in must be over, the
+  // end of the request's own budget and not a fresh one
+  const ssoLogin = async (until) => {
     const oidc = `https://oidc.${config.ssoRegion}.amazonaws.com`
     const started = await ctx.request('POST', `${oidc}/device_authorization`, {
       body: { clientId: CLIENT_NAME, startUrl: config.ssoStartUrl },
@@ -139,7 +156,7 @@ const start = (args) => {
     }
     const { deviceCode, userCode, verificationUri } = started.json
     let interval = started.json.interval ?? 5
-    const deadline = ctx.clockMs() + Math.min((started.json.expiresIn ?? 270) * 1000, WAIT_MS)
+    const deadline = Math.min(ctx.clockMs() + (started.json.expiresIn ?? 270) * 1000, until)
     // nothing can be finished when the step cannot be shown: stop before polling, and store nothing
     if (!ctx.showToPerson(`Open ${verificationUri} and enter the code ${userCode}`)) {
       throw refuse(noTerminalMessage)
@@ -207,7 +224,7 @@ const start = (args) => {
 
   // the identity a request mints from: the ambient role in CI, else the
   // sign-in, renewed by a login only when a person is there to complete it
-  const identityKey = async (req, target) => {
+  const identityKey = async (req, target, until) => {
     const key = ambient()
     if (key) {
       if (!(await callerIdentityOk(target, key))) {
@@ -217,7 +234,7 @@ const start = (args) => {
     }
     let signed = await signedInKey(target)
     if (signed === null && req.interactive) {
-      await ssoLogin()
+      await ssoLogin(until)
       signed = await signedInKey(target)
     }
     if (signed === null) {
@@ -317,28 +334,46 @@ const start = (args) => {
     }
 
     // The token is an identity snapshot and each request is authorized when it
-    // is made: a new token from the same identity would be refused the same
-    // way, so none is minted. A 403 never moves to another identity here.
+    // is made: a new token from the same identity is not expected to be
+    // treated differently, so none is minted. A 403 never moves to another
+    // identity here. The answer says what the provider saw, that the registry
+    // answered 403; why it did is not in the answer, so the action to check is
+    // named as the likely one, not asserted.
     if (req.retry === true && req.httpStatus === 403) {
       return err(
         'other',
         write
-          ? `The publish identity is denied ${write.action} for this package. A new token would be refused the same way.`
-          : 'The identity is denied ReadFromRepository for this repository. A new token would be refused the same way.',
+          ? `The registry answered 403 to the ${req.operation} of ${label} made with a token minted for the publish identity, and did not say why. A new token from the same identity would be authorized the same way, so none is minted. Check that the identity is allowed ${write.action} on this package.`
+          : `The registry answered 403 to a read of ${target.repository} made with a token minted for the everyday identity, and did not say why. A new token from the same identity would be authorized the same way, so none is minted. Check that the identity is allowed ReadFromRepository on this repository.`,
         ['registry answered 403'],
       )
     }
     if (!hasIdentity()) {
       return err('not-found')
     }
-    if (write) {
-      if (inCi() ? !config.ciPublisher : !req.interactive) {
-        return err(
-          'other',
-          inCi()
-            ? `${write.subject} ${label} needs a publisher role, and this provider is not configured to treat the ambient role as one.`
-            : `${write.subject} ${label} needs the person's presence, and this request is not interactive. Run it from a terminal.`,
-        )
+    // Presence is the request's `interactive`, not the `CI` variable: whoever ran npm sets
+    // that variable, and a request npm says is interactive has a person to ask. Without
+    // one a write is served only where the provider's own configuration says the
+    // ambient role is a publisher.
+    if (write && !req.interactive && !(config.ciPublisher && ambient() !== null)) {
+      return err(
+        'other',
+        inCi() && !config.ciPublisher
+          ? `${write.subject} ${label} needs a publisher role, and this provider is not configured to treat the ambient role as one.`
+          : `${write.subject} ${label} needs the person's presence, and this request is not interactive. Run it from a terminal.`,
+      )
+    }
+    // one deadline for everything the request waits on for the person: the sign-in, the
+    // presence prompt and the code, inside npm's 5 minutes for an interactive `get`
+    const deadline = ctx.clockMs() + WAIT_MS
+    if (write && req.interactive) {
+      const question = `${write.verb} ${label} on ${target.repository} in domain ${target.domain}?`
+      const answered = await ctx.confirmWithin(question, WAIT_MS)
+      if (answered === null) {
+        return err('other', `${write.subject} ${label} was not confirmed within 4 minutes 30 seconds.`)
+      }
+      if (!answered) {
+        return err('other', `${write.subject} ${label} was not confirmed.`)
       }
     }
 
@@ -354,7 +389,7 @@ const start = (args) => {
       }
     }
 
-    const keyId = await identityKey(req, target)
+    const keyId = await identityKey(req, target, deadline)
     if (!write) {
       const minted = await authorizationToken(target, keyId, READ_SECONDS)
       const answer = ok('get', {
@@ -369,19 +404,9 @@ const start = (args) => {
     }
 
     let mfaCode = null
-    if (!inCi()) {
-      // one deadline for the presence prompt and the code
-      const deadline = ctx.clockMs() + WAIT_MS
-      const question = `${write.verb} ${label} on ${target.repository} in domain ${target.domain}?`
-      const answered = await ctx.confirmWithin(question, WAIT_MS)
-      if (answered === null) {
-        return err('other', `${write.subject} ${label} was not confirmed within 4 minutes 30 seconds.`)
-      }
-      if (!answered) {
-        return err('other', `${write.subject} ${label} was not confirmed.`)
-      }
+    if (req.interactive) {
       const left = deadline - ctx.clockMs()
-      const typed = left > 0 ? await ctx.askWithin(`MFA code of ${config.mfaSerial} for the publish role:`, left) : null
+      const typed = left > 0 ? await ctx.askWithin(`MFA code of ${config.mfaSerial} for the publish role:`, left, { secret: true }) : null
       if (typed === null) {
         return err('other', `The MFA code for ${write.subject.toLowerCase()} ${label} was not entered within 4 minutes 30 seconds.`)
       }
@@ -428,45 +453,45 @@ const start = (args) => {
     if (!req.interactive) {
       return err('other', 'Signing in needs the person to finish it in a browser, and this request is not interactive.')
     }
+    // the sign-in is kept only once AWS accepts what it hands out, as the Azure provider
+    // confirms its login; a failed one gives back the sign-in it replaced
+    const previous = ssoCache()
     try {
-      await ssoLogin()
-    } catch (error) {
-      if (error instanceof Answer) {
-        return error.answer
+      await ssoLogin(ctx.clockMs() + WAIT_MS)
+      if ((await signedInKey(target)) === null) {
+        throw refuse(`AWS did not accept the role credentials of the new sign-in for profile ${profile}. Nothing was stored. Run npm login again.`)
       }
+    } catch (error) {
+      restoreSsoCache(previous)
       throw error
     }
     return ok('login')
   }
 
-  // The provider's own tokens go. Tokens already issued stay valid until they
-  // expire, since CodeArtifact has no per-token revocation, and `aws sso logout` is
-  // never run: it signs the user out of every profile.
+  // The provider's own tokens go, and the sign-in its `login` made, which in this
+  // reference provider is its own store (a real build that leaves the CLI's cache
+  // alone has to record the logout, or installs keep minting). Tokens already issued
+  // stay valid until they expire, since CodeArtifact has no per-token revocation,
+  // and `aws sso logout` is never run: it signs the user out of every profile.
+  // Nothing held is `not-found`.
   const logout = async (req) => {
     const target = registries.includes(req.registry) ? parseTarget(req.registry) : null
     if (!target || target.owner !== allowOwner) {
       return err('url-not-supported')
     }
+    const held = readTokens.size > 0 || ssoCache() !== null
     readTokens.clear()
-    log('logout: issued CodeArtifact tokens stay valid until they expire; the AWS sign-in is untouched')
-    return ok('logout')
-  }
-
-  // an answer raised from a helper is that handler's answer
-  const guarded = (handler) => async (req) => {
-    try {
-      return await handler(req)
-    } catch (error) {
-      if (error instanceof Answer) {
-        return error.answer
-      }
-      throw error
+    if (!held) {
+      return err('not-found')
     }
+    restoreSsoCache(null)
+    log('logout: issued CodeArtifact tokens stay valid until they expire; the sign-in was removed here, and aws sso logout was not run')
+    return ok('logout')
   }
 
   return {
     hello: { v: [1], capabilities: ['login', 'logout', 'erase'], registries },
-    handlers: { get: guarded(get), erase, login, logout },
+    handlers: { get, erase, login, logout },
   }
 }
 

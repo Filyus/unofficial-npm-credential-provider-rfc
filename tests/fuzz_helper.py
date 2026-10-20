@@ -189,9 +189,12 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
         for hidden in sorted({form for secret in secrets if secret for form in {secret} | forms(secret)}, key=len, reverse=True):
             around = around.replace(hidden, "***")
         for secret in sorted(secrets):
-            # a credential is what can be typed: a lone control character the
-            # helper printed is none
-            if not secret or not all(" " <= character <= "~" for character in secret) or secret in "***":
+            # a credential is what can be typed and seen: one with a control, a
+            # format (U+180E) or a space other than " " in it is not looked for.
+            # Text beyond ASCII that prints (an accented or an emoji credential)
+            # is looked for like any other. U+FFFD is what invalid bytes decode
+            # to, a decoding artifact and not something typed
+            if not secret or not secret.isprintable() or "\ufffd" in secret or secret in "***":
                 continue
             for form in {secret} | forms(secret):
                 if form and form in shown and form not in around:

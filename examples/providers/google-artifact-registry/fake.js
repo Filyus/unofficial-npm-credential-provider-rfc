@@ -14,7 +14,12 @@
 //              second expired_token), account,
 //              sessions { refreshToken: { account, lapsed, lapseAfter } }
 //              (`lapseAfter: n` ends the session after n refreshes, as when
-//              an administrator's session length runs out between two requests)
+//              an administrator's session length runs out between two requests),
+//              noRefreshToken (an approved sign-in answered with no refresh token),
+//              refreshStatus (a status every refresh grant is answered with, 503:
+//              Google is down), revokeStatus (a status POST /revoke answers with
+//              instead of revoking), revoked (the refresh tokens revoked so far)
+// state.iam.empty: the token endpoint answers 200 with no body; iam.unauthenticated: 401 whoever asks
 // state.iam:   serviceAccounts { email: { roles, tokenCreators, tokens } }, a
 //              queue of tokens per account that each impersonation takes from
 // state.sts:   audience, subjectToken, principal, roles, expiresIn, tokens
@@ -29,6 +34,7 @@ const createFake = (state) => {
   const iam = (state.iam ??= {})
   const sts = (state.sts ??= {})
   oauth.sessions ??= {}
+  oauth.revoked = []
   oauth.devices = 0
   oauth.polls = 0
   oauth.refreshes = 0
@@ -47,6 +53,9 @@ const createFake = (state) => {
 
   const tokenEndpoint = ({ body, clock }) => {
     if (body.grant_type === 'refresh_token') {
+      if (oauth.refreshStatus) {
+        return json(oauth.refreshStatus, { error: 'the fake is told to fail' })
+      }
       const session = oauth.sessions[body.refresh_token]
       if (!session || session.lapsed || (session.lapseAfter !== undefined && (session.refreshes ?? 0) >= session.lapseAfter)) {
         return json(400, { error: 'invalid_grant' })
@@ -83,6 +92,9 @@ const createFake = (state) => {
         oauth.pending -= 1
         return json(428, { error: 'authorization_pending' })
       }
+      if (oauth.noRefreshToken) {
+        return json(200, { access_token: issueAccess(oauth.account), expires_in: 3600, token_type: 'Bearer' })
+      }
       const refresh = `refresh-device-${body.device_code.slice(12)}`
       oauth.sessions[refresh] = { account: oauth.account }
       return json(200, { access_token: issueAccess(oauth.account), refresh_token: refresh, expires_in: 3600, token_type: 'Bearer' })
@@ -93,7 +105,7 @@ const createFake = (state) => {
   const generateAccessToken = ({ path, token, body, clock }) => {
     const match = /^\/v1\/projects\/-\/serviceAccounts\/([^/:]+):generateAccessToken$/.exec(decodeURIComponent(path))
     const caller = accessTokens.get(token)
-    if (!match || !caller) {
+    if (iam.unauthenticated || !match || !caller) {
       return json(401, { error: { status: 'UNAUTHENTICATED' } })
     }
     const account = iam.serviceAccounts[match[1]]
@@ -102,6 +114,9 @@ const createFake = (state) => {
     }
     if (!(account.tokenCreators || []).includes(caller)) {
       return json(403, { error: { status: 'PERMISSION_DENIED' } })
+    }
+    if (iam.empty) {
+      return { status: 200 }
     }
     const lifetime = Number.parseInt(body.lifetime, 10)
     if (!(lifetime > 0 && lifetime <= 3600)) {
@@ -145,6 +160,18 @@ const createFake = (state) => {
     }
     if (method === 'POST' && path === '/token') {
       return tokenEndpoint(request)
+    }
+    if (method === 'POST' && path === '/revoke') {
+      if (oauth.revokeStatus) {
+        return json(oauth.revokeStatus, { error: 'the fake is told to fail' })
+      }
+      const token = request.body && request.body.token
+      if (!Object.hasOwn(oauth.sessions, token)) {
+        return json(400, { error: 'invalid_token' })
+      }
+      delete oauth.sessions[token]
+      oauth.revoked.push(token)
+      return json(200, {})
     }
     if (method === 'POST' && path.endsWith(':generateAccessToken')) {
       return generateAccessToken(request)

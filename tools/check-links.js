@@ -32,15 +32,22 @@ const slugsOf = file => {
   return slugCache.get(file)
 }
 
+// `](target)`, `](<target with spaces>)`, a plain target that holds balanced
+// parentheses (two deep), and an optional "title" after it.
+const LINK = /\]\((<[^<>\n]*>|(?:[^()\s<]|\((?:[^()\s]|\([^()\s]*\))*\))+)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g
+const decode = target => { try { return decodeURIComponent(target) } catch { return target } }
+
 const broken = []
 for (const file of files) {
   const text = withoutFences(fs.readFileSync(path.join(root, file), 'utf8'))
-  for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
-    const target = m[1]
+  for (const m of text.matchAll(LINK)) {
+    const target = decode(m[1][0] === '<' ? m[1].slice(1, -1) : m[1])
     if (/^[a-z]+:/i.test(target)) {
       continue
     }
-    const [rel, anchor] = target.split('#')
+    const hash = target.indexOf('#')
+    const rel = hash < 0 ? target : target.slice(0, hash)
+    const anchor = hash < 0 ? undefined : target.slice(hash + 1)
     const resolved = rel ? path.posix.normalize(path.posix.join(path.posix.dirname(file), rel)) : file
     if (!fs.existsSync(path.join(root, resolved))) {
       broken.push(`${file}: ${target} (no such file)`)

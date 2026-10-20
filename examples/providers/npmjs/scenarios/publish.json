@@ -39,5 +39,41 @@
         "issuedAt": 1790000000
       }
     ]
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "read",
+          "token": "example-read-token",
+          "selects": {
+            "scopes": [
+              "@acme"
+            ]
+          },
+          "issuedAt": 1790000000
+        },
+        {
+          "tier": "stage-only",
+          "token": "example-stage-only-token",
+          "selects": {
+            "packages": [
+              "@acme/widgets"
+            ]
+          },
+          "issuedAt": 1790000000
+        },
+        {
+          "tier": "publish",
+          "token": "example-publish-token",
+          "selects": {
+            "packages": [
+              "@acme/widgets"
+            ]
+          },
+          "issuedAt": 1790000000
+        }
+      ]
+    }
   }
 }

@@ -7,6 +7,18 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
+const tty = require('node:tty')
+const { StringDecoder } = require('node:string_decoder')
+
+// What a call that outlived its deadline throws. The message names the origin
+// and not the URL: a path or a query can carry a secret.
+class RequestTimeout extends Error {
+  constructor(method, url, ms) {
+    super(`${method} ${new URL(url).origin} did not answer within ${ms} ms`)
+    this.name = 'RequestTimeout'
+    this.code = 'ETIMEDOUT'
+  }
+}
 
 const loadContext = (configPath) => {
   if (typeof configPath !== 'string') {
@@ -35,14 +47,20 @@ const loadContext = (configPath) => {
   // provider would use the credential store the platform has.
   const writeStore = (store) => {
     const temporary = `${storePath}.${process.pid}.tmp`
-    const fd = fs.openSync(temporary, 'w', 0o600)
     try {
-      fs.writeSync(fd, `${JSON.stringify(store, null, 2)}\n`)
-      fs.fsyncSync(fd)
-    } finally {
-      fs.closeSync(fd)
+      const fd = fs.openSync(temporary, 'w', 0o600)
+      try {
+        fs.writeSync(fd, `${JSON.stringify(store, null, 2)}\n`)
+        fs.fsyncSync(fd)
+      } finally {
+        fs.closeSync(fd)
+      }
+      fs.renameSync(temporary, storePath)
+    } catch (error) {
+      // the file beside the store holds secrets: a failed write does not leave it
+      fs.rmSync(temporary, { force: true })
+      throw error
     }
-    fs.renameSync(temporary, storePath)
   }
 
   // Time comes from here, never from Date.now or setTimeout, so that a run
@@ -119,9 +137,20 @@ const loadContext = (configPath) => {
     return base ? base + url.slice(origin.length) : url
   }
 
+  // Every call has a deadline, so a vendor that accepts the connection and
+  // says nothing cannot hold the provider past what npm will wait for.
+  // `until` is a time on this context's clock (`clockMs()`); `timeoutMs` is a
+  // bound on this call alone; neither given, the default is `requestTimeoutMs`
+  // of the configuration, 30 s. Outside a run the time left is a real timer.
+  // In a run time is synthetic and passes only by `sleep`, so an `until` that
+  // is already past fails at once and one still ahead does not shorten the
+  // real wait, which is `timeoutMs` or the default. An expired call throws a
+  // `RequestTimeout`, which a provider that does not catch it answers `other`.
+  const defaultTimeoutMs = Number.isFinite(config.requestTimeoutMs) ? config.requestTimeoutMs : 30000
+
   // `headers` adds to what the call sets (an `Accept`, an `npm-otp`); it cannot
   // replace the clock header a conformance run adds
-  const request = async (method, url, { token, body, form, headers: extra } = {}) => {
+  const request = async (method, url, { token, body, form, headers: extra, until, timeoutMs } = {}) => {
     const headers = { ...(extra || {}) }
     if (token) {
       headers.authorization = `Bearer ${token}`
@@ -138,8 +167,31 @@ const loadContext = (configPath) => {
       // the fake API judges "too soon" by the provider's time, not its own
       headers['x-conformance-clock'] = String(clockMs())
     }
-    const response = await fetch(endpoint(url), { method, headers, body: payload, redirect: 'manual' })
-    const text = await response.text()
+    let limit = timeoutMs === undefined ? defaultTimeoutMs : timeoutMs
+    if (until !== undefined) {
+      const left = until - clockMs()
+      if (left <= 0) {
+        throw new RequestTimeout(method, url, 0)
+      }
+      if (!clockPath) {
+        limit = Math.min(limit, left)
+      }
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), limit)
+    let response
+    let text
+    try {
+      response = await fetch(endpoint(url), { method, headers, body: payload, redirect: 'manual', signal: controller.signal })
+      text = await response.text()
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new RequestTimeout(method, url, limit)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
     let json = null
     try {
       json = text ? JSON.parse(text) : null
@@ -170,9 +222,11 @@ const loadContext = (configPath) => {
   // A line the person types on the controlling terminal: a username, a
   // password, a one-time password. Never stdin, which belongs to the protocol.
   // The conformance run scripts the lines ("silent": nobody types, and the
-  // provider's own deadline decides). A real terminal echoes what is typed;
-  // turning echo off is the terminal's business and is not done here.
-  const ask = async (question, signal) => {
+  // provider's own deadline decides). `{ secret: true }` asks for the line
+  // without echo where Node can turn it off (see `readSecretLine`, which says
+  // where it cannot); a scripted line is logged as asked either way. An
+  // unanswerable prompt (end of input, Ctrl-C) gives `null`.
+  const ask = async (question, signal, { secret = false } = {}) => {
     if (scripted) {
       if (!typed.length) {
         throw new Error(`no scripted line for: ${question}`)
@@ -181,11 +235,11 @@ const loadContext = (configPath) => {
       const line = typed.shift()
       return line === 'silent' ? new Promise(() => {}) : line
     }
-    return readTerminalLine(`${question} `, signal)
+    return (secret ? readSecretLine : readTerminalLine)(`${question} `, signal)
   }
 
   // `ask` that gives up: `null` when `ms` pass first
-  const askWithin = (question, ms) => withDeadline((signal) => ask(question, signal), ms)
+  const askWithin = (question, ms, options) => withDeadline((signal) => ask(question, signal, options), ms)
 
   // A browser or device-code step the person completes. Scripted runs have
   // the fake identity provider complete it; a real run would open the URL.
@@ -230,31 +284,156 @@ const writeTerminal = (text) => {
   }
 }
 
+// The first line of `input`, a readable stream, without its line ending: the
+// text up to the first newline, decoded across chunk borders (a multi-byte
+// character can be split between two chunks). Bytes after that newline are
+// discarded with the stream: the terminal gives a line at a time, and what a
+// person typed ahead belongs to nobody. At end of input (Ctrl-D, a closed
+// console) what was typed so far is the answer, or `null` if nothing was: a
+// prompt nobody can answer must not hold the process. An aborted read gives
+// `null`; a stream error rejects.
+const readLineFrom = (input, signal) =>
+  new Promise((resolve, reject) => {
+    const decoder = new StringDecoder('utf8')
+    let line = ''
+    let settled = false
+    const settle = (value, error) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      input.destroy()
+      if (error) {
+        reject(error)
+      } else {
+        resolve(value)
+      }
+    }
+    input.on('data', (chunk) => {
+      line += decoder.write(chunk)
+      const newline = line.indexOf('\n')
+      if (newline !== -1) {
+        settle(line.slice(0, newline).replace(/\r$/, ''))
+      }
+    })
+    input.on('end', () => {
+      line += decoder.end()
+      settle(line === '' ? null : line.replace(/\r$/, ''))
+    })
+    input.on('error', (error) => settle(null, error))
+    if (signal) {
+      if (signal.aborted) {
+        settle(null)
+      }
+      signal.addEventListener('abort', () => settle(null), { once: true })
+    }
+  })
+
+// Typed text with the keys of a line editor applied, for a terminal in raw
+// mode where nothing is echoed and nothing edited for us: Enter ends the line,
+// Backspace removes a character, Ctrl-C cancels, Ctrl-D ends it too (an empty
+// line is then `null`, as at end of input), Ctrl-U clears. Returns the new text
+// and whether the line is over (`done`, with `cancelled` for Ctrl-C).
+const editSecret = (text, keys) => {
+  let line = text
+  for (const char of keys) {
+    if (char === '\r' || char === '\n') {
+      return { text: line, done: true, cancelled: false }
+    }
+    if (char === '\u0003') {
+      return { text: '', done: true, cancelled: true }
+    }
+    if (char === '\u0004') {
+      return { text: line, done: true, cancelled: line === '' }
+    }
+    if (char === '\u007f' || char === '\b') {
+      line = Array.from(line).slice(0, -1).join('')
+    } else if (char === '\u0015') {
+      line = ''
+    } else if (char >= ' ') {
+      line += char
+    }
+  }
+  return { text: line, done: false, cancelled: false }
+}
+
+// The line of a prompt whose answer is a secret (a password, a one-time
+// password), typed without echo where Node can: the terminal opened on its
+// path is a TTY, and `setRawMode` turns echo off for as long as the read lasts
+// (restored whatever the end). The limit: where it cannot (no TTY, a console
+// that refuses raw mode, which some terminal emulators on Windows do), the line
+// is read as `readTerminalLine` reads it, echoed, and the person is told so
+// before typing ("input is shown"). Never stdin.
+const readSecretLine = (prompt, signal) => {
+  let fd
+  let terminal
+  try {
+    fd = fs.openSync(terminalPaths().input, 'r')
+    if (!tty.isatty(fd)) {
+      throw new Error('not a tty')
+    }
+    terminal = new tty.ReadStream(fd)
+    terminal.setRawMode(true)
+  } catch {
+    if (terminal) {
+      terminal.destroy()
+    } else if (fd !== undefined) {
+      fs.closeSync(fd)
+    }
+    return readTerminalLine(`${prompt}(input is shown) `, signal)
+  }
+  return new Promise((resolve) => {
+    const decoder = new StringDecoder('utf8')
+    let text = ''
+    let settled = false
+    const settle = (value) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      try {
+        terminal.setRawMode(false)
+      } catch {
+        // the stream is going away either way
+      }
+      terminal.destroy()
+      try {
+        writeTerminal('\n')
+      } catch {
+        // nothing to say it on
+      }
+      resolve(value)
+    }
+    writeTerminal(prompt)
+    terminal.on('data', (chunk) => {
+      const edited = editSecret(text, decoder.write(chunk))
+      text = edited.text
+      if (edited.done) {
+        settle(edited.cancelled ? null : text)
+      }
+    })
+    terminal.on('end', () => settle(text === '' ? null : text))
+    terminal.on('error', () => settle(null))
+    if (signal) {
+      if (signal.aborted) {
+        settle(null)
+      }
+      signal.addEventListener('abort', () => settle(null), { once: true })
+    }
+  })
+}
+
 // Asynchronous, so that a provider's own deadline on the prompt can fire, and
 // abortable, so that once it has the read of the terminal does not hold the
 // process until someone presses Enter. An aborted read gives `null`.
-const readTerminalLine = (prompt, signal) =>
-  new Promise((resolve, reject) => {
-    writeTerminal(prompt)
-    const input = fs.createReadStream(terminalPaths().input)
-    let line = ''
-    input.on('data', (chunk) => {
-      line += chunk
-      if (line.includes('\n')) {
-        input.destroy()
-        resolve(line.slice(0, line.indexOf('\n')).replace(/\r$/, ''))
-      }
-    })
-    input.on('error', reject)
-    signal?.addEventListener('abort', () => {
-      input.destroy()
-      resolve(null)
-    }, { once: true })
-  })
+const readTerminalLine = (prompt, signal) => {
+  writeTerminal(prompt)
+  return readLineFrom(fs.createReadStream(terminalPaths().input), signal)
+}
 
 const askTerminal = async (question, signal) => {
   const answer = await readTerminalLine(`${question} [y/N] `, signal)
   return answer !== null && /^y(es)?$/i.test(answer.trim())
 }
 
-module.exports = { loadContext }
+module.exports = { loadContext, readLineFrom, editSecret, RequestTimeout }

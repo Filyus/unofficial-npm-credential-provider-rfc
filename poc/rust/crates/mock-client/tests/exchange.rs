@@ -2,8 +2,9 @@ use credential_provider_protocol::{Auth, ErrorKind, ProviderResponse, Request, R
 use mock_client::{
     ChainKind, ClientScenario, ProviderCommand, ProviderSession, run_exchange, run_provider_chain,
 };
-use std::path::PathBuf;
-use std::process::Command;
+
+mod common;
+use common::provider_command;
 
 #[test]
 fn one_session_serves_sequential_requests_from_one_process() {
@@ -304,20 +305,6 @@ fn client_rejects_missing_expiration() {
     );
 }
 
-fn provider_command(scenario: &str) -> ProviderCommand {
-    let mut command = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
-    command
-        .arg("run")
-        .arg("--quiet")
-        .arg("--manifest-path")
-        .arg(workspace_manifest())
-        .arg("-p")
-        .arg("mock-provider")
-        .arg("--");
-    // the session puts the sentinel after `--` and before these
-    ProviderCommand::new(command, vec!["--scenario".into(), scenario.into()])
-}
-
 #[test]
 fn provider_outside_its_hello_registries_is_not_asked() {
     let summary = run_exchange(
@@ -338,12 +325,6 @@ fn a_provider_started_without_the_sentinel_does_not_speak_the_protocol() {
         .expect("runs");
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty(), "no hello without the sentinel");
-}
-
-fn workspace_manifest() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("Cargo.toml")
 }
 
 // A line that is not a request is answered with one `Err`, never `Ok`, and the
@@ -463,4 +444,126 @@ fn a_kind_no_version_knows_is_not_malformed_even_with_nothing_else() {
     );
     still_serves(&mut session);
     session.close().expect("clean exit");
+}
+
+fn policy() -> serde_json::Value {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../spec/policy-v1.json");
+    serde_json::from_str(&std::fs::read_to_string(path).expect("the policy is there"))
+        .expect("the policy is JSON")
+}
+
+#[test]
+fn an_unknown_error_kind_fails_the_get_like_other() {
+    let error = run_exchange(
+        provider_command("unknown-error-kind"),
+        ClientScenario::InstallGet,
+    )
+    .expect_err("read as `other`, which stops the chain");
+
+    assert_eq!(error.to_string(), "provider error: other");
+}
+
+#[test]
+fn an_unknown_error_kind_does_not_move_a_chain_on() {
+    // not read as url-not-supported or not-found: the next provider is not asked
+    let error = run_provider_chain(
+        vec![
+            provider_command("unknown-error-kind"),
+            provider_command("get-success"),
+        ],
+        ClientScenario::InstallGet,
+        ChainKind::Global,
+    )
+    .expect_err("the chain stops at an `other`");
+
+    assert!(error.to_string().contains("other"));
+}
+
+#[test]
+fn an_unknown_cache_is_never_and_an_unknown_granularity_is_package() {
+    use credential_provider_protocol::{CachePolicy, Granularity, generated};
+    let mut session = ProviderSession::spawn(provider_command("unknown-cache-and-granularity"))
+        .expect("provider starts");
+    let response = session
+        .request(&Request::get_install(
+            "https://registry.example.test/",
+            Some("@scope"),
+            "pkg",
+        ))
+        .expect("an unknown value is a well-formed one");
+    let ProviderResponse::Ok(ok) = response else {
+        panic!("expected Ok, got {response:?}");
+    };
+
+    assert_eq!(ok.cache, Some(CachePolicy::Never));
+    assert_eq!(ok.granularity, Some(Granularity::Package));
+    let policy = policy();
+    let mapping = &policy["forwardCompatibility"];
+    assert_eq!(mapping["unknownCache"], generated::UNKNOWN_CACHE);
+    assert_eq!(
+        mapping["unknownGranularity"],
+        generated::UNKNOWN_GRANULARITY
+    );
+    assert_eq!(
+        serde_json::to_value(CachePolicy::Never).unwrap(),
+        generated::UNKNOWN_CACHE
+    );
+    assert_eq!(
+        serde_json::to_value(Granularity::Package).unwrap(),
+        generated::UNKNOWN_GRANULARITY
+    );
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn an_unknown_auth_type_fails_the_request_as_other() {
+    let error = run_exchange(
+        provider_command("unknown-auth-type"),
+        ClientScenario::InstallGet,
+    )
+    .expect_err("npm has nothing it can send");
+
+    assert!(
+        error
+            .to_string()
+            .contains("other: unknown auth.type digest")
+    );
+}
+
+#[test]
+fn a_global_chain_that_declined_a_listed_host_sends_no_stored_credential() {
+    // the provider lists the `http:` form of the host asked about over `https:`:
+    // npm sends it nothing, the chain is exhausted, and the request fails
+    let error = run_provider_chain(
+        vec![
+            provider_command("url-not-supported"),
+            provider_command("lists-other-form"),
+        ],
+        ClientScenario::InstallGet,
+        ChainKind::Global,
+    )
+    .expect_err("a URL form a provider declined on a host its hello lists");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("lists http://registry.example.test/"),
+        "{text}"
+    );
+    assert!(text.contains("no stored credential"), "{text}");
+}
+
+#[test]
+fn a_global_chain_that_declined_an_unlisted_host_still_leaves_it_without_a_provider() {
+    let summary = run_provider_chain(
+        vec![
+            provider_command("serves-elsewhere"),
+            provider_command("url-not-supported"),
+        ],
+        ClientScenario::InstallGet,
+        ChainKind::Global,
+    )
+    .expect("a host no hello lists falls back as before");
+
+    assert_eq!(summary.outcome, "as-no-provider");
 }

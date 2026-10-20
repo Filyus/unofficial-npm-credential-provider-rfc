@@ -16,7 +16,11 @@
 // against an allowlist of the provider's own (credprovider's cover the feed
 // and SPS hosts), the 90 seconds of the device flow, a 403 answered
 // `other` and never by a wider token, and a retry that would get the same
-// Entra token again answered with a diagnosis.
+// Entra token again answered with a diagnosis. Beyond the page, as this
+// provider's own policy: an interactive write (publish, deprecate, dist-tag,
+// unpublish) asks the person first, and the machine's own Entra token serves a
+// write with no one to ask only where `ciPublisher` in the provider's
+// configuration says so; a new login revokes what the replaced one minted.
 // Recalled, not read, and so unverified here: the SessionTokens paths, query
 // and fields and the way a token is revoked (DELETE with `authorizationId`),
 // the Entra v2.0 device-code and token endpoint shapes (these are the
@@ -30,7 +34,7 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { serve, ok, err, log } = require('../lib/protocol.js')
+const { serve, ok, err, log, Answer } = require('../lib/protocol.js')
 const { loadContext } = require('../lib/context.js')
 
 const CLIENT_ID = 'example-npm-credential-provider'
@@ -41,6 +45,9 @@ const ASSERTION_TYPE = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
 // authorities the provider signs in at: https, one of these hosts, the tenant as the path
 const AUTHORITY_HOSTS = new Set(['login.microsoftonline.com', 'login.windows.net', 'login.microsoft.com', 'sts.windows.net'])
 const TENANT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9.-]+)$/i
+// Entra's multi-tenant endpoints: a sign-in there picks its own tenant, and a feed names one
+const MULTI_TENANT = new Set(['common', 'organizations', 'consumers'])
+const isTenant = (value) => TENANT.test(value) && !MULTI_TENANT.has(value.toLowerCase())
 const WRITE_SCOPE = 'vso.packaging_write'
 const MANAGE_SCOPE = 'vso.packaging_manage'
 // The credprovider's default for a SelfDescribing token; a manage token is
@@ -55,14 +62,17 @@ const DEVICE_WAIT_MS = 90 * 1000
 const SERVED_OPERATIONS = new Set(['read', 'publish', 'deprecate', 'dist-tag', 'unpublish'])
 const AZ_URL = 'https://az.example.test/get-access-token'
 const PAT_USERNAME = 'npm'
-
-// A protocol answer raised from deep inside a helper.
-class Answer extends Error {
-  constructor(answer) {
-    super(answer.Err ? answer.Err.kind : 'answer')
-    this.answer = answer
-  }
+// inside npm's 5 minutes for an interactive `get`, as the AWS provider's prompts are
+const PRESENCE_MS = 4.5 * 60 * 1000
+// how a write names itself in the presence prompt
+const WRITES = {
+  publish: 'Publish',
+  deprecate: 'Deprecate',
+  'dist-tag': 'Change the dist-tags of',
+  unpublish: 'Unpublish',
 }
+
+// a protocol answer raised from deep inside a helper (lib's `Answer`, which `serve` answers itself)
 const fail = (message) => new Answer(err('other', message))
 
 const nameOf = (req) => (req.scope ? `${req.scope}/${req.package}` : req.package)
@@ -76,7 +86,7 @@ const checkedAuthority = (value) => {
     return null
   }
   const tenant = url.pathname.replace(/^\/|\/$/g, '')
-  if (url.protocol !== 'https:' || !AUTHORITY_HOSTS.has(url.hostname) || url.port || url.username || url.search || !TENANT.test(tenant)) {
+  if (url.protocol !== 'https:' || !AUTHORITY_HOSTS.has(url.hostname) || url.port || url.username || url.search || !isTenant(tenant)) {
     return null
   }
   return `https://${url.hostname}/${tenant}`
@@ -88,8 +98,9 @@ const start = (args) => {
   if (!org || !/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(org)) {
     throw new Error('--org, or org in the configuration, names the organization this provider serves')
   }
-  const prefixes = [`https://pkgs.dev.azure.com/${org}/`, `https://${org}.pkgs.visualstudio.com/`]
-  // an exact prefix, in the casing the user's config has, and `https:` only
+  // an exact prefix: the path in the casing the user's config has, the legacy host in lowercase as
+  // npm compares hosts, and `https:` only
+  const prefixes = [`https://pkgs.dev.azure.com/${org}/`, `https://${org.toLowerCase()}.pkgs.visualstudio.com/`]
   const served = (registry) => prefixes.some((prefix) => registry.startsWith(prefix))
   const sessionsUrl = (extra) => `https://vssps.dev.azure.com/${org}/_apis/Token/SessionTokens?api-version=7.1-preview.1${extra}`
 
@@ -124,7 +135,7 @@ const start = (args) => {
     if (challenge && !named) {
       throw fail(`Azure Artifacts named a Microsoft Entra authority that is not on the allowlist, so no sign-in was started for the ${org} organization.`)
     }
-    if (!named && !TENANT.test(tenant)) {
+    if (!named && !isTenant(tenant)) {
       throw fail(`Azure Artifacts did not say which Microsoft Entra tenant the ${org} organization belongs to (HTTP ${probed.status}).`)
     }
     const authority = named || checkedAuthority(`https://login.microsoftonline.com/${tenant}`)
@@ -222,6 +233,19 @@ const start = (args) => {
     return { token: minted.token, expiresAt }
   }
 
+  // Best effort at the service for every session token the account still holds a
+  // handle of; what fails is said on stderr and never stops the rest.
+  const revokeMinted = async (account, why) => {
+    for (const held of account.minted || []) {
+      try {
+        await revoke(account, held.authorizationId)
+      } catch (error) {
+        const cause = error instanceof Answer ? 'the sign-in is gone' : error.message
+        log(`${why}: a session token could not be revoked, it expires on its own date (${cause})`)
+      }
+    }
+  }
+
   const revoke = async (account, authorizationId) => {
     const access = await entraAccess(account)
     const res = await ctx.request('DELETE', sessionsUrl(`&authorizationId=${encodeURIComponent(authorizationId)}`), { token: access })
@@ -242,28 +266,32 @@ const start = (args) => {
     try {
       const url = new URL(collection)
       const named = url.hostname === 'dev.azure.com' ? url.pathname.split('/')[1] : url.hostname.replace(/\.visualstudio\.com$/, '')
-      return named === org ? process.env.SYSTEM_ACCESSTOKEN : null
+      // organization names are not case-sensitive, and a URL parser lowercases the legacy host
+      return named.toLowerCase() === org.toLowerCase() ? process.env.SYSTEM_ACCESSTOKEN : null
     } catch {
       return null
     }
   }
 
-  // An Entra token of the machine's own identity: a workload identity (the
-  // federated token file is the pipeline's) or the Azure CLI's. `{ token,
-  // expiresAt }`, or null where neither is set up.
-  const identityToken = async () => {
+  // The machine's own Entra identity, found without asking anyone for a token:
+  // a workload identity (the federated token file is the pipeline's) or the
+  // Azure CLI's. A function that fetches `{ token, expiresAt }`, or null where
+  // neither is set up. What is set up is known before any call is made, so a
+  // request that will be refused is refused before the identity is used.
+  const identitySource = () => {
     if (process.env.AZURE_ARTIFACTS_ENTRA_SOURCE === 'az') {
-      const res = await ctx.request('GET', AZ_URL)
-      if (res.status !== 200 || !res.json || !res.json.accessToken || !Number.isInteger(res.json.expires_on)) {
-        throw fail('The Azure CLI gave no Microsoft Entra token. Run az login.')
+      return async () => {
+        const res = await ctx.request('GET', AZ_URL)
+        if (res.status !== 200 || !res.json || !res.json.accessToken || !Number.isInteger(res.json.expires_on)) {
+          throw fail('The Azure CLI gave no Microsoft Entra token. Run az login.')
+        }
+        return { token: res.json.accessToken, expiresAt: res.json.expires_on }
       }
-      return { token: res.json.accessToken, expiresAt: res.json.expires_on }
     }
     const { AZURE_CLIENT_ID: clientId, AZURE_TENANT_ID: tenantId, AZURE_FEDERATED_TOKEN_FILE: file } = process.env
     if (!clientId || !tenantId || !file) {
       return null
     }
-    const authority = checkedAuthority(`https://login.microsoftonline.com/${tenantId}`)
     let assertion
     try {
       assertion = fs.readFileSync(path.resolve(__dirname, file), 'utf8').trim()
@@ -273,23 +301,47 @@ const start = (args) => {
       }
       throw error
     }
-    if (!authority) {
-      throw fail('AZURE_TENANT_ID is not a tenant of a Microsoft Entra authority.')
+    return async () => {
+      const authority = checkedAuthority(`https://login.microsoftonline.com/${tenantId}`)
+      if (!authority) {
+        throw fail('AZURE_TENANT_ID is not a tenant of a Microsoft Entra authority.')
+      }
+      const now = ctx.now()
+      const res = await ctx.request('POST', `${authority}/oauth2/v2.0/token`, {
+        form: {
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          scope: `${AZURE_DEVOPS_RESOURCE}/.default`,
+          client_assertion_type: ASSERTION_TYPE,
+          client_assertion: assertion,
+        },
+      })
+      if (res.status !== 200 || !res.json || !res.json.access_token) {
+        throw fail(`Microsoft Entra refused the workload identity (HTTP ${res.status}).`)
+      }
+      return { token: res.json.access_token, expiresAt: now + res.json.expires_in }
     }
-    const now = ctx.now()
-    const res = await ctx.request('POST', `${authority}/oauth2/v2.0/token`, {
-      form: {
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        scope: `${AZURE_DEVOPS_RESOURCE}/.default`,
-        client_assertion_type: ASSERTION_TYPE,
-        client_assertion: assertion,
-      },
-    })
-    if (res.status !== 200 || !res.json || !res.json.access_token) {
-      throw fail(`Microsoft Entra refused the workload identity (HTTP ${res.status}).`)
+  }
+
+  // The person's presence for a write, asked on the controlling terminal and
+  // only when the request is interactive: the credential about to be released
+  // is a write one. A read asks nothing. Unanswered in time is `other`.
+  const confirmWrite = async (req) => {
+    if (!Object.hasOwn(WRITES, req.operation) || !req.interactive) {
+      return
     }
-    return { token: res.json.access_token, expiresAt: now + res.json.expires_in }
+    const subject = `${nameOf(req)}${req.version ? `@${req.version}` : ''}`
+    const question =
+      req.operation === 'unpublish'
+        ? `Mint a 15-minute Owner token (vso.packaging_manage) to unpublish ${subject} in the ${org} organization?`
+        : `${WRITES[req.operation]} ${subject} in the ${org} organization?`
+    const answered = await ctx.confirmWithin(question, PRESENCE_MS)
+    if (answered === null) {
+      throw fail(`The ${req.operation} of ${subject} was not confirmed within 4 minutes 30 seconds. No credential was released.`)
+    }
+    if (!answered) {
+      throw fail(`The ${req.operation} of ${subject} was not confirmed. No credential was released.`)
+    }
   }
 
   // --- handlers ------------------------------------------------------------------
@@ -308,8 +360,8 @@ const start = (args) => {
     if (req.operation === 'publish') {
       return err(
         'other',
-        `Azure Artifacts refused the publish of ${name} ${req.version} with 403. For a publish this usually means the version already exists, or once existed, in the feed or in an upstream, and versions are never reused. No other credential is released for this request. Publish a new version.`,
-        ['Azure Artifacts answers 403 for a duplicate or deleted version'],
+        `Azure Artifacts refused the publish of ${name} ${req.version} with 403 and did not say why. Microsoft documents that a version that exists, or once existed, in the feed or in an upstream cannot be published again; a missing Contributor role is the other usual reason, and the provider cannot tell which applies. No other credential is released for this request. If the version existed, publish a new one; otherwise ask a feed owner for the Contributor role.`,
+        ['the registry answered 403 to the publish'],
       )
     }
     return err(
@@ -337,6 +389,7 @@ const start = (args) => {
       if (retried) {
         return err('other', 'Azure Artifacts rejected the pipeline job token, and a job token has no refresh. Check that the job runs in the organization the provider serves and that the build identity has a role on the feed.')
       }
+      await confirmWrite(req)
       return ok('get', {
         auth: { type: 'bearer', token: job },
         cache: 'session',
@@ -350,6 +403,7 @@ const start = (args) => {
       if (retried) {
         return err('other', `Azure Artifacts rejected the personal access token stored for the ${org} organization. The provider keeps it: run npm logout and npm login to replace it.`)
       }
+      await confirmWrite(req)
       return ok('get', {
         auth: { type: 'basic', username: PAT_USERNAME, password: account.pat },
         cache: 'session',
@@ -361,20 +415,31 @@ const start = (args) => {
       return fromLogin(req, account)
     }
 
-    const identity = await identityToken()
-    if (!identity) {
+    const source = identitySource()
+    if (!source) {
       return err('not-found')
     }
     // The bare Entra token is not packaging-scoped and works in every
     // organization of the tenant: it is handed out only where nothing else can
     // exist (a pipeline's identity, `interactive` false). A person at a
-    // terminal signs in with `npm login`, which mints a packaging token.
+    // terminal signs in with `npm login`, which mints a packaging token. The
+    // refusal comes before the identity is asked for anything.
     if (req.interactive) {
       return err(
         'other',
         `The only credential on this machine for the ${org} organization is an Entra token that is not limited to packaging, and this provider hands such a token out only where no person can sign in. Run npm login.`,
       )
     }
+    // `interactive: false` is also a developer's `npm publish > log.txt`, where nobody can be
+    // asked: a write with this token needs the provider's own configuration to say
+    // that the machine's identity is a publisher (never an environment variable)
+    if (Object.hasOwn(WRITES, req.operation) && !ctx.config.ciPublisher) {
+      return err(
+        'other',
+        `The ${req.operation} of ${nameOf(req)} needs a person's presence or a credential minted for it, and the only credential here is an Entra token that is not limited to packaging. This provider releases that token for a write only when its own configuration says the machine's identity is a publisher (ciPublisher).`,
+      )
+    }
+    const identity = await source()
     if (retried && rejected === identity.token) {
       return err(
         'other',
@@ -386,6 +451,7 @@ const start = (args) => {
   }
 
   const fromLogin = async (req, account) => {
+    await confirmWrite(req)
     if (req.operation === 'unpublish') {
       // bound to the package and never reused
       const minted = await mint(account, MANAGE_SCOPE, MANAGE_SECONDS, `unpublish ${nameOf(req)} ${ctx.now()}`)
@@ -437,15 +503,13 @@ const start = (args) => {
     if (req.token) {
       // a PAT the user supplied replaces the sign-in; it is checked the way
       // it will be used, as basic, before it is kept
-      const { origin } = new URL(req.registry)
-      const base = ctx.config.endpoints && ctx.config.endpoints[origin]
-      const checked = await fetch(base ? base + req.registry.slice(origin.length) : req.registry, {
+      const checked = await ctx.request('GET', req.registry, {
         headers: { authorization: `Basic ${Buffer.from(`${PAT_USERNAME}:${req.token}`).toString('base64')}` },
-        redirect: 'manual',
       })
       if (checked.status !== 200) {
         return err('other', `Azure Artifacts did not accept the personal access token (HTTP ${checked.status}). Nothing was stored.`)
       }
+      await revokeMinted(readAccount(), 'replaced')
       writeAccount({ pat: req.token })
       return ok('login')
     }
@@ -459,6 +523,8 @@ const start = (args) => {
     if (confirmed.status !== 200) {
       return err('other', `Azure Artifacts did not accept the new sign-in (HTTP ${confirmed.status}). Nothing was stored.`)
     }
+    // what the replaced sign-in minted is revoked with it, not left valid with no handle kept
+    await revokeMinted(readAccount(), 'replaced')
     writeAccount({
       authority,
       refreshToken: granted.refresh_token,
@@ -480,33 +546,14 @@ const start = (args) => {
     if (account.pat) {
       log('logout: a personal access token cannot be revoked without an Entra token; it was removed here only')
     }
-    for (const held of account.minted || []) {
-      try {
-        await revoke(account, held.authorizationId)
-      } catch (error) {
-        const why = error instanceof Answer ? 'the sign-in is gone' : error.message
-        log(`logout: a session token could not be revoked, it expires on its own date (${why})`)
-      }
-    }
+    await revokeMinted(account, 'logout')
     writeAccount({})
     return ok('logout')
   }
 
-  // an answer raised from a helper is that handler's answer
-  const guarded = (handler) => async (req) => {
-    try {
-      return await handler(req)
-    } catch (error) {
-      if (error instanceof Answer) {
-        return error.answer
-      }
-      throw error
-    }
-  }
-
   return {
     hello: { v: [1], capabilities: ['login', 'logout', 'erase'], registries: prefixes },
-    handlers: { get: guarded(get), erase: guarded(erase), login: guarded(login), logout: guarded(logout) },
+    handlers: { get, erase, login, logout },
   }
 }
 

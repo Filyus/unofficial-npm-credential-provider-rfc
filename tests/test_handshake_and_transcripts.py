@@ -132,7 +132,7 @@ class TranscriptTests(unittest.TestCase):
 
     def test_a_malformed_error_answer_is_still_a_protocol_violation(self) -> None:
         lines = (TRANSCRIPTS / "retry-after-403-nothing-else.jsonl").read_text(encoding="utf-8").splitlines()
-        for bad in ('{"kind":"permission-denied"}', '{"kind":"other","message":7}'):
+        for bad in ('{"kind":"Permission-Denied"}', '{"kind":"other","message":7}'):
             with self.subTest(err=bad), tempfile.TemporaryDirectory() as scratch:
                 path = Path(scratch) / "t.jsonl"
                 path.write_text(

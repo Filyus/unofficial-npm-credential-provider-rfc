@@ -27,6 +27,27 @@ const err = (kind, message, causedBy) => ({
   },
 })
 
+// A protocol answer raised from deep inside a helper: `throw new Answer(err(...))`
+// ends the handler with that answer. `serve` answers it itself, so a handler
+// needs no wrapper; `guarded` is for a handler called outside `serve`.
+class Answer extends Error {
+  constructor(answer) {
+    super(answer.Err ? answer.Err.kind : 'answer')
+    this.answer = answer
+  }
+}
+
+const guarded = (handler) => async (request) => {
+  try {
+    return await handler(request)
+  } catch (error) {
+    if (error instanceof Answer) {
+      return error.answer
+    }
+    throw error
+  }
+}
+
 // Arguments after the sentinel, as `--name value` pairs.
 const parseArgs = (argv) => {
   if (argv[0] !== SENTINEL) {
@@ -246,6 +267,10 @@ const serve = async (start) => {
     try {
       answer = handler ? await handler(message) : err('operation-not-supported')
     } catch (error) {
+      if (error instanceof Answer) {
+        write(error.answer)
+        continue
+      }
       // a parse error quotes what it could not parse, and what a provider parses is
       // its own store or an identity file: no part of that goes to npm
       answer = err('other', error instanceof SyntaxError ? 'a file the provider reads is not valid JSON' : error.message)
@@ -254,4 +279,4 @@ const serve = async (start) => {
   }
 }
 
-module.exports = { SENTINEL, MAX_LINE_BYTES, ok, err, serve, log, readLines, validateRequest, parseRequest }
+module.exports = { SENTINEL, MAX_LINE_BYTES, ok, err, Answer, guarded, serve, log, readLines, validateRequest, parseRequest }

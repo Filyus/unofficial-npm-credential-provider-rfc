@@ -47,6 +47,7 @@ SCENARIO = ROOT / "examples" / "providers" / "scenario.js"
 STEPS = 20
 READ_OPERATIONS = {"read", "stage-read"}
 FOREIGN = "https://elsewhere.example.test/"
+DEFAULT_REGISTRY = "https://registry.example.test/"
 # operations no version knows; `constructor` is also a name every JavaScript object
 # has, through Object.prototype, so a provider that looks an operation up in a plain
 # object finds something; `prototype` is only another unknown one
@@ -195,18 +196,41 @@ FIELDS = ["v", "kind", "registry", "scope", "package", "version", "operation", "
 
 
 class Session:
-    def __init__(self, name: str, transcript: Path, seed: int, *, hostile: bool = False, deadline: float = 10) -> None:
+    def __init__(self, name: str, transcript: Path, seed: int, *, hostile: bool = False, deadline: float = 10,
+                 start: bool = True) -> None:
         self.name = name
         self.seed = seed
         self.hostile = hostile
+        self.transcript = transcript
+        self.deadline = deadline
         self.label = f"{name}/{transcript.name} seed {seed}"
         self.random = random.Random(seed)
         self.sent: list[bytes] = []
+        self.helper: subprocess.Popen | None = None
+        self.provider: subprocess.Popen | None = None
+        self.helper_out = self.helper_err = self.out = self.err = None
+        if start:
+            self.start()
+
+    def start(self) -> None:
+        """Starts the scenario's helper and the provider and reads the hello. A
+        provider that never says hello (or a helper that fails) is a violation
+        raised from here, with nothing left running: `kill` has been called."""
+        try:
+            self._start()
+        except BaseException:
+            self.kill()
+            raise
+
+    def _start(self) -> None:
+        name, transcript, seed, deadline = self.name, self.transcript, self.seed, self.deadline
         self.helper = subprocess.Popen(
             ["node", str(SCENARIO), "--sessions", str(seed), name, str(transcript)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.helper_out = Lines(self.helper.stdout, 30)
+        # drained, so a helper that writes a good deal to stderr is never held on a full pipe
+        self.helper_err = Lines(self.helper.stderr, 30)
         setup = json.loads(self.helper_out.next("the scenario"))
         self.asked_file = Path(setup["askedFile"])
         self.secrets: set[str] = set(setup["secrets"])
@@ -226,7 +250,8 @@ class Session:
 
         # the transcripts' own get requests: realistic registries, scopes and packages, and only
         # those of registries the hello names (a transcript may show the provider refusing one it
-        # does not serve); a transcript with none borrows the others of its example
+        # does not serve, and "names" is the model's own registry matching, at a segment boundary);
+        # a transcript with none borrows the others of its example
         served = tuple(hello.get("registries") or ())
 
         def gets_of(path: Path) -> list[dict]:
@@ -235,12 +260,16 @@ class Session:
                 for event in load_transcript(str(path))
                 if event.get("from") == "client" and event.get("message", {}).get("kind") == "get"
             ]
-            return [request for request in found if request["registry"].startswith(served)] if served else found
+            return [request for request in found if self.model.serves(request["registry"])] if served else found
 
         self.pool = gets_of(transcript)
         if not self.pool:
             for other in sorted(transcript.parent.glob("*.jsonl")):
                 self.pool += gets_of(other)
+        if not self.pool:
+            # nothing in the example is a registry this provider serves: a plain read of the first it lists
+            self.pool = [{"v": 1, "kind": "get", "registry": served[0] if served else DEFAULT_REGISTRY,
+                          "operation": "read", "command": "install", "interactive": False, "package": "widgets"}]
         self.write_tokens: set[str] = set()
         # a session is one npm command, whatever the requests it was drawn from said
         self.command = self.random.choice(["install", "ci", "publish", "view"])
@@ -593,7 +622,10 @@ class Session:
             raise Violation("one-answer-per-line", f"{self.label}: lines left unread: {extra[:2]!r}")
         self.helper.stdin.close()
         last = json.loads(self.helper_out.next("the scenario's end"))
-        self.helper.wait(timeout=10)
+        try:
+            self.helper.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            raise Violation("exit-0", f"{self.label}: the scenario's helper did not exit after its stdin closed") from None
         self.secrets |= set(last["secrets"])
         leaked = sorted(secret for secret in self.secrets if secret in stderr)
         if leaked:
@@ -611,13 +643,17 @@ class Session:
                 raise Violation("model-accepts-answers", f"{self.label}: the session is not a valid transcript: {violation}") from None
 
     def kill(self) -> None:
-        for process in (self.provider, self.helper):
+        """Ends whatever has been started, whatever state the session is in
+        (also one that never got as far as a hello)."""
+        processes = [process for process in (self.provider, self.helper) if process is not None]
+        for process in processes:
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=10)
-        for lines in (self.out, self.err, self.helper_out):
-            lines.thread.join(timeout=10)
-        for process in (self.provider, self.helper):
+        for lines in (self.out, self.err, self.helper_out, self.helper_err):
+            if lines is not None:
+                lines.thread.join(timeout=10)
+        for process in processes:
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream and not stream.closed:
                     stream.close()
@@ -625,8 +661,9 @@ class Session:
 
 def run_session(name: str, transcript: Path, seed: int, indices: list, *, hostile: bool,
                 deadline: float = 10) -> tuple[Violation | None, Session]:
-    session = Session(name, transcript, seed, hostile=hostile, deadline=deadline)
+    session = Session(name, transcript, seed, hostile=hostile, deadline=deadline, start=False)
     try:
+        session.start()
         session.run(indices)
         session.close()
         return None, session

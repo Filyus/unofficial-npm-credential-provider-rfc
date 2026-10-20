@@ -13,7 +13,9 @@
 // and the end of stdin runs the checks run.js runs after a session (the
 // presence answers asked for, the store, the fake's state). It exits 0 when
 // they hold and 1, with the reason on stderr, when they do not. The
-// provider's stderr stays with the client, so the secret check is run.js's.
+// provider's stderr stays with the client: if it sends it before closing
+// stdin, as one line `stderr <JSON string>`, the check run.js makes (no secret
+// of the scenario in it) is made here too, and without that line it is not.
 //
 // With --sessions the client sends requests of its own from the
 // scenario's starting state, so the end checks do not apply: presence
@@ -49,8 +51,12 @@ const main = async () => {
     const setup = { provider: run.provider, cwd: run.cwd, configFile: run.configFile, env: run.env }
     console.log(JSON.stringify(sessions ? { ...setup, askedFile: run.askedFile, secrets: run.secrets() } : setup))
     let requests = 0
+    // what the provider wrote to stderr, if the client says (`stderr <JSON string>`)
+    let stderr = null
     for await (const line of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
-      if (line.trim() === 'tick') {
+      if (line.startsWith('stderr ')) {
+        stderr = (stderr ?? '') + JSON.parse(line.slice('stderr '.length))
+      } else if (line.trim() === 'tick') {
         requests += 1
         run.tick(`${run.label} request ${requests}`)
         // the client waits for this before it sends the request, or the
@@ -61,7 +67,7 @@ const main = async () => {
     if (sessions) {
       console.log(JSON.stringify({ secrets: run.secrets() }))
     } else {
-      run.finish(null)
+      run.finish(stderr)
     }
   } finally {
     await run.cleanup()

@@ -60,7 +60,8 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | `noProviderConfigured` | `stored-credential-or-anonymous` |
 | `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous-with-warning` |
-| `globalChainWarningOnlyWhenAProviderListsTheHost` | `True` |
+| `globalChainAllUrlNotSupportedOnListedHost` | `fail` |
+| `globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries` | `True` |
 | `registryChainAllUrlNotSupported` | `fail` |
 | `registryChainIgnoresStoredCredential` | `warn` |
 | `notFoundAtEnd` | `fail` |
@@ -76,6 +77,7 @@ Source: `spec/policy-v1.json`.
 | --- | --- |
 | `notFound` | `try-next-provider` |
 | `urlNotSupportedRemembered` | `per-provider-and-registry-for-the-command` |
+| `notFoundRemembered` | `per-provider-registry-and-scope-for-the-command` |
 | `storedCredentialEntry` | `npm:token` |
 | `implicitStoredCredentialEntry` | `end-of-global-chain-unless-a-provider-answered-not-found` |
 | `builtinPrefix` | `npm:` |
@@ -109,6 +111,10 @@ Source: `spec/policy-v1.json`.
 | `unknownOperation` | `operation-not-supported` |
 | `unknownFields` | `ignore` |
 | `unknownCapabilities` | `ignore` |
+| `unknownErrorKind` | `other` |
+| `unknownCache` | `never` |
+| `unknownGranularity` | `package` |
+| `unknownAuthType` | `fail-as-other-naming-the-provider` |
 
 ## Token Helper (Phase 1)
 

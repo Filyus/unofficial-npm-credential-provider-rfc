@@ -70,17 +70,14 @@
   "expect": {
     "store": {
       "gcloud": {
-        "credentials": {
-          "refreshToken": "refresh-device-1"
-        },
         "adc": {
-          "refreshToken": "refresh-device-2"
+          "refreshToken": "refresh-device-1"
         }
       }
     },
     "state": {
       "oauth": {
-        "devices": 2,
+        "devices": 1,
         "tooSoon": 0
       }
     }

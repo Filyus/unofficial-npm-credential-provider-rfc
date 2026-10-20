@@ -89,9 +89,11 @@ const start = async (args) => {
 
   const fresh = (token) => token && (token.expiresAt === undefined || token.expiresAt - ctx.now() > MARGIN)
 
-  const fromResponse = (json) => ({
+  // `requestedAt` is the clock when the request went out: the platform counts `expires_in`
+  // from when it issued the token, so the time the answer took to come back is not the token's
+  const fromResponse = (json, requestedAt) => ({
     token: json.access_token,
-    ...(json.expires_in === undefined ? {} : { expiresAt: ctx.now() + json.expires_in }),
+    ...(json.expires_in === undefined ? {} : { expiresAt: requestedAt + json.expires_in }),
   })
 
   const rejectedIdentity = (req) =>
@@ -99,6 +101,7 @@ const start = async (args) => {
 
   const mint = async (req, login) => {
     const common = { expires_in: EXPIRES_IN, refreshable: false }
+    const requestedAt = ctx.now()
     const res = login.type === 'refresh'
       ? await ctx.request('POST', `${root}/access/api/v1/tokens`, {
         form: { grant_type: 'refresh_token', refresh_token: login.refreshToken, access_token: login.accessToken, ...common },
@@ -112,7 +115,7 @@ const start = async (args) => {
       if (login.type === 'refresh' && res.json.refresh_token) {
         writeLogin({ ...login, refreshToken: res.json.refresh_token })
       }
-      return { auth: fromResponse(res.json) }
+      return { auth: fromResponse(res.json, requestedAt) }
     }
     if (res.status === 401) {
       throw new Answer(err('other', `Artifactory refused the stored login. Run npm login for ${req.registry}.`))
@@ -138,6 +141,7 @@ const start = async (args) => {
     if (idToken.status !== 200 || !idToken.json || !idToken.json.value) {
       throw new Answer(err('other', `The CI did not give an ID token (HTTP ${idToken.status})`))
     }
+    const requestedAt = ctx.now()
     const res = await ctx.request('POST', `${root}/access/api/v1/oidc/token`, {
       body: {
         grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
@@ -149,7 +153,7 @@ const start = async (args) => {
     if (res.status !== 200 || !res.json || !res.json.access_token) {
       throw new Answer(err('other', `Artifactory refused the OIDC exchange for provider ${oidcProvider} (HTTP ${res.status})`))
     }
-    return { auth: fromResponse(res.json) }
+    return { auth: fromResponse(res.json, requestedAt) }
   }
 
   const answerWith = (credential) => {
@@ -284,8 +288,12 @@ const start = async (args) => {
     if (!stored) {
       return err('not-found')
     }
-    // best effort: what cannot be revoked is warned about, and the login goes all the same
+    // The login goes first, as the RFC has it, so that an Artifactory that is slow or down
+    // cannot keep it; the revocation that follows is a best effort, and what cannot be
+    // revoked is warned about.
     const tokens = stored.type === 'refresh' ? [stored.accessToken, stored.refreshToken] : [stored.token]
+    writeLogin(null)
+    held = null
     for (const token of tokens) {
       try {
         const res = await ctx.request('POST', `${root}/access/api/v1/tokens/revoke`, { body: { token } })
@@ -296,8 +304,6 @@ const start = async (args) => {
         log('logout: the stored login could not be revoked')
       }
     }
-    writeLogin(null)
-    held = null
     return ok('logout')
   }
 

@@ -36,6 +36,7 @@
     },
     "state": {
       "revoked": [
+        "example-device-token",
         "example-pasted-token"
       ],
       "login": {

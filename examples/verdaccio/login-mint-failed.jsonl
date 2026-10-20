@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.example.test/verdaccio/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Verdaccio did not generate a full token at https://npm.example.test/verdaccio/ (HTTP 500). Nothing was stored."}}}
+{"from":"client","event":"close"}

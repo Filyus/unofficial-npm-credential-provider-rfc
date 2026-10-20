@@ -1,0 +1,6 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-job-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":false,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"GitLab refused the job token with 403; the provider has no other credential to release for this request"}}}
+{"from":"client","event":"close"}

@@ -140,23 +140,41 @@ impl Hello {
 
     /// Whether this provider serves `registry`: always without a list;
     /// otherwise a listed URL with the same scheme, host and port whose path
-    /// is a prefix of the registry's at a segment boundary. Both sides are
-    /// taken as already canonical; canonicalization is pinned elsewhere.
+    /// is a prefix of the registry's at a segment boundary, as the Python model
+    /// compares them (`registry_matches`): host case, a default port and dot
+    /// segments are not differences, the path is compared byte for byte, and a
+    /// URL with no canonical form (a port over 65535, an unpaired bracket)
+    /// matches nothing. Limit: a host with a non-ASCII character is compared
+    /// lowercased and not as punycode (no IDNA table in this crate), so
+    /// `https://bücher.example/` and `https://xn--bcher-kva.example/` differ
+    /// here and agree in the Python model.
     pub fn serves(&self, registry: &str) -> bool {
         let Some(registries) = &self.registries else {
             return true;
         };
-        let with_slash = |url: &str| {
-            if url.ends_with('/') {
-                url.to_string()
-            } else {
-                format!("{url}/")
-            }
+        let Some(wanted) = canonical(registry) else {
+            return false;
         };
-        let registry = with_slash(registry);
         registries
             .iter()
-            .any(|served| registry.starts_with(&with_slash(served)))
+            .any(|served| canonical(served).is_some_and(|served| served.covers(&wanted)))
+    }
+
+    /// The entries of this hello's `registries` that name the host of
+    /// `registry`, in any form: another scheme, port or path on that host. A
+    /// global chain every provider of which declined `registry` sends no stored
+    /// credential where some provider lists the host (`fallback` in
+    /// spec/policy-v1.json): that is a URL form the provider declined. Hosts
+    /// compare as `serves` compares them.
+    pub fn listed_forms(&self, registry: &str) -> Vec<String> {
+        let (Some(registries), Some(wanted)) = (&self.registries, canonical(registry)) else {
+            return Vec::new();
+        };
+        registries
+            .iter()
+            .filter(|entry| canonical(entry).is_some_and(|entry| entry.host == wanted.host))
+            .cloned()
+            .collect()
     }
 
     pub fn v1() -> Self {
@@ -171,6 +189,102 @@ impl Hello {
             registries: None,
         }
     }
+}
+
+/// A URL as registry matching compares it: scheme (absent for a `//host/path/`
+/// key), lowercase host, port (absent when it is the scheme's default), and the
+/// path with its dot segments resolved, ending in `/`.
+#[derive(Debug, PartialEq, Eq)]
+struct Canonical {
+    scheme: Option<String>,
+    host: String,
+    port: Option<u16>,
+    path: String,
+}
+
+impl Canonical {
+    /// Whether `other` falls under `self`: the scheme compared only when `self`
+    /// has one, host and port equal, `self`'s path a prefix of `other`'s.
+    fn covers(&self, other: &Self) -> bool {
+        let mut port = other.port;
+        if self.scheme.is_none() && port == other.scheme.as_deref().and_then(default_port) {
+            port = None;
+        }
+        if self.scheme.is_some() && self.scheme != other.scheme {
+            return false;
+        }
+        self.host == other.host && self.port == port && other.path.starts_with(&self.path)
+    }
+}
+
+fn default_port(scheme: &str) -> Option<u16> {
+    match scheme {
+        "http" => Some(80),
+        "https" => Some(443),
+        _ => None,
+    }
+}
+
+fn canonical(url: &str) -> Option<Canonical> {
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest))
+            if scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) =>
+        {
+            (Some(scheme.to_ascii_lowercase()), rest)
+        }
+        _ => (None, url.strip_prefix("//")?),
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let path = &tail[..tail.find(['?', '#']).unwrap_or(tail.len())];
+    let hostport = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, rest)| rest);
+    let (host, port) = if let Some(bracketed) = hostport.strip_prefix('[') {
+        let (host, after) = bracketed.split_once(']')?;
+        (host, after.strip_prefix(':'))
+    } else {
+        match hostport.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (hostport, None),
+        }
+    };
+    let port = match port {
+        None | Some("") => None,
+        Some(digits) if digits.bytes().all(|b| b.is_ascii_digit()) => Some(digits.parse().ok()?),
+        Some(_) => return None,
+    };
+    let port = match &scheme {
+        Some(scheme) if port == default_port(scheme) => None,
+        _ => port,
+    };
+    // as the IDNA encoding the Python model applies refuses it: a label of more than 63 characters
+    if host.is_ascii() && host.split('.').any(|label| label.len() > 63) {
+        return None;
+    }
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in path.split('/').skip(1) {
+        match segment {
+            ".." => {
+                segments.pop();
+            }
+            "." => {}
+            other => segments.push(other),
+        }
+    }
+    let mut path = format!("/{}", segments.join("/"));
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    Some(Canonical {
+        scheme,
+        host: host.to_lowercase(),
+        port,
+        path,
+    })
 }
 
 fn served_registry_is_well_formed(entry: &str) -> bool {
@@ -190,24 +304,52 @@ fn served_registry_is_well_formed(entry: &str) -> bool {
             .any(|c| matches!(c, '?' | '#' | '\\') || c.is_whitespace())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The schema's pattern for an open-ended name, `kind` and `operation`: a lowercase
+/// letter, then lowercase letters, digits and hyphens, and nothing after (a
+/// trailing newline included).
+pub fn is_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '-'))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RequestKind {
     Login,
     Logout,
     Get,
     Erase,
-    /// A kind this build does not know, sent by a newer client. A provider
-    /// answers it with `operation-not-supported`; a client never sends it.
-    #[serde(other)]
+    /// A kind this build does not know, sent by a newer client: a well-formed
+    /// name (`is_identifier`) it has no variant for. A provider answers it with
+    /// `operation-not-supported`; a client never sends it. A text that is not a
+    /// name is not a kind at all and does not parse.
     Unsupported,
+}
+
+impl<'de> Deserialize<'de> for RequestKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Ok(match text.as_str() {
+            "login" => Self::Login,
+            "logout" => Self::Logout,
+            "get" => Self::Get,
+            "erase" => Self::Erase,
+            other if is_identifier(other) => Self::Unsupported,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "kind must be a lowercase identifier",
+                ));
+            }
+        })
+    }
 }
 
 /// The npm action a credential must authorize. npm names the action and the
 /// provider maps it onto its registry's own tiers, because those differ: npmjs
 /// splits stage-only from direct publish, GitHub Packages and Azure Artifacts
 /// put deletion in a tier above write.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Operation {
     Read,
@@ -222,10 +364,36 @@ pub enum Operation {
     Trust,
     StageReject,
     Account,
-    /// An action this build does not know. A provider must not treat it as
-    /// `read`; it answers `operation-not-supported`.
-    #[serde(other)]
+    /// An action this build does not know: a well-formed name it has no variant
+    /// for. A provider must not treat it as `read`; it answers
+    /// `operation-not-supported`. A text that is not a name does not parse.
     Unsupported,
+}
+
+impl<'de> Deserialize<'de> for Operation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Ok(match text.as_str() {
+            "read" => Self::Read,
+            "publish" => Self::Publish,
+            "stage" => Self::Stage,
+            "stage-read" => Self::StageRead,
+            "deprecate" => Self::Deprecate,
+            "dist-tag" => Self::DistTag,
+            "unpublish" => Self::Unpublish,
+            "owner" => Self::Owner,
+            "access" => Self::Access,
+            "trust" => Self::Trust,
+            "stage-reject" => Self::StageReject,
+            "account" => Self::Account,
+            other if is_identifier(other) => Self::Unsupported,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "operation must be a lowercase identifier",
+                ));
+            }
+        })
+    }
 }
 
 impl Operation {
@@ -469,16 +637,57 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Auth {
+    Bearer {
+        token: Secret,
+    },
+    Basic {
+        username: String,
+        password: Secret,
+    },
+    /// An `auth.type` this build does not know, sent by a newer provider: a
+    /// well-formed name (`is_identifier`) it has no variant for. npm has
+    /// nothing it can send, so a client fails the request as an `other` answer;
+    /// it is never written.
+    #[serde(skip_serializing)]
+    Unknown(String),
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum KnownAuth {
     Bearer { token: Secret },
     Basic { username: String, password: Secret },
+}
+
+impl<'de> Deserialize<'de> for Auth {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let name = value
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| D::Error::custom("auth.type must be a string"))?;
+        match name {
+            "bearer" | "basic" => KnownAuth::deserialize(value.clone())
+                .map(|known| match known {
+                    KnownAuth::Bearer { token } => Self::Bearer { token },
+                    KnownAuth::Basic { username, password } => Self::Basic { username, password },
+                })
+                .map_err(D::Error::custom),
+            other if is_identifier(other) => Ok(Self::Unknown(other.to_owned())),
+            _ => Err(D::Error::custom("auth.type must be a lowercase identifier")),
+        }
+    }
 }
 
 impl Auth {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         match self {
+            // well formed: what to do with it is the client's business
+            Self::Unknown(_) => Ok(()),
             Self::Bearer { token } => require(!token.expose().is_empty(), "bearer token is empty"),
             Self::Basic { username, password } => require(
                 !username.is_empty() && !password.expose().is_empty(),
@@ -515,7 +724,7 @@ pub struct ProviderOk {
     pub auth: Option<Auth>,
     #[serde(
         default,
-        deserialize_with = "wire::present",
+        deserialize_with = "open::cache",
         skip_serializing_if = "Option::is_none"
     )]
     pub cache: Option<CachePolicy>,
@@ -535,7 +744,7 @@ pub struct ProviderOk {
     pub operation_independent: Option<bool>,
     #[serde(
         default,
-        deserialize_with = "wire::present",
+        deserialize_with = "open::granularity",
         skip_serializing_if = "Option::is_none"
     )]
     pub granularity: Option<Granularity>,
@@ -600,24 +809,51 @@ impl ProviderOk {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderErr {
     pub kind: ErrorKind,
-    #[serde(
-        default,
-        deserialize_with = "wire::present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(
-        rename = "causedBy",
-        default,
-        deserialize_with = "wire::present",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "causedBy", skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<Vec<String>>,
 }
 
+/// `ProviderErr` as it is on the wire: an object. (The derived reader of a
+/// struct also takes a JSON array, by position, and `open::error_kind` takes
+/// any name, so `["a"]` would be an `Err` of kind `a`.)
+#[derive(Deserialize)]
+struct WireErr {
+    #[serde(deserialize_with = "open::error_kind")]
+    kind: ErrorKind,
+    #[serde(default, deserialize_with = "wire::present")]
+    message: Option<String>,
+    #[serde(rename = "causedBy", default, deserialize_with = "wire::present")]
+    caused_by: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for ProviderErr {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if !value.is_object() {
+            return Err(D::Error::custom("Err must be an object"));
+        }
+        let WireErr {
+            kind,
+            message,
+            caused_by,
+        } = WireErr::deserialize(value).map_err(D::Error::custom)?;
+        Ok(Self {
+            kind,
+            message,
+            caused_by,
+        })
+    }
+}
+
+/// An error kind of the protocol. A provider newer than npm may answer with one
+/// this version does not know: on the wire that is read as `Other`
+/// (`UNKNOWN_ERROR_KIND`), the most cautious known kind, by `open::error_kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorKind {
@@ -625,6 +861,57 @@ pub enum ErrorKind {
     NotFound,
     OperationNotSupported,
     Other,
+}
+
+/// Values of known response fields that a provider newer than npm may extend:
+/// a well-formed name (`is_identifier`) this build has no variant for is read as
+/// the most cautious known value, the mapping `forwardCompatibility` of
+/// spec/policy-v1.json says; a text that is not a name is not a value at all and
+/// does not parse. (`auth.type` has no such value: see `Auth::Unknown`.)
+mod open {
+    use super::{CachePolicy, ErrorKind, Granularity, is_identifier};
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer};
+
+    fn name<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<String, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if is_identifier(&text) {
+            Ok(text)
+        } else {
+            Err(D::Error::custom(format!(
+                "{what} must be a lowercase identifier"
+            )))
+        }
+    }
+
+    pub fn error_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ErrorKind, D::Error> {
+        Ok(match name(deserializer, "Err.kind")?.as_str() {
+            "url-not-supported" => ErrorKind::UrlNotSupported,
+            "not-found" => ErrorKind::NotFound,
+            "operation-not-supported" => ErrorKind::OperationNotSupported,
+            _ => ErrorKind::Other,
+        })
+    }
+
+    pub fn cache<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<CachePolicy>, D::Error> {
+        Ok(Some(match name(deserializer, "cache")?.as_str() {
+            "session" => CachePolicy::Session,
+            "expires" => CachePolicy::Expires,
+            _ => CachePolicy::Never,
+        }))
+    }
+
+    pub fn granularity<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Granularity>, D::Error> {
+        Ok(Some(match name(deserializer, "granularity")?.as_str() {
+            "registry" => Granularity::Registry,
+            "scope" => Granularity::Scope,
+            _ => Granularity::Package,
+        }))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1006,6 +1293,57 @@ mod tests {
             known.validate_received().is_err(),
             "a get still needs interactive"
         );
+    }
+
+    #[test]
+    fn a_kind_or_an_operation_that_is_not_a_name_does_not_parse() {
+        // the schema's pattern, as the Python model and the providers hold it: `Get`,
+        // `login` followed by a newline, a digit first or an underscore make no name
+        for kind in ["Get", "login\\n", "9x", "x_y", "", "get "] {
+            let line = format!(r#"{{"v":1,"kind":"{kind}","registry":"x"}}"#);
+            assert!(read::<Request>(&line).is_err(), "kind {kind:?}");
+            let line = format!(r#"{{"Ok":{{"kind":"{kind}"}}}}"#);
+            assert!(read::<ProviderResponse>(&line).is_err(), "Ok.kind {kind:?}");
+            let line = format!(r#"{{{GET},"operation":"{kind}"}}"#);
+            assert!(read::<Request>(&line).is_err(), "operation {kind:?}");
+        }
+        for name in ["refresh", "x-y", "a1"] {
+            let request: Request =
+                read(&format!(r#"{{"v":1,"kind":"{name}","registry":"x"}}"#)).unwrap();
+            assert_eq!(request.kind, RequestKind::Unsupported);
+            let request: Request = read(&format!(r#"{{{GET},"operation":"{name}"}}"#)).unwrap();
+            assert_eq!(request.operation, Some(Operation::Unsupported));
+            request.validate_received().unwrap();
+        }
+    }
+
+    // The cases of Registry matching shared with the Python model
+    // (tests/test_registry_matching.py reads the same file).
+    #[test]
+    fn registry_matching_answers_as_the_python_model_does() {
+        let shared: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../../tests/registry_matching_cases.json"
+            ))
+            .expect("the cases are in the repository"),
+        )
+        .unwrap();
+        let cases = shared["cases"].as_array().unwrap();
+        assert!(cases.len() >= 25, "{} cases", cases.len());
+        for case in cases {
+            let (served, url, expected) = (
+                case[0].as_str().unwrap(),
+                case[1].as_str().unwrap(),
+                case[2].as_bool().unwrap(),
+            );
+            let hello = Hello {
+                v: vec![1],
+                capabilities: None,
+                registries: Some(vec![served.to_string()]),
+            };
+            assert_eq!(hello.serves(url), expected, "{served} serving {url}");
+        }
     }
 
     #[test]
@@ -1414,6 +1752,128 @@ mod tests {
         ];
 
         assert_eq!(actual, generated::AUTH_TYPES);
+    }
+
+    fn response(text: &str) -> Result<ProviderResponse, serde_json::Error> {
+        serde_json::from_str(text)
+    }
+
+    #[test]
+    fn an_unknown_error_kind_is_read_as_other() {
+        for kind in ["permission-denied", "rate-limited", "x1"] {
+            let parsed = response(&format!(r#"{{"Err":{{"kind":"{kind}"}}}}"#)).unwrap();
+            let ProviderResponse::Err(err) = parsed else {
+                panic!("an Err")
+            };
+            assert_eq!(err.kind, ErrorKind::Other, "{kind}");
+        }
+        assert_eq!(
+            serde_json::to_value(ErrorKind::Other).unwrap(),
+            generated::UNKNOWN_ERROR_KIND
+        );
+        // an array is not an object, whatever its first element reads as
+        assert!(response(r#"{"Err":["a"]}"#).is_err());
+        assert!(response(r#"{"Err":["other","m"]}"#).is_err());
+        for bad in [r#""Other""#, r#""""#, "1", "null", r#""other\n""#] {
+            assert!(
+                response(&format!(r#"{{"Err":{{"kind":{bad}}}}}"#)).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_cache_is_read_as_never_and_an_unknown_granularity_as_package() {
+        let ProviderResponse::Ok(ok) = response(
+            r#"{"Ok":{"kind":"get","auth":{"type":"bearer","token":"t"},"cache":"lease","granularity":"host"}}"#,
+        )
+        .unwrap() else {
+            panic!("an Ok")
+        };
+        assert_eq!(ok.cache, Some(CachePolicy::Never));
+        assert_eq!(ok.granularity, Some(Granularity::Package));
+        ok.validate_for(&RequestKind::Get).unwrap();
+        // an unknown cache needs no expiresAt, which only `expires` requires
+        assert!(
+            response(r#"{"Ok":{"kind":"login","cache":"lease"}}"#)
+                .unwrap()
+                .validate_for(&RequestKind::Login)
+                .is_ok()
+        );
+        assert_eq!(
+            serde_json::to_value(CachePolicy::Never).unwrap(),
+            generated::UNKNOWN_CACHE
+        );
+        assert_eq!(
+            serde_json::to_value(Granularity::Package).unwrap(),
+            generated::UNKNOWN_GRANULARITY
+        );
+        for bad in [
+            r#""cache":"Lease""#,
+            r#""cache":"""#,
+            r#""cache":1"#,
+            r#""granularity":"Host""#,
+            r#""granularity":"""#,
+            r#""granularity":null"#,
+        ] {
+            assert!(
+                response(&format!(r#"{{"Ok":{{"kind":"login",{bad}}}}}"#)).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_auth_type_is_well_formed_and_a_client_fails_it() {
+        let ProviderResponse::Ok(ok) =
+            response(r#"{"Ok":{"kind":"get","auth":{"type":"digest","realm":"r"}}}"#).unwrap()
+        else {
+            panic!("an Ok")
+        };
+        assert_eq!(ok.auth, Some(Auth::Unknown("digest".into())));
+        ok.validate_for(&RequestKind::Get).unwrap();
+        for bad in [
+            r#"{"type":"Digest"}"#,
+            r#"{"type":""}"#,
+            r#"{"type":1}"#,
+            r#"{}"#,
+            r#"{"type":"bearer"}"#,
+            r#"{"type":"basic","username":"u"}"#,
+        ] {
+            assert!(
+                response(&format!(r#"{{"Ok":{{"kind":"get","auth":{bad}}}}}"#)).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hello_says_which_forms_of_a_host_it_lists() {
+        let hello = Hello {
+            registries: Some(vec![
+                "https://registry.example.test/npm/".into(),
+                "http://REGISTRY.example.test:8080/".into(),
+                "https://other.example.test/".into(),
+            ]),
+            ..Hello::v1()
+        };
+        assert_eq!(
+            hello.listed_forms("http://registry.example.test/"),
+            vec![
+                "https://registry.example.test/npm/".to_string(),
+                "http://REGISTRY.example.test:8080/".to_string()
+            ]
+        );
+        assert!(
+            hello
+                .listed_forms("https://elsewhere.example.test/")
+                .is_empty()
+        );
+        assert!(
+            Hello::v1()
+                .listed_forms("https://registry.example.test/")
+                .is_empty()
+        );
     }
 
     fn serialized_values<T, const N: usize>(values: [T; N]) -> Vec<String>

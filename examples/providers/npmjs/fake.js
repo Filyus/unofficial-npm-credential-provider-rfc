@@ -2,6 +2,8 @@
 // A fake of the registry.npmjs.org endpoints the provider uses, answering
 // from the scenario's state:
 //   tokens: { <token>: { valid, username } }   accepted by /-/whoami
+//   whoamiStatus                               a status (503) /-/whoami answers instead of
+//                                              looking at the token, as when the registry is down
 //   login:  { pending, token, retryAfter, doneUrl }  the web login; `pending` polls answer 202 first,
 //                                              each with Retry-After, and a poll sooner than
 //                                              that is answered 429
@@ -18,6 +20,9 @@ const createFake = (state) => {
   return (request) => {
     const { method, path } = request
     if (method === 'GET' && path === '/-/whoami') {
+      if (state.whoamiStatus) {
+        return { status: state.whoamiStatus, json: { error: 'unavailable' } }
+      }
       const known = request.token && state.tokens[request.token]
       return known && known.valid
         ? { status: 200, json: { username: known.username || 'alice' } }

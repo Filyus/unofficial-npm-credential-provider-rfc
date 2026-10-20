@@ -15,6 +15,10 @@
 //   deployTokens                            live deploy tokens, as created
 //   deleted                                 ids deleted so far
 //   nextId                                  id of the next deploy token
+//   failDeletes                             how many of the next DELETEs of a deploy token
+//                                           are answered 500 and delete nothing
+//   oauth.refreshStatus                     a status (503) the refresh grant answers instead of
+//                                           looking at the token, as when GitLab is down
 
 const json = (status, body) => ({ status, json: body })
 
@@ -48,6 +52,9 @@ const createFake = (state) => {
   return ({ method, path, token, body, clock }) => {
     if (method === 'POST' && path === '/oauth/token') {
       if (body.grant_type === 'refresh_token') {
+        if (oauth.refreshStatus) {
+          return json(oauth.refreshStatus, { error: 'temporarily_unavailable' })
+        }
         // the old refresh token stops working with the first use
         return body.refresh_token === oauth.refreshToken ? issue() : json(400, { error: 'invalid_grant' })
       }
@@ -104,6 +111,10 @@ const createFake = (state) => {
         return json(201, { ...created, name: body.name, username: `gitlab+deploy-token-${created.id}`, revoked: false, expired: false })
       }
       if (method === 'DELETE' && route[2]) {
+        if (state.failDeletes > 0) {
+          state.failDeletes -= 1
+          return json(500, { message: '500 Internal Server Error' })
+        }
         const index = state.deployTokens.findIndex((t) => t.id === Number(route[2]))
         if (index < 0) {
           return json(404, { message: '404 Not found' })

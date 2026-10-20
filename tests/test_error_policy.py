@@ -49,9 +49,10 @@ class ErrorPolicyTests(unittest.TestCase):
         with self.assertRaises(ProviderFailure):
             self.client().handle_response(REQUEST, {"Err": {"kind": "other", "message": "boom"}})
 
-    def test_unsupported_error_kind_is_protocol_violation(self) -> None:
+    def test_an_error_kind_that_is_not_a_name_is_a_protocol_violation(self) -> None:
+        # an unknown name is read as `other` (test_forward_compat_and_timeouts)
         with self.assertRaises(ProtocolViolation):
-            self.client().handle_response(REQUEST, {"Err": {"kind": "permission-denied"}})
+            self.client().handle_response(REQUEST, {"Err": {"kind": "Permission-Denied"}})
 
     def test_err_must_be_object(self) -> None:
         with self.assertRaises(ProtocolViolation):

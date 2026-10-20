@@ -1,14 +1,19 @@
 use credential_provider_protocol::{
-    ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderResponse, Request,
+    Auth, ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderResponse, Request,
     RequestKind, generated, generated::SENTINEL_ARGUMENT, negotiate, read_json_line,
     write_json_line,
 };
 use std::fmt;
 use std::io::{BufReader, Read, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::thread;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+/// How long `close` waits for a provider to exit once its stdin is closed.
+/// npm need not wait at all; a test harness that does must not wait for ever.
+const CLOSE_LIMIT: Duration = Duration::from_secs(10);
 
 /// The time a provider gets to answer, per kind of wait. The default is the
 /// policy's (`spec/policy-v1.json`, `credentialProvider.timeoutSeconds`, through
@@ -84,6 +89,11 @@ pub struct ExchangeSummary {
     pub selected_version: u32,
     pub outcome: String,
     pub provider_index: usize,
+    /// The entries of the provider's hello `registries` that name the host of
+    /// the request's registry, in any form: what a global chain that every
+    /// provider declined needs to know before it may fall back to a stored
+    /// credential.
+    pub listed_forms: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -156,7 +166,15 @@ impl ProviderCommand {
 /// does every later one on the session.
 pub struct ProviderSession {
     child: Child,
-    stdin: Option<ChildStdin>,
+    /// Lines for the thread that owns the provider's stdin: a write that blocks
+    /// (a provider that reads nothing, a pipe that is full) is then inside the
+    /// deadline of the wait for the answer, and killing the provider ends it.
+    writer: Option<Sender<Vec<u8>>>,
+    write_failed: Arc<Mutex<Option<String>>>,
+    /// What the provider has written to stderr so far, drained as it comes so
+    /// that a chatty provider is never blocked on a full pipe.
+    stderr: Arc<Mutex<Vec<u8>>>,
+    stderr_thread: Option<JoinHandle<()>>,
     lines: Receiver<Line>,
     timeouts: Timeouts,
     killed: bool,
@@ -187,7 +205,7 @@ impl ProviderSession {
         let mut child = command
             .spawn()
             .map_err(|error| ExchangeError::ProcessFailed(error.to_string()))?;
-        let stdin = child
+        let mut stdin = child
             .stdin
             .take()
             .ok_or(ExchangeError::MissingPipe("stdin"))?;
@@ -195,6 +213,35 @@ impl ProviderSession {
             .stdout
             .take()
             .ok_or(ExchangeError::MissingPipe("stdout"))?;
+        let mut stderr_pipe = child
+            .stderr
+            .take()
+            .ok_or(ExchangeError::MissingPipe("stderr"))?;
+        let stderr = Arc::new(Mutex::new(Vec::new()));
+        let drained = Arc::clone(&stderr);
+        let stderr_thread = thread::spawn(move || {
+            let mut chunk = [0_u8; 4096];
+            while let Ok(read) = stderr_pipe.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                drained
+                    .lock()
+                    .expect("no panic holds the lock")
+                    .extend_from_slice(&chunk[..read]);
+            }
+        });
+        let (writer, queued) = mpsc::channel::<Vec<u8>>();
+        let write_failed = Arc::new(Mutex::new(None));
+        let failed = Arc::clone(&write_failed);
+        thread::spawn(move || {
+            for bytes in queued {
+                if let Err(error) = stdin.write_all(&bytes).and_then(|()| stdin.flush()) {
+                    *failed.lock().expect("no panic holds the lock") = Some(error.to_string());
+                    break;
+                }
+            }
+        });
         // a thread reads the provider's lines so a wait can end at a deadline;
         // killing the provider closes its stdout, which ends the thread
         let (sender, lines) = mpsc::channel::<Line>();
@@ -210,7 +257,10 @@ impl ProviderSession {
         });
         let mut session = Self {
             child,
-            stdin: Some(stdin),
+            writer: Some(writer),
+            write_failed,
+            stderr,
+            stderr_thread: Some(stderr_thread),
             lines,
             timeouts,
             killed: false,
@@ -270,14 +320,25 @@ impl ProviderSession {
     /// Writes bytes to the provider as they are, newline and all, and reads no
     /// answer: for a line that is not a request, or a blank one that gets none.
     pub fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ExchangeError> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or(ExchangeError::MissingPipe("stdin"))?;
-        stdin
-            .write_all(bytes)
-            .and_then(|()| stdin.flush())
-            .map_err(|error| ExchangeError::ProcessFailed(error.to_string()))
+        self.send_bytes(bytes.to_vec())
+    }
+
+    /// Hands bytes to the writer thread. A write that failed earlier is
+    /// reported here, the next time something is sent.
+    fn send_bytes(&mut self, bytes: Vec<u8>) -> Result<(), ExchangeError> {
+        if let Some(error) = self
+            .write_failed
+            .lock()
+            .expect("no panic holds the lock")
+            .clone()
+        {
+            return Err(ExchangeError::ProcessFailed(error));
+        }
+        self.writer
+            .as_ref()
+            .ok_or(ExchangeError::MissingPipe("stdin"))?
+            .send(bytes)
+            .map_err(|_| ExchangeError::ProcessFailed("the provider closed its stdin".into()))
     }
 
     /// Reads the provider's next answer, whatever it is an answer to.
@@ -300,12 +361,17 @@ impl ProviderSession {
         if self.killed {
             return Err(ExchangeError::SessionEnded);
         }
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or(ExchangeError::MissingPipe("stdin"))?;
-        write_json_line(stdin, message)?;
-        self.next_line(limit, waiting_for)
+        // the deadline starts before the write: a provider that reads nothing
+        // is killed at the limit like one that reads and never answers
+        let deadline = Instant::now() + limit;
+        let mut bytes = Vec::new();
+        write_json_line(&mut bytes, message)?;
+        self.send_bytes(bytes)?;
+        self.next_line_within(
+            deadline.saturating_duration_since(Instant::now()),
+            limit,
+            waiting_for,
+        )
     }
 
     /// The provider's next line, or the end of it: past `limit` it is killed.
@@ -314,15 +380,22 @@ impl ProviderSession {
         limit: Duration,
         waiting_for: &str,
     ) -> Result<T, ExchangeError> {
+        self.next_line_within(limit, limit, waiting_for)
+    }
+
+    /// `next_line` with `left` of the `limit` still to wait (the rest went on
+    /// the write).
+    fn next_line_within<T: serde::de::DeserializeOwned>(
+        &mut self,
+        left: Duration,
+        limit: Duration,
+        waiting_for: &str,
+    ) -> Result<T, ExchangeError> {
         if self.killed {
             return Err(ExchangeError::SessionEnded);
         }
-        let deadline = Instant::now() + limit;
         let exited = || ExchangeError::Provider(format!("provider exited before {waiting_for}"));
-        match self
-            .lines
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        {
+        match self.lines.recv_timeout(left) {
             Ok(line) => {
                 let value = line?.ok_or_else(exited)?;
                 Ok(serde_json::from_value(value).map_err(ProtocolError::Json)?)
@@ -340,32 +413,64 @@ impl ProviderSession {
 
     fn kill(&mut self) {
         self.killed = true;
-        drop(self.stdin.take());
+        drop(self.writer.take());
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
 
-    /// Closes stdin, the end-of-session signal, and requires a clean exit.
-    /// A test harness waits to check the exit; npm need not wait for the
-    /// provider at all, so a provider cannot count on work after this.
-    pub fn close(mut self) -> Result<(), ExchangeError> {
+    /// What the provider has written to stderr so far.
+    pub fn stderr(&self) -> String {
+        String::from_utf8_lossy(&self.stderr.lock().expect("no panic holds the lock")).into_owned()
+    }
+
+    /// Closes stdin, the end-of-session signal, and requires a clean exit
+    /// within `CLOSE_LIMIT`; a provider that stays is killed and that is an
+    /// error. A test harness waits to check the exit; npm need not wait for
+    /// the provider at all, so a provider cannot count on work after this.
+    pub fn close(self) -> Result<(), ExchangeError> {
+        self.close_with_stderr().map(|_| ())
+    }
+
+    /// `close`, giving back what the provider wrote to stderr over the whole
+    /// session, for a test that checks it (it is what npm logs).
+    pub fn close_with_stderr(self) -> Result<String, ExchangeError> {
+        self.close_within(CLOSE_LIMIT)
+    }
+
+    /// `close_with_stderr` with a limit of the caller's for the exit.
+    pub fn close_within(mut self, limit: Duration) -> Result<String, ExchangeError> {
         if self.killed {
-            return Ok(());
+            return Ok(self.stderr());
         }
-        drop(self.stdin.take());
-        let mut stderr = String::new();
-        if let Some(mut pipe) = self.child.stderr.take() {
-            pipe.read_to_string(&mut stderr)
-                .map_err(|error| ExchangeError::ProcessFailed(error.to_string()))?;
+        drop(self.writer.take());
+        let deadline = Instant::now() + limit;
+        let status = loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+                Ok(None) => {
+                    self.kill();
+                    return Err(ExchangeError::ProcessFailed(format!(
+                        "the provider did not exit within {}s of its stdin closing; {}",
+                        limit.as_secs_f64(),
+                        self.stderr()
+                    )));
+                }
+                Err(error) => return Err(ExchangeError::ProcessFailed(error.to_string())),
+            }
+        };
+        // the pipe closes with the process, unless it handed it on: a moment, not for ever
+        if let Some(thread) = self.stderr_thread.take() {
+            let settle = Instant::now() + Duration::from_secs(1);
+            while !thread.is_finished() && Instant::now() < settle {
+                thread::sleep(Duration::from_millis(2));
+            }
         }
-        let status = self
-            .child
-            .wait()
-            .map_err(|error| ExchangeError::ProcessFailed(error.to_string()))?;
+        let stderr = self.stderr();
         if !status.success() {
             return Err(ExchangeError::ProcessFailed(stderr));
         }
-        Ok(())
+        Ok(stderr)
     }
 }
 
@@ -392,6 +497,11 @@ pub fn run_exchange_with(
 ) -> Result<ExchangeSummary, ExchangeError> {
     let mut session = ProviderSession::spawn_with(provider_command, timeouts)?;
     let request = request_for(scenario);
+    let listed_forms = session
+        .hello
+        .as_ref()
+        .map(|hello| hello.listed_forms(&request.registry))
+        .unwrap_or_default();
     if !session.serves(&request.registry) {
         let selected_version = session.version;
         session.close()?;
@@ -399,6 +509,7 @@ pub fn run_exchange_with(
             selected_version,
             outcome: "try-next-provider".into(),
             provider_index: 0,
+            listed_forms,
         });
     }
     let response = session.request(&request)?;
@@ -410,6 +521,7 @@ pub fn run_exchange_with(
         selected_version,
         outcome,
         provider_index: 0,
+        listed_forms,
     })
 }
 
@@ -474,9 +586,12 @@ pub enum ChainKind {
 /// Tries providers in order, as Cargo does: `url-not-supported` and
 /// `not-found` move on, anything else stops. A global chain that every
 /// provider declined leaves the registry without a provider (outcome
-/// `as-no-provider`: npm's behaviour today); a per-registry list that does the
-/// same fails, and so does a chain in which someone answered `not-found`
-/// (the legacy opt-in is the model's business, not this mock's).
+/// `as-no-provider`: npm's behaviour today), except where some provider's hello
+/// lists the registry's host in any form: that is a URL form it declined, npm
+/// sends no stored credential, and the request fails, naming the provider and
+/// the forms it lists. A per-registry list that declines fails, and so does a
+/// chain in which someone answered `not-found` (the legacy opt-in is the
+/// model's business, not this mock's).
 pub fn run_provider_chain(
     provider_commands: Vec<ProviderCommand>,
     scenario: ClientScenario,
@@ -493,9 +608,18 @@ pub fn run_provider_chain_with(
 ) -> Result<ExchangeSummary, ExchangeError> {
     let mut not_found = false;
     let mut selected_version = 0;
+    let mut listing = Vec::new();
     for (provider_index, provider_command) in provider_commands.into_iter().enumerate() {
+        let name = provider_command
+            .program
+            .get_program()
+            .to_string_lossy()
+            .into_owned();
         let mut summary = run_exchange_with(provider_command, scenario, timeouts)?;
         selected_version = summary.selected_version;
+        if !summary.listed_forms.is_empty() {
+            listing.push(format!("{name} lists {}", summary.listed_forms.join(", ")));
+        }
         match summary.outcome.as_str() {
             "try-next-provider" => continue,
             "try-next-provider-not-found" => {
@@ -506,6 +630,13 @@ pub fn run_provider_chain_with(
         }
         summary.provider_index = provider_index;
         return Ok(summary);
+    }
+    if kind == ChainKind::Global && !listing.is_empty() && !not_found {
+        return Err(ExchangeError::Provider(format!(
+            "every provider declined {}, a URL form on a host a provider's hello lists, so npm sends no stored credential: {}",
+            request_for(scenario).registry,
+            listing.join("; ")
+        )));
     }
 
     if not_found {
@@ -519,6 +650,7 @@ pub fn run_provider_chain_with(
             selected_version,
             outcome: "as-no-provider".into(),
             provider_index: 0,
+            listed_forms: Vec::new(),
         }),
         ChainKind::PerRegistry => Err(ExchangeError::Provider(
             "no credential provider in the per-registry list could handle the registry".into(),
@@ -557,6 +689,12 @@ fn summarize(request: &RequestKind, response: &ProviderResponse) -> Result<Strin
     }
     match response {
         ProviderResponse::Ok(ok) => {
+            if let Some(Auth::Unknown(name)) = &ok.auth {
+                // npm has nothing it can send: an `other` answer, which fails
+                return Err(ExchangeError::Provider(format!(
+                    "other: unknown auth.type {name}"
+                )));
+            }
             if matches!(
                 ok.kind,
                 RequestKind::Login | RequestKind::Logout | RequestKind::Erase

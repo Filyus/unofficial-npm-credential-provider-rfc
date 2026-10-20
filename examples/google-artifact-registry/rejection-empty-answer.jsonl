@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout","retry-context"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","command":"install","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"Google would not issue a token for acme-reader@acme-prod.iam.gserviceaccount.com (HTTP 200). Check that the sign-in may impersonate it."}}}
+{"from":"client","event":"close"}

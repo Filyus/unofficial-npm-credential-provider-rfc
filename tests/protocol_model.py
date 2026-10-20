@@ -14,7 +14,12 @@ from tests.generated_policy import (
     ERASE_ERROR_OUTCOMES,
     ERROR_KINDS,
     EXPIRY_MARGIN_SECONDS,
+    GLOBAL_CHAIN_LISTED_HOST_OUTCOME,
     IDENTIFIER_PATTERN,
+    SCHEME_IN_CACHE_KEY,
+    UNKNOWN_CACHE,
+    UNKNOWN_ERROR_KIND,
+    UNKNOWN_GRANULARITY,
     OPERATION_INDEPENDENT_DEFAULT,
     OPERATIONS_REQUIRING_VERSION,
     PROTOCOL_VERSION,
@@ -139,13 +144,31 @@ class CredentialClientModel:
 
     def request_or_decline(self, context: RequestContext, declined: DeclinedRegistries | None = None,
                            provider: str = "provider") -> dict[str, Any] | str:
-        """The `get` npm sends, or `try-next-provider` without any message when
-        the provider's hello leaves this registry out."""
+        """The `get` npm sends, or the answer npm already has without sending
+        anything: `try-next-provider` when the provider's hello leaves this
+        registry out or it declined it earlier in the command, and
+        `try-next-provider-not-found` when it answered `not-found` for this
+        registry and scope earlier."""
+        if declined is not None:
+            remembered = declined.remembered(provider, context.registry, context.scope)
+            if remembered is not None:
+                return remembered
         if not self.serves(context.registry):
             if declined is not None:
                 declined.record(provider, context.registry, "try-next-provider")
             return "try-next-provider"
         return self.build_request(context)
+
+    def answer_in_chain(self, request: dict[str, Any], response: dict[str, Any],
+                        declined: DeclinedRegistries, provider: str = "provider") -> str:
+        """`handle_response` for a provider of a chain: a `url-not-supported`
+        or `not-found` is remembered for the rest of the command, so the
+        provider is not asked again about that registry (or, for `not-found`,
+        that registry and scope)."""
+        outcome = self.handle_response(request, response)
+        if request.get("kind") != "erase":
+            declined.record(provider, request["registry"], outcome, request.get("scope"))
+        return outcome
 
     def receive_hello(self, message: dict[str, Any]) -> int:
         self._require_state(ClientState.SPAWNED)
@@ -337,7 +360,7 @@ class CredentialClientModel:
             for bound_operation in (operation, None):
                 key = CacheKey(
                     granularity,
-                    registry,
+                    registry_key(registry),
                     scope if granularity != "registry" else None,
                     package if granularity == "package" else None,
                     bound_operation,
@@ -359,8 +382,13 @@ class CredentialClientModel:
         if not isinstance(err, dict):
             raise ProtocolViolation("Err response must be an object")
         kind = err.get("kind")
-        if not isinstance(kind, str) or kind not in ERROR_KINDS:
-            raise ProtocolViolation(f"unsupported error kind: {kind!r}")
+        # open, as request kinds are: a provider newer than npm may answer with
+        # a kind this version does not know, which is read as the most cautious
+        # known one (`other`: the request fails, naming the provider)
+        if not _is_identifier(kind):
+            raise ProtocolViolation(f"Err.kind must match {IDENTIFIER_PATTERN}: {kind!r}")
+        if kind not in ERROR_KINDS:
+            kind = UNKNOWN_ERROR_KIND
         if "message" in err and not isinstance(err["message"], str):
             raise ProtocolViolation("Err.message must be a string")
         if "causedBy" in err and (
@@ -421,10 +449,20 @@ class CredentialClientModel:
             raise ProtocolViolation(f"expected state {expected.value}, got {self.state.value}")
 
 
+def registry_key(registry: str) -> str:
+    """The registry as the cache key holds it. The scheme is part of it
+    (`cache.schemeInKey`): an answer for `https://host/` never serves
+    `http://host/`, which a provider may treat differently (it declines the
+    `http:` form of a registry it serves over `https:`)."""
+    if SCHEME_IN_CACHE_KEY:
+        return registry
+    return re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*:", "", registry)
+
+
 def cache_key(entry: CacheEntry) -> CacheKey:
     return CacheKey(
         entry.granularity,
-        entry.registry,
+        registry_key(entry.registry),
         entry.scope if entry.granularity in {"scope", "package"} else None,
         entry.package if entry.granularity == "package" else None,
         None if entry.operation_independent else entry.operation,
@@ -555,15 +593,21 @@ def validate_hello(message: Any) -> tuple[list[int], list[str]]:
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
-def _canonical(url: str) -> tuple[str | None, str, int | None, str]:
+def _canonical(url: str) -> tuple[str | None, str, int | None, str] | None:
     """Scheme (None for a `//host/path/` key), host (lowercase, punycode),
     port (None when default), and path with dot segments resolved, ending
-    in `/`. The path keeps its case and its percent-encodings."""
-    parts = urlsplit(url)
-    scheme = parts.scheme.lower() or None
-    host = ".".join(label.encode("idna").decode("ascii") if label else label
-                    for label in (parts.hostname or "").split("."))
-    port = parts.port
+    in `/`. The path keeps its case and its percent-encodings. `None` for a
+    URL that has no canonical form (a port over 65535, a host label over 63
+    characters, an unpaired bracket): the schema accepts such a hello entry and
+    it matches nothing."""
+    try:
+        parts = urlsplit(url)
+        scheme = parts.scheme.lower() or None
+        host = ".".join(label.encode("idna").decode("ascii") if label else label
+                        for label in (parts.hostname or "").split("."))
+        port = parts.port
+    except (ValueError, UnicodeError):
+        return None
     if scheme is not None and port == _DEFAULT_PORTS.get(scheme):
         port = None
     segments: list[str] = []
@@ -581,9 +625,13 @@ def registry_matches(served: str, url: str) -> bool:
     """Registry matching: does `url` fall under `served`? Host and port equal
     after canonicalization; the served path a prefix of the URL's path at a
     segment boundary, compared byte for byte; the scheme compared only when
-    `served` carries one (a hello entry), not for a `//host/path/` key."""
-    served_scheme, served_host, served_port, served_path = _canonical(served)
-    scheme, host, port, path = _canonical(url)
+    `served` carries one (a hello entry), not for a `//host/path/` key. A URL
+    with no canonical form matches nothing and is matched by nothing."""
+    canonical_served, canonical_url = _canonical(served), _canonical(url)
+    if canonical_served is None or canonical_url is None:
+        return False
+    served_scheme, served_host, served_port, served_path = canonical_served
+    scheme, host, port, path = canonical_url
     if served_scheme is None and scheme is not None and port == _DEFAULT_PORTS.get(scheme):
         port = None
     if served_scheme is not None and served_scheme != scheme:
@@ -646,8 +694,11 @@ def validate_auth(auth: Any) -> None:
     if not isinstance(auth, dict):
         raise ProtocolViolation("Ok.auth is required")
     auth_type = auth.get("type")
-    if not _is_enum(auth_type, SUPPORTED_AUTH_TYPES):
-        raise ProtocolViolation(f"unsupported auth type: {auth_type!r}")
+    if not _is_identifier(auth_type):
+        raise ProtocolViolation(f"auth.type must match {IDENTIFIER_PATTERN}: {auth_type!r}")
+    if auth_type not in SUPPORTED_AUTH_TYPES:
+        # npm has nothing it can send: the request fails as an `other` answer
+        raise ProviderFailure(f"other: unknown auth.type {auth_type!r}")
     if auth_type == "bearer" and not _is_nonempty_string(auth.get("token")):
         raise ProtocolViolation("bearer auth requires a non-empty token")
     if auth_type == "basic":
@@ -661,22 +712,34 @@ def validate_ok(ok: dict[str, Any]) -> tuple[Any, str, int | None, str, bool]:
     required for get and validated whenever present."""
     kind = ok.get("kind")
     auth = ok.get("auth")
+    unknown_auth: ProviderFailure | None = None
     if kind == "get" or "auth" in ok:
-        validate_auth(auth)
+        try:
+            validate_auth(auth)
+        except ProviderFailure as failure:
+            # a failure of the request, but only once the rest of the message
+            # is known to be well formed: a malformed one is a protocol violation
+            unknown_auth = failure
     cache = ok.get("cache", DEFAULT_CACHE_POLICY)
-    if not _is_enum(cache, SUPPORTED_CACHE):
-        raise ProtocolViolation(f"unsupported cache policy: {cache!r}")
+    if not _is_identifier(cache):
+        raise ProtocolViolation(f"cache must match {IDENTIFIER_PATTERN}: {cache!r}")
+    if cache not in SUPPORTED_CACHE:
+        cache = UNKNOWN_CACHE
     expires_at = ok.get("expiresAt")
     if "expiresAt" in ok and (not _is_int(expires_at) or expires_at < 0):
         raise ProtocolViolation("expiresAt must be an integer Unix timestamp >= 0")
     if cache == "expires" and "expiresAt" not in ok:
         raise ProtocolViolation("cache=expires requires expiresAt")
     granularity = ok.get("granularity", DEFAULT_GRANULARITY)
-    if not _is_enum(granularity, SUPPORTED_GRANULARITY):
-        raise ProtocolViolation(f"unsupported granularity: {granularity!r}")
+    if not _is_identifier(granularity):
+        raise ProtocolViolation(f"granularity must match {IDENTIFIER_PATTERN}: {granularity!r}")
+    if granularity not in SUPPORTED_GRANULARITY:
+        granularity = UNKNOWN_GRANULARITY
     operation_independent = ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT)
     if not isinstance(operation_independent, bool):
         raise ProtocolViolation("operationIndependent must be boolean")
+    if unknown_auth is not None:
+        raise unknown_auth
     return auth, cache, expires_at, granularity, operation_independent
 
 
@@ -699,11 +762,35 @@ def load_transcript(path: str) -> list[dict[str, Any]]:
 
 class ChainOutcome(NamedTuple):
     """What a chain decided for one registry: `ok` (entry `entry` answered),
-    `stored-credential` (the credential in `.npmrc`), `anonymous`, or `fail`."""
+    `stored-credential` (the credential in `.npmrc`), `anonymous`, or `fail`.
+    `message` says why a failure that no provider's answer explains happened."""
 
     result: str
     entry: int | None = None
     warnings: tuple[str, ...] = ()
+    message: str = ""
+
+
+class ProviderListing(NamedTuple):
+    """One provider of a chain, as its hello described it: `registries` is
+    the hello's list, or None when it had none."""
+
+    name: str
+    registries: list[str] | None = None
+
+
+def _host(url: str) -> str | None:
+    canonical = _canonical(url)
+    return canonical[1] if canonical is not None else None
+
+
+def listed_forms(registries: list[str] | None, registry: str) -> list[str]:
+    """The entries of a hello's `registries` that name the host of `registry`,
+    in any form: another scheme, port or path on that host."""
+    wanted = _host(registry)
+    if not registries or wanted is None:
+        return []
+    return [entry for entry in registries if _host(entry) == wanted]
 
 
 def resolve_chain(
@@ -713,8 +800,8 @@ def resolve_chain(
     stored_credential: bool,
     legacy_fallback: bool = False,
     oidc_token: bool = False,
-    registry_host: str | None = None,
-    listed_hosts: frozenset[str] | None = None,
+    registry: str | None = None,
+    providers: list[ProviderListing] | None = None,
 ) -> ChainOutcome:
     """The end of a provider chain. `answers` holds, in chain order, either
     `STORED_CREDENTIAL_ENTRY` (`npm:token`) or one provider's outcome: `ok`,
@@ -726,7 +813,15 @@ def resolve_chain(
     only while every provider before it declined the registry: after a
     `not-found` the stored credential needs the legacy opt-in, as it does
     after a version mismatch. A per-registry list never consults a stored
-    credential it does not list, and says so."""
+    credential it does not list, and says so.
+
+    `registry` and `providers` (each provider's hello, in chain order) say what
+    the hellos list. A global chain every provider of which declined the
+    registry does not fall back to a stored credential where some provider's
+    hello lists the registry's host in any form: that is a URL form the
+    provider declined, so the request fails, naming the provider and the forms
+    it lists. Elsewhere the fallback warns, except where every provider lists
+    its registries and none lists this host: no provider stands behind it."""
     if oidc_token:
         # a token from a successful trusted-publishing exchange: no provider is
         # asked, and it is not a stored credential, so nothing is "ignored"
@@ -762,10 +857,21 @@ def resolve_chain(
         return done("fail")
     if per_registry:
         return done("fail")
+    if not listed and registry is not None and providers is not None:
+        forms = [(provider.name, listed_forms(provider.registries, registry)) for provider in providers]
+        forms = [(name, listing) for name, listing in forms if listing]
+        if forms:
+            named = "; ".join(f"{name} lists {', '.join(listing)}" for name, listing in forms)
+            return ChainOutcome(
+                GLOBAL_CHAIN_LISTED_HOST_OUTCOME, None, (),
+                f"{registry} is a URL form a provider declined on a host its hello lists, "
+                f"so npm sends no stored credential: {named}",
+            )
     if stored_credential and not listed:
-        # when every provider listed its registries, warn only where one of them
-        # lists this host: that is where a stored credential stands in for it
-        if listed_hosts is not None and registry_host not in listed_hosts:
+        # every provider lists its registries and none lists this host: no
+        # provider stands behind the host, and nothing is said about the
+        # stored credential
+        if providers is not None and all(provider.registries is not None for provider in providers):
             return done("stored-credential")
         return done("stored-credential", None, "stored credential used after every global provider declined the registry")
     return done("anonymous")
@@ -808,10 +914,13 @@ def classify_401(www_authenticate: str | None, body: Any) -> str:
     object when the body was JSON, which never matches the text test."""
     asks_otp = isinstance(body, str) and "one-time pass" in body
     if www_authenticate is not None:
-        challenge = www_authenticate.lower()
-        if "ipaddress" in challenge:
+        # npm-registry-fetch splits the header at commas and looks for the whole
+        # items `ipaddress` and `otp` (`indexOf` on the array, not on the
+        # string): `Basic realm="footprint"` is neither
+        challenges = re.split(r",\s*", www_authenticate.lower())
+        if "ipaddress" in challenges:
             return "eauthip"
-        if "otp" in challenge:
+        if "otp" in challenges:
             return "otp"
         return "otp" if asks_otp else "reject"
     return "otp" if asks_otp else "reject"
@@ -844,10 +953,14 @@ class ProviderRestarts:
     TIMEOUT_KILLS_BEFORE_NO_RESTART times in one command."""
 
     kills: int = 0
+    failed: list[str] = field(default_factory=list)
 
-    def on_timeout(self, queued: int) -> int:
+    def on_timeout(self, queued: list[str]) -> list[str]:
+        """The kill: the requests waiting on the provider, in order, are the
+        ones that fail (the cache is not touched)."""
         self.kills += 1
-        return queued
+        self.failed.extend(queued)
+        return list(queued)
 
     def may_start(self) -> bool:
         return self.kills < TIMEOUT_KILLS_BEFORE_NO_RESTART
@@ -857,16 +970,30 @@ class ProviderRestarts:
 class DeclinedRegistries:
     """`url-not-supported` depends on `registry` alone, so the client remembers
     it per provider and registry for the rest of the command, and a provider
-    that does not serve a registry is asked about it once."""
+    that does not serve a registry is asked about it once. `not-found` is
+    remembered the same way, for that provider, registry and scope (an
+    unscoped package's being no scope): a provider that holds one scope of many
+    is asked about each other scope once."""
 
     declined: set[tuple[str, str]] = field(default_factory=set)
+    not_found: set[tuple[str, str, str | None]] = field(default_factory=set)
 
-    def should_ask(self, provider: str, registry: str) -> bool:
-        return (provider, registry) not in self.declined
+    def should_ask(self, provider: str, registry: str, scope: str | None = None) -> bool:
+        return self.remembered(provider, registry, scope) is None
 
-    def record(self, provider: str, registry: str, outcome: str) -> None:
+    def remembered(self, provider: str, registry: str, scope: str | None = None) -> str | None:
+        """The answer npm gives without asking, or None when it asks."""
+        if (provider, registry) in self.declined:
+            return "try-next-provider"
+        if (provider, registry, scope) in self.not_found:
+            return "try-next-provider-not-found"
+        return None
+
+    def record(self, provider: str, registry: str, outcome: str, scope: str | None = None) -> None:
         if outcome == "try-next-provider":
             self.declined.add((provider, registry))
+        elif outcome == "try-next-provider-not-found":
+            self.not_found.add((provider, registry, scope))
 
 
 def validate_transcript(path: str, config: ProviderConfig | None = None) -> CredentialClientModel:

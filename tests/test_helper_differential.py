@@ -17,6 +17,7 @@ import tempfile
 import unittest
 
 from tests import fuzz_helper
+from tests.tools_required import needs
 
 HONEST = r"""
 const { toHeader: real } = { toHeader: (helper, stdout) => {
@@ -36,7 +37,7 @@ def prototype(source: str) -> Path:
     return root
 
 
-@unittest.skipUnless(shutil.which("node"), "node is not installed")
+@needs(bool(shutil.which("node")), "node is not installed")
 class HarnessTests(unittest.TestCase):
     def found(self, source: str) -> set[str]:
         root = prototype(source)

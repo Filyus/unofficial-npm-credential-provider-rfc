@@ -16,9 +16,10 @@ import unittest
 from unittest import mock
 
 from tests import differential as d
+from tests.tools_required import needs
 
 
-@unittest.skipUnless(shutil.which("cargo") and shutil.which("node"), "cargo and node are needed")
+@needs(bool(shutil.which("cargo") and shutil.which("node")), "cargo and node are needed")
 class DifferentialTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -61,6 +62,29 @@ class DifferentialTests(unittest.TestCase):
                 self.assertEqual(d.short(rust_verdict), "ok", rust_verdict)
                 if case.role == "request":
                     self.assertEqual(d.short(js_verdict), "ok", js_verdict)
+
+    def test_a_kind_or_an_operation_that_is_not_a_name_is_refused_by_every_reader_and_an_unknown_name_is_not(self) -> None:
+        """"Get", "login\\n" and "9x" are not names (the schema's pattern, with nothing after
+        the last character); "refresh" and "x-y" are names this build has no
+        variant for, which a provider answers `operation-not-supported`."""
+        expected = {"refresh": "ok", "x-y": "ok", "Get": "err", "login\n": "err", "9x": "err", "": "err", "x_y": "err"}
+        cases, wanted = [], []
+        for text, verdict in expected.items():
+            cases.append(d.Case("request", {"v": 1, "kind": "logout", "registry": "https://r.test/"}, [["set", ["kind"], text]]))
+            cases.append(d.Case("request", {**d.GET}, [["set", ["operation"], text]]))
+            wanted.append(verdict)
+            wanted.append(verdict)
+        lines = [case.line() for case in cases]
+        validators = d.schema_validators()
+        rust, js = d.rust_verdicts(lines), d.js_verdicts(lines)
+        for case, verdict, rust_verdict, js_verdict in zip(cases, wanted, rust, js):
+            message = json.loads(case.text)
+            with self.subTest(message=case.text):
+                self.assertEqual(d.verdict_schema(validators, "request", message), verdict)
+                self.assertEqual(d.verdict_python("request", message), verdict)
+                self.assertEqual(d.short(rust_verdict), verdict, rust_verdict)
+                self.assertEqual(d.short(js_verdict), verdict, js_verdict)
+        self.assertEqual(d.judge(cases), [])
 
     def test_the_messages_are_not_all_refused_or_all_accepted(self) -> None:
         """Agreement on nothing but errors would prove nothing."""
@@ -111,6 +135,48 @@ class DifferentialTests(unittest.TestCase):
         case = d.Case("hello", base, [["add", [], "x", 1], ["set", ["v"], []], ["add", [], "y", 2]])
         small = d.shrink_case(case, lambda trial: b'"v": []' in trial.text)
         self.assertEqual(small.ops, [["set", ["v"], []]])
+
+
+class ShrinkRoundsTests(unittest.TestCase):
+    """Shrinking on a fake `still`: no reader runs."""
+
+    BASE = {"v": [1], "kind": "get", "registry": "r"}
+    OPS = [["add", [], "a", 1], ["add", [], "b", 2], ["add", [], "c", 3], ["add", [], "d", 4]]
+
+    def case(self) -> "d.Case":
+        return d.Case("request", self.BASE, [list(op) for op in self.OPS])
+
+    def test_a_round_asks_about_all_its_candidates_in_one_call(self) -> None:
+        asked = []
+
+        def many(cases):
+            asked.append(len(cases))
+            return [b'"b": 2' in each.text and b'"d": 4' in each.text for each in cases]
+
+        small = d.shrink_case(self.case(), lambda each: self.fail("one at a time"), many)
+        self.assertEqual([op[2] for op in small.ops], ["b", "d"])
+        self.assertEqual(asked, [4, 1, 2])  # the round; the two that keep the case, together; the round that finds none
+
+    def test_batched_and_one_at_a_time_leave_the_same_operations(self) -> None:
+        import itertools
+        names = ["a", "b", "c", "d"]
+        for need in itertools.chain.from_iterable(itertools.combinations(names, n) for n in range(0, 5)):
+            def still(each, need=need):
+                return all(f'"{name}": '.encode() in each.text for name in need)
+            with self.subTest(need=need):
+                single = d.shrink_case(self.case(), still)
+                batched = d.shrink_case(self.case(), still, lambda cases: [still(each) for each in cases])
+                self.assertEqual(single.ops, batched.ops)
+                self.assertEqual([op[2] for op in single.ops], list(need) or [single.ops[0][2]])
+
+    def test_omissions_that_keep_the_case_only_one_at_a_time_are_not_all_taken(self) -> None:
+        """Leaving out `a` keeps the case and so does leaving out `b`, but not both."""
+        def still(each):
+            return b'"a": 1' in each.text or b'"b": 2' in each.text
+
+        small = d.shrink_case(self.case(), still, lambda cases: [still(each) for each in cases])
+        self.assertTrue(still(small))
+        self.assertEqual(len(small.ops), 1)
 
 
 if __name__ == "__main__":

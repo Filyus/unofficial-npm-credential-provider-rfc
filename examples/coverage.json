@@ -22,15 +22,12 @@
     "stage": "n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer"
   },
   "azure-artifacts": {
-    "stage": "n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)",
-    "not-found": "n/a: the provider holds an organization-wide credential and feed visibility is decided by feed roles at request time; no page says an unreadable feed is hidden, a refusal reaches the provider as a 401 or 403 retry (the page, Rejection)"
+    "stage": "n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)"
   },
   "aws-codeartifact": {
-    "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations",
-    "not-found": "n/a: AWS documents a refusal as 403 (AccessDeniedException) or 401 (NotAuthorized), not as a hidden repository (the page, Rejection)"
+    "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations"
   },
   "verdaccio": {
-    "not-found": "n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)",
     "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
   }
 }

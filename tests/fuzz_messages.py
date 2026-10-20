@@ -60,7 +60,11 @@ def run(argv: list[str] | None = None) -> int:
             found = d.judge([case])
             return bool(found) and d.signature(found[0]) == signature
 
-        small = d.shrink_case(entry["case"], same)
+        def same_all(cases: list[d.Case], signature=signature) -> list[bool]:
+            found = {id(each["case"]): d.signature(each) == signature for each in d.judge(cases)}
+            return [found.get(id(case), False) for case in cases]
+
+        small = d.shrink_case(entry["case"], same, same_all)
         verdicts = d.judge([small])[0]["verdicts"]
         role = small.role
         name = f"{role}-{'-'.join(f'{reader}_{d.short(v)}' for reader, v in sorted(verdicts.items()))}"

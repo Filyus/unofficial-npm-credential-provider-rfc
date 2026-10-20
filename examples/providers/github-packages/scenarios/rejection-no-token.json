@@ -19,6 +19,8 @@
     "tokens": {}
   },
   "expect": {
-    "store": {}
+    "store": {
+      "https://npm.pkg.github.com/": null
+    }
   }
 }

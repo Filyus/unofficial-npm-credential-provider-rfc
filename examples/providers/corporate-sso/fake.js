@@ -10,7 +10,9 @@
 //                sooner than interval + 5 s is answered slow_down again, and a
 //                second such poll expired_token, as RFC 8628 allows),
 //                userCode, verificationUri, sessions { refreshToken: { lapsed, lapseAfter } },
-//                clients { id: { secret, roles } }, groups
+//                clients { id: { secret, roles } }, groups,
+//                omit (fields left out of a successful device or refresh grant, as an
+//                IdP that answers 200 with less than a session would)
 // state.gateway: tokens { "read:@corp": [{ token, expires_at, groups }] }, a queue
 //                per key that each mint takes from
 // The fake adds its counters to the state: idp.refreshes, devices,
@@ -41,6 +43,8 @@ const createFake = (state) => {
     return token
   }
 
+  const withheld = (body) => Object.fromEntries(Object.entries(body).filter(([key]) => !(idp.omit || []).includes(key)))
+
   const tokenEndpoint = ({ body, clock }) => {
     if (body.grant_type === 'refresh_token') {
       const session = idp.sessions[body.refresh_token]
@@ -51,7 +55,7 @@ const createFake = (state) => {
       }
       idp.refreshes += 1
       session.refreshes = (session.refreshes ?? 0) + 1
-      return json(200, { access_token: issueAccess(), expires_in: 600 })
+      return json(200, withheld({ access_token: issueAccess(), expires_in: 600 }))
     }
     if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
       if (body.device_code !== 'device-code-1') {
@@ -74,7 +78,7 @@ const createFake = (state) => {
       }
       const refresh = `refresh-device-${idp.devices}`
       idp.sessions[refresh] = {}
-      return json(200, { access_token: issueAccess(), refresh_token: refresh, expires_in: 600 })
+      return json(200, withheld({ access_token: issueAccess(), refresh_token: refresh, expires_in: 600 }))
     }
     if (body.grant_type === 'client_credentials') {
       const client = idp.clients[body.client_id]

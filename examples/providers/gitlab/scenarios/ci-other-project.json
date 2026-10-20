@@ -21,7 +21,9 @@
     "nextId": 1
   },
   "expect": {
-    "store": {},
+    "store": {
+      "https://gitlab.example.com": null
+    },
     "state": {
       "tokens": [
         "must-not-be-minted"

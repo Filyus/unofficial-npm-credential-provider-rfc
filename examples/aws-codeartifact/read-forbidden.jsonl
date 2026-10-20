@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","scope":"@acme","package":"ui","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":403}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The registry answered 403 to a read of my-repo made with a token minted for the everyday identity, and did not say why. A new token from the same identity would be authorized the same way, so none is minted. Check that the identity is allowed ReadFromRepository on this repository.","causedBy":["registry answered 403"]}}}
+{"from":"client","event":"close"}

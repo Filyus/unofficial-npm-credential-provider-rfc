@@ -28,5 +28,29 @@
         "issuedAt": 1792238400
       }
     ]
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "publish",
+          "token": "example-publish-token",
+          "selects": {
+            "packages": [
+              "@acme/widgets"
+            ]
+          },
+          "issuedAt": 1790000000
+        },
+        {
+          "tier": "session",
+          "token": "example-session-token",
+          "selects": {
+            "all": true
+          },
+          "issuedAt": 1792238400
+        }
+      ]
+    }
   }
 }

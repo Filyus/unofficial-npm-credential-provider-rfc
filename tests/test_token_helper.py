@@ -72,11 +72,21 @@ class TokenHelperConfigTests(unittest.TestCase):
             with self.assertRaises(ResolutionFailure):
                 check_token_helper_config("/usr/local/bin/codeartifact-token", source)
 
-    def test_relative_paths_and_arguments_are_rejected(self) -> None:
-        for value in ("codeartifact-token", "./token.sh", "/usr/bin/aws codeartifact get-authorization-token"):
-            with self.subTest(value=value):
-                with self.assertRaises(ResolutionFailure):
-                    check_token_helper_config(value, "user", exists=lambda path: False, is_file=lambda path: False)
+    def test_relative_paths_and_arguments_are_rejected_as_arguments(self) -> None:
+        import os
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as helper:
+            pass
+        try:
+            # a file that exists, followed by arguments: refused for the arguments, not for being missing
+            values = ["codeartifact-token", "./token.sh", f"{helper.name} codeartifact get-authorization-token"]
+            for value in values:
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ResolutionFailure, "arguments are not supported"):
+                        check_token_helper_config(value, "user")
+            check_token_helper_config(helper.name, "user")
+        finally:
+            os.unlink(helper.name)
 
     def test_windows_absolute_paths_are_accepted(self) -> None:
         for value in ("C:\\tools\\token.cmd", "C:/tools/token.cmd", "\\\\server\\share\\token.cmd"):

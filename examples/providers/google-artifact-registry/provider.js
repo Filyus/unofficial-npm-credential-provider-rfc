@@ -9,24 +9,25 @@
 // What comes from the page: the policy (reader for `read`, writer for
 // `publish` and `deprecate` after a presence prompt and only when
 // `interactive` is true, no prompt for a machine identity in CI), the refusal
-// of every other operation, no revoke on `erase`, no widening on a 403, a
+// of every other operation, no revoke on `erase` (`logout` revokes the
+// provider's own sign-in only), no widening on a 403, a
 // lapsed sign-in answered `other`, and the expiry taken from Google's answer,
 // never from `now + 3600`.
 // SIMPLIFIED, so that it can run without gcloud (the page says so, under
 // Configuration): the page has the provider run `gcloud auth login` and
 // `gcloud auth application-default login` against its own configuration; here
-// each is Google's device authorization flow against the configured endpoints,
-// and a token is made through a refresh grant of the stored sign-in (the
+// one sign-in, the one a token is made from (the second's), is Google's device
+// authorization flow against the configured endpoints, and a token is made through a refresh grant of the stored sign-in (the
 // library call the page names) and the IAM Credentials API. In CI only the
 // federated identity of a credentials file the configuration names is used,
 // not the metadata server's, and a 403 retry is answered `other` for every
 // operation: there is no `repoAdmin` identity to move up to. The endpoint
-// paths and fields are recalled, not read (see fake.js); the client id is
-// invented.
+// paths and fields are recalled, not read (see fake.js), the revoke endpoint
+// of `logout` among them; the client id is invented.
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { serve, ok, err } = require('../lib/protocol.js')
+const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext } = require('../lib/context.js')
 
 const CAPABILITIES = ['erase', 'login', 'logout', 'retry-context']
@@ -56,6 +57,11 @@ const ABSENT = {
 class Lapsed extends Error {}
 class Failed extends Error {}
 
+// Text that goes to the person's terminal and has a part it did not write: a package
+// name and version from the request, the address and code Google answers with. npm
+// strips control characters from what it shows, but this text bypasses npm.
+const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, '?')
+
 const start = (args) => {
   const ctx = loadContext(args.config)
   const repositories = ctx.config.repositories || {}
@@ -66,14 +72,14 @@ const start = (args) => {
   const gcloud = () => ctx.readStore().gcloud || null
 
   const lapsedMessage = (req) =>
-    `The sign-in behind this provider's gcloud configuration has lapsed and needs a new one. Run npm login for ${req.registry}.`
+    `The sign-in behind this provider has lapsed and needs a new one. Run npm login for ${req.registry}.`
 
   // --- the person's sign-in ----------------------------------------------------
 
-  // Google's device flow, for one of the two sign-ins `npm login` needs. Both
-  // share the deadline of the login request.
-  const deviceFlow = async (command, deadline) => {
-    const failed = (reason) => new Failed(`${command} did not finish: ${reason}. Nothing was stored. Run npm login again.`)
+  // Google's device flow, for the sign-in `npm login` needs, inside the deadline
+  // of the login request. What comes back is its refresh token.
+  const deviceFlow = async (deadline) => {
+    const failed = (reason) => new Failed(`The sign-in did not finish: ${reason}. Nothing was stored. Run npm login again.`)
     const started = await ctx.request('POST', `${OAUTH}/device/code`, {
       form: { client_id: CLIENT_ID, scope: CLOUD_PLATFORM },
     })
@@ -82,9 +88,9 @@ const start = (args) => {
     }
     const { device_code: deviceCode, user_code: userCode, verification_url: url } = started.json
     let interval = started.json.interval ?? 5
-    if (!ctx.showToPerson(`Open ${url} and enter the code ${userCode}`)) {
+    if (!ctx.showToPerson(`Open ${plain(url)} and enter the code ${plain(userCode)}`)) {
       // nothing the person could finish: the code is left to expire at Google
-      throw new Failed(`There is no terminal to show the sign-in on, so ${command} was not run. Nothing was stored. Run npm login from a terminal.`)
+      throw new Failed('There is no terminal to show the sign-in on, so no sign-in was started. Nothing was stored. Run npm login from a terminal.')
     }
     for (;;) {
       await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
@@ -92,6 +98,10 @@ const start = (args) => {
         form: { grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: CLIENT_ID },
       })
       if (polled.status === 200 && polled.json) {
+        if (!polled.json.refresh_token) {
+          // an access token alone would be lost within the hour: there is nothing to store
+          throw failed('Google approved the sign-in but gave no refresh token')
+        }
         return polled.json.refresh_token
       }
       const code = polled.json && polled.json.error
@@ -107,7 +117,7 @@ const start = (args) => {
         throw failed(`Google refused the sign-in (HTTP ${polled.status})`)
       }
       if (ctx.clockMs() >= deadline) {
-        throw failed('no sign-in was completed in 4 minutes 30 seconds, so gcloud was stopped')
+        throw failed('no sign-in was completed in 4 minutes 30 seconds')
       }
     }
   }
@@ -127,8 +137,13 @@ const start = (args) => {
     const refreshed = await ctx.request('POST', `${OAUTH}/token`, {
       form: { grant_type: 'refresh_token', refresh_token: adc.refreshToken, client_id: CLIENT_ID },
     })
-    if (refreshed.status !== 200 || !refreshed.json || !refreshed.json.access_token) {
+    // Google refuses a refresh grant that has ended with 400 (invalid_grant) or 401; any
+    // other answer, a 5xx or a 429, is no refusal and says nothing about the sign-in
+    if (refreshed.status === 400 || refreshed.status === 401) {
       throw new Lapsed()
+    }
+    if (refreshed.status !== 200 || !refreshed.json || !refreshed.json.access_token || !Number.isInteger(refreshed.json.expires_in)) {
+      throw new Failed(`Google answered ${refreshed.status} to refreshing the sign-in, so nothing is known about it. Try again, and run npm login only if Google then refuses it.`)
     }
     userAccess = { token: refreshed.json.access_token, expiresAt: now + refreshed.json.expires_in }
     return userAccess.token
@@ -149,7 +164,7 @@ const start = (args) => {
       throw new Lapsed()
     }
     const expiresAt = minted.json && Math.floor(Date.parse(minted.json.expireTime) / 1000)
-    if (minted.status !== 200 || !minted.json.accessToken || !Number.isInteger(expiresAt)) {
+    if (minted.status !== 200 || !minted.json || !minted.json.accessToken || !Number.isInteger(expiresAt)) {
       throw new Failed(
         `Google would not issue a token for ${identity.serviceAccount} (HTTP ${minted.status}). Check that the sign-in may impersonate it.`,
       )
@@ -210,10 +225,11 @@ const start = (args) => {
     }
     const write = Object.hasOwn(WRITE_VERBS, req.operation)
     const name = req.scope ? `${req.scope}/${req.package}` : req.package
-    if (req.operation === 'publish' && !req.version) {
-      return err('other', `A publish request for ${name} must name a version.`)
-    }
-    const federated = federatedIdentity()
+    // A machine identity is released with no presence, and the CI variable that selects it
+    // is the environment's, which a terminal can set too: so only a request that is not
+    // interactive (npm decides that from the process and no CI) may take it. An
+    // interactive one takes the person's sign-in and the presence prompt.
+    const federated = req.interactive ? null : federatedIdentity()
     const tier = repositories[req.registry][write ? 'write' : 'read']
     if (!federated && !tier) {
       return err('other', `This provider has no ${write ? 'writer' : 'reader'} identity configured for ${req.registry}.`)
@@ -241,7 +257,7 @@ const start = (args) => {
       if (!gcloud()) {
         // nobody ever signed in here: nothing to withhold, and no login opened
         return forced
-          ? err('other', `This provider's gcloud configuration holds no sign-in. Run npm login for ${req.registry}.`)
+          ? err('other', `This provider holds no sign-in. Run npm login for ${req.registry}.`)
           : err('not-found')
       }
       if (write) {
@@ -252,13 +268,22 @@ const start = (args) => {
           )
         }
         const label = req.version ? `${name}@${req.version}` : name
-        const question = `${WRITE_VERBS[req.operation]} ${label} ${req.operation === 'publish' ? 'to' : 'in'} ${new URL(req.registry).host}${new URL(req.registry).pathname}?`
-        const answer = await ctx.confirmWithin(question, WAIT_MS)
+        const question = `${WRITE_VERBS[req.operation]} ${plain(label)} ${req.operation === 'publish' ? 'to' : 'in'} ${new URL(req.registry).host}${new URL(req.registry).pathname}?`
+        let answer
+        try {
+          answer = await ctx.confirmWithin(question, WAIT_MS)
+        } catch (error) {
+          if (error.syscall === 'open') {
+            // the terminal cannot be opened: say so instead of passing the OS error on
+            return err('other', `The ${req.operation} of ${name} needs a presence prompt, and the terminal cannot be opened. Run npm ${req.operation} from a terminal, or from CI under a machine identity.`)
+          }
+          throw error
+        }
         if (answer === null) {
-          return err('other', `The ${req.operation} of ${name} was not confirmed within 4 minutes 30 seconds.`)
+          return err('other', `The ${req.operation} of ${name} was not confirmed within 4 minutes 30 seconds. No credential was released.`)
         }
         if (!answer) {
-          return err('other', `The ${req.operation} of ${name} was not confirmed.`)
+          return err('other', `The ${req.operation} of ${name} was not confirmed. No credential was released.`)
         }
       } else {
         const held = readTokens.get(req.registry)
@@ -295,6 +320,18 @@ const start = (args) => {
       operationIndependent: false,
     })
 
+  // Google's revoke endpoint (recalled, not read): the token in a form. Best effort.
+  const revoke = async (token, what) => {
+    try {
+      const res = await ctx.request('POST', `${OAUTH}/revoke`, { form: { token } })
+      if (res.status !== 200) {
+        log(`${what}: Google answered ${res.status} to revoking the sign-in; it stays valid until revoked at myaccount.google.com`)
+      }
+    } catch {
+      log(`${what}: the sign-in could not be revoked`)
+    }
+  }
+
   // Drops what this process holds. No revoke call: revoking an access token
   // that has a refresh token behind it would sign the user out of gcloud, and
   // the stored sign-in is `login`'s, which only `logout` removes.
@@ -312,29 +349,38 @@ const start = (args) => {
       return err('url-not-supported')
     }
     if (req.token !== undefined) {
-      return err('other', 'A token given to npm login is a one-hour access token and not worth storing; this provider signs in with gcloud.')
+      return err('other', 'A token given to npm login is a one-hour access token and not worth storing; this provider signs the person in itself, so run npm login with no token.')
     }
     if (!req.interactive) {
       return err('other', 'Signing in needs a terminal, and none is available.')
     }
     const deadline = ctx.clockMs() + WAIT_MS
+    let refreshToken
     try {
-      const credentials = await deviceFlow('gcloud auth login', deadline)
-      const adc = await deviceFlow('gcloud auth application-default login', deadline)
-      ctx.writeStore({ ...ctx.readStore(), gcloud: { credentials: { refreshToken: credentials }, adc: { refreshToken: adc } } })
+      refreshToken = await deviceFlow(deadline)
     } catch (error) {
       if (error instanceof Failed) {
         return err('other', error.message)
       }
       throw error
     }
+    const replaced = gcloud() && gcloud().adc && gcloud().adc.refreshToken
+    ctx.writeStore({ ...ctx.readStore(), gcloud: { adc: { refreshToken } } })
     readTokens.clear()
     userAccess = null
+    // a sign-in that is no longer kept is one nobody can revoke later
+    if (replaced && replaced !== refreshToken) {
+      await revoke(replaced, 'login')
+    }
     return ok('login')
   }
 
-  // Removes only what the provider created: its own configuration. Never
-  // `gcloud auth revoke`, never the user's own ADC file.
+  // Removes only what the provider created: its own sign-in, here the `gcloud` entry of its
+  // store and in a real build its own configuration directory. Never `gcloud auth revoke`
+  // on the shared configuration, never the user's own ADC file. The sign-in is the
+  // provider's own grant, so revoking its refresh token at Google signs the user out of
+  // nothing else. The entry goes first, so that a slow Google cannot keep it, and the
+  // revocation is a best effort.
   const logout = async (req) => {
     if (!Object.hasOwn(repositories, req.registry)) {
       return err('url-not-supported')
@@ -347,6 +393,9 @@ const start = (args) => {
     ctx.writeStore(rest)
     readTokens.clear()
     userAccess = null
+    if (removed.adc && removed.adc.refreshToken) {
+      await revoke(removed.adc.refreshToken, 'logout')
+    }
     return ok('logout')
   }
 

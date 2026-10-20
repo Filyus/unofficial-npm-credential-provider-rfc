@@ -57,7 +57,7 @@ For each token and request, record the status, the item count or error body, and
 
 ## Result, 2026-10-17
 
-Run once with npm 11.19.0 against a scoped package the account maintains, whose versions are published by trusted publishing, with T1–T5 (T6 and T3b skipped, and the publishing-access setting left as it was). T3 staged `0.0.0-tokentest.1` without asking for a one-time password.
+Run once, by hand, with `poc/stage-tiers/run.js` (so not re-run by CI, and not repeatable without the account, the package and the tokens) with npm 11.19.0 against a scoped package the account maintains, whose versions are published by trusted publishing, with T1–T5 (T6 and T3b skipped, and the publishing-access setting left as it was). T3 staged `0.0.0-tokentest.1` without asking for a one-time password.
 
 | Token | R1 list | R2 list, `package=` | R3 record | R4 tarball |
 |---|---|---|---|---|

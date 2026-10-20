@@ -12,9 +12,23 @@ const os = require('node:os')
 const path = require('node:path')
 const readline = require('node:readline')
 const test = require('node:test')
-const { loadContext } = require('./lib/context.js')
+const http = require('node:http')
+const { PassThrough } = require('node:stream')
+const { loadContext, readLineFrom, editSecret, RequestTimeout } = require('./lib/context.js')
 const { startFake } = require('./lib/fake-server.js')
 const { SENTINEL } = require('./lib/protocol.js')
+
+// An await that cannot outlive the test: a hung child or a stream that never
+// ends fails in `ms` and does not wait for the CI job to be cancelled
+const within = (promise, ms, what) => {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what}: no result within ${ms} ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
 
 const scratchConfig = (t, config) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-real-time-'))
@@ -74,13 +88,13 @@ test('the npmjs.com provider waits out Retry-After on real timers', async (t) =>
     stderr += chunk
   })
   const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]()
-  assert.deepEqual(JSON.parse((await lines.next()).value).v, [1])
+  assert.deepEqual(JSON.parse((await within(lines.next(), 15000, 'hello')).value).v, [1])
   const started = Date.now()
   child.stdin.write(`${JSON.stringify({ v: 1, kind: 'login', registry: 'https://registry.npmjs.org/', interactive: true })}\n`)
-  assert.deepEqual(JSON.parse((await lines.next()).value), { Ok: { kind: 'login' } })
+  assert.deepEqual(JSON.parse((await within(lines.next(), 30000, 'the login answer')).value), { Ok: { kind: 'login' } })
   const took = Date.now() - started
   child.stdin.end()
-  await new Promise((resolve) => child.on('close', resolve))
+  await within(new Promise((resolve) => child.on('close', resolve)), 15000, 'the provider closing')
 
   assert.ok(took >= 950, `the login took ${took} ms, less than the Retry-After of 1 s`)
   assert.equal(state.tooSoon, undefined, 'a poll came sooner than Retry-After')
@@ -101,7 +115,7 @@ test('a deadline that did not pass does not keep the process alive', async (t) =
     ctx.withDeadline(() => Promise.resolve("answered"), 30000).then((answer) => console.log(answer))
   `
   const started = Date.now()
-  const done = await new Promise((resolve) => {
+  const done = await within(new Promise((resolve) => {
     const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'inherit'] })
     let out = ''
     child.stdout.on('data', (chunk) => {
@@ -109,7 +123,7 @@ test('a deadline that did not pass does not keep the process alive', async (t) =
     })
     child.on('close', (code) => resolve({ code, out }))
     t.after(() => child.kill())
-  })
+  }), 20000, 'the process exiting')
   assert.equal(done.out.trim(), 'answered')
   assert.ok(Date.now() - started < 10000, `the process stayed ${Date.now() - started} ms for a half-minute deadline`)
 })
@@ -150,11 +164,11 @@ test('with no run person, the sign-in step goes to the terminal or the login sto
     stderr += chunk
   })
   const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]()
-  assert.deepEqual(JSON.parse((await lines.next()).value).v, [1])
+  assert.deepEqual(JSON.parse((await within(lines.next(), 15000, 'hello')).value).v, [1])
   child.stdin.write(`${JSON.stringify({ v: 1, kind: 'login', registry: 'https://registry.npmjs.org/', interactive: true })}\n`)
-  const answer = JSON.parse((await lines.next()).value)
+  const answer = JSON.parse((await within(lines.next(), 30000, 'the login answer')).value)
   child.stdin.end()
-  await new Promise((resolve) => child.on('close', resolve))
+  await within(new Promise((resolve) => child.on('close', resolve)), 15000, 'the provider closing')
   // a runner may or may not have a terminal; both outcomes are right, and nothing in between
   const shown = answer.Ok && answer.Ok.kind === 'login'
   const stopped = answer.Err && answer.Err.kind === 'other' && /no terminal/i.test(answer.Err.message || '')
@@ -167,4 +181,115 @@ test('with no run person, the sign-in step goes to the terminal or the login sto
     [],
     `the provider wrote a terminal name as a file\n${stderr}`,
   )
+})
+
+// a vendor that accepts the connection and never answers
+const startHung = async (t) => {
+  const sockets = new Set()
+  const server = http.createServer(() => {})
+  server.on('connection', (socket) => sockets.add(socket))
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => {
+    for (const socket of sockets) {
+      socket.destroy()
+    }
+    server.close()
+  })
+  return `http://127.0.0.1:${server.address().port}`
+}
+
+test('a call to a vendor that never answers fails within its deadline, without a clock and in a run', async (t) => {
+  const url = await startHung(t)
+  const real = loadContext(scratchConfig(t, { requestTimeoutMs: 150, endpoints: { 'https://registry.example.test': url } }))
+  let started = Date.now()
+  await assert.rejects(within(real.request('GET', 'https://registry.example.test/poll?secret=x'), 5000, 'the default deadline'), (error) => {
+    assert.ok(error instanceof RequestTimeout)
+    assert.equal(error.code, 'ETIMEDOUT')
+    assert.ok(!error.message.includes('secret'), 'the message quoted the query')
+    return true
+  })
+  assert.ok(Date.now() - started < 3000)
+  // `timeoutMs` bounds one call, `until` a time on the clock of the context
+  started = Date.now()
+  await assert.rejects(within(real.request('GET', 'https://registry.example.test/', { timeoutMs: 100 }), 5000, 'timeoutMs'), RequestTimeout)
+  await assert.rejects(within(real.request('GET', 'https://registry.example.test/', { until: real.clockMs() + 100 }), 5000, 'until'), RequestTimeout)
+  assert.ok(Date.now() - started < 3000, 'until did not shorten the wait')
+  await assert.rejects(real.request('GET', 'https://registry.example.test/', { until: real.clockMs() - 1 }), RequestTimeout)
+
+  // in a run the clock is a file: a deadline already past fails at once, and the real bound is the default one
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-clock-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(dir, 'clock'), '1000')
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ store: 'store.json', clock: 'clock', requestTimeoutMs: 150, endpoints: { 'https://registry.example.test': url } }))
+  const run = loadContext(path.join(dir, 'config.json'))
+  await assert.rejects(run.request('GET', 'https://registry.example.test/', { until: run.clockMs() }), RequestTimeout)
+  await assert.rejects(within(run.request('GET', 'https://registry.example.test/', { until: run.clockMs() + 600000 }), 5000, 'run'), RequestTimeout)
+})
+
+test('a call that answers in time is not cut short', async (t) => {
+  const fake = await startFake(() => ({ status: 200, json: { fine: true } }))
+  t.after(() => fake.close())
+  const ctx = loadContext(scratchConfig(t, { requestTimeoutMs: 5000, endpoints: { 'https://registry.example.test': fake.url } }))
+  const res = await ctx.request('GET', 'https://registry.example.test/', { until: ctx.clockMs() + 5000 })
+  assert.deepEqual(res.json, { fine: true })
+})
+
+test('a store that cannot be written leaves no temporary file beside it', (t) => {
+  const file = scratchConfig(t, {})
+  const dir = path.dirname(file)
+  const ctx = loadContext(file)
+  // a directory where the store goes: the rename fails after the temporary was written
+  fs.mkdirSync(path.join(dir, 'store.json'))
+  assert.throws(() => ctx.writeStore({ tokens: ['secret'] }))
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp')), [])
+  // and one that cannot even be opened
+  const sub = loadContext(scratchConfig(t, { store: 'missing-dir/store.json' }))
+  assert.throws(() => sub.writeStore({}))
+})
+
+test('a line read from a terminal stream: split characters, end of input, abort', async () => {
+  const split = new PassThrough()
+  const euro = Buffer.from('p\u20acw\r\nrest')
+  const pending = readLineFrom(split)
+  split.write(euro.subarray(0, 2))
+  split.write(euro.subarray(2, 3))
+  split.write(euro.subarray(3))
+  assert.equal(await within(pending, 2000, 'split line'), 'p\u20acw')
+
+  const typed = new PassThrough()
+  const eof = readLineFrom(typed)
+  typed.end('no newline')
+  assert.equal(await within(eof, 2000, 'end of input'), 'no newline')
+
+  const closed = new PassThrough()
+  const nothing = readLineFrom(closed)
+  closed.end()
+  assert.equal(await within(nothing, 2000, 'empty end of input'), null)
+
+  const idle = new PassThrough()
+  const controller = new AbortController()
+  const aborted = readLineFrom(idle, controller.signal)
+  controller.abort()
+  assert.equal(await within(aborted, 2000, 'abort'), null)
+})
+
+test('a secret typed in raw mode is edited as a line is', () => {
+  assert.deepEqual(editSecret('', 'ab\u007fc\r'), { text: 'ac', done: true, cancelled: false })
+  assert.deepEqual(editSecret('', 'x'), { text: 'x', done: false, cancelled: false })
+  assert.deepEqual(editSecret('ab', 'c\u0015d\n'), { text: 'd', done: true, cancelled: false })
+  assert.equal(editSecret('ab', '\u0003').cancelled, true)
+  assert.equal(editSecret('', '\u0004').cancelled, true)
+  assert.deepEqual(editSecret('ab', '\u0004'), { text: 'ab', done: true, cancelled: false })
+})
+
+test('a malformed provider body is a 500 from the fake and the run goes on', async () => {
+  const fake = await startFake(() => ({ status: 200, json: {} }))
+  try {
+    const bad = await fetch(`${fake.url}/x`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nope' })
+    assert.equal(bad.status, 500)
+    const good = await fetch(`${fake.url}/x`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    assert.equal(good.status, 200)
+  } finally {
+    await fake.close()
+  }
 })

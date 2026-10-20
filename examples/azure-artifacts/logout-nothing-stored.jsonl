@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"logout","registry":"https://pkgs.dev.azure.com/contoso/"}}
+{"from":"provider","message":{"Err":{"kind":"not-found"}}}
+{"from":"client","event":"close"}

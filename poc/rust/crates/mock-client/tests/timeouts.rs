@@ -7,48 +7,29 @@ use credential_provider_protocol::{
     Granularity, Operation, ProviderResponse, Request, RequestKind, generated,
 };
 use mock_client::{
-    ChainKind, ClientScenario, ExchangeError, ProviderCommand, ProviderSession, ProviderSupervisor,
-    Timeouts, run_exchange_with, run_provider_chain_with,
+    ChainKind, ClientScenario, ExchangeError, ProviderSession, ProviderSupervisor, Timeouts,
+    run_exchange_with, run_provider_chain_with,
 };
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+mod common;
+use common::provider_command;
 
 const REGISTRY: &str = "https://registry.example.test/";
 /// Long enough for a provider that answers, short enough for the suite.
 const SHORT: Duration = Duration::from_millis(400);
+/// The hello limit of a test that expects no kill at hello: a provider that
+/// starts slowly (a cold runner, an antivirus scan of a new binary) must not
+/// fail a test that is about something else.
+const HELLO_GENEROUS: Duration = Duration::from_secs(30);
 
-fn mock_provider_exe() -> PathBuf {
-    static EXE: OnceLock<PathBuf> = OnceLock::new();
-    EXE.get_or_init(|| {
-        // run the binary itself: killing a `cargo run` would leave the provider
-        // behind, holding its exe
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
-        let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-            .args(["build", "--quiet", "-p", "mock-provider", "--manifest-path"])
-            .arg(manifest)
-            .stdout(Stdio::null())
-            .status()
-            .expect("cargo runs");
-        assert!(status.success(), "mock-provider builds");
-        // target/debug/deps/<this test> -> target/debug
-        let profile_dir = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .and_then(|deps| deps.parent())
-            .unwrap()
-            .to_path_buf();
-        profile_dir.join(format!("mock-provider{}", std::env::consts::EXE_SUFFIX))
-    })
-    .clone()
-}
-
-fn provider_command(scenario: &str) -> ProviderCommand {
-    ProviderCommand::new(
-        Command::new(mock_provider_exe()),
-        vec!["--scenario".into(), scenario.into()],
-    )
+/// `SHORT` for every request kind and a generous limit for hello. Only the
+/// tests of a hang at hello use `Timeouts::all(SHORT)`.
+fn short_requests() -> Timeouts {
+    Timeouts {
+        hello: HELLO_GENEROUS,
+        ..Timeouts::all(SHORT)
+    }
 }
 
 fn timed_out(error: &ExchangeError) -> bool {
@@ -155,9 +136,8 @@ fn a_hang_in_each_request_kind_is_killed_at_its_own_limit() {
         ("hang-logout", Request::bare(RequestKind::Logout, REGISTRY)),
     ];
     for (scenario, request) in cases {
-        let mut session =
-            ProviderSession::spawn_with(provider_command(scenario), Timeouts::all(SHORT))
-                .expect("provider says hello");
+        let mut session = ProviderSession::spawn_with(provider_command(scenario), short_requests())
+            .expect("provider says hello");
         let error = session.request(&request).expect_err(scenario);
         assert!(timed_out(&error), "{scenario}: {error}");
         assert!(session.killed(), "{scenario}");
@@ -185,9 +165,8 @@ fn the_limit_is_per_kind_not_one_for_all() {
 
 #[test]
 fn after_a_timeout_the_requests_queued_behind_it_fail() {
-    let mut session =
-        ProviderSession::spawn_with(provider_command("hang-get"), Timeouts::all(SHORT))
-            .expect("provider says hello");
+    let mut session = ProviderSession::spawn_with(provider_command("hang-get"), short_requests())
+        .expect("provider says hello");
     assert!(timed_out(&session.request(&get(false)).unwrap_err()));
     // the same session, whatever the kind: the provider is gone
     for request in [get(false), login()] {
@@ -204,7 +183,7 @@ fn an_exchange_and_a_chain_fail_on_a_timeout() {
     let error = run_exchange_with(
         provider_command("hang-get"),
         ClientScenario::InstallGet,
-        Timeouts::all(SHORT),
+        short_requests(),
     )
     .expect_err("the request fails");
     assert!(timed_out(&error), "{error}");
@@ -217,7 +196,7 @@ fn an_exchange_and_a_chain_fail_on_a_timeout() {
         ],
         ClientScenario::InstallGet,
         ChainKind::Global,
-        Timeouts::all(SHORT),
+        short_requests(),
     )
     .expect_err("the chain fails");
     assert!(timed_out(&error), "{error}");
@@ -232,7 +211,7 @@ fn a_provider_killed_twice_is_not_started_again_and_a_fast_one_is_never_killed()
             counted.set(counted.get() + 1);
             provider_command("hang-get")
         },
-        Timeouts::all(SHORT),
+        short_requests(),
     );
     // each request starts a new session and is killed
     for kills in 1..=generated::TIMEOUT_KILLS_BEFORE_NO_RESTART {
@@ -246,7 +225,7 @@ fn a_provider_killed_twice_is_not_started_again_and_a_fast_one_is_never_killed()
 
     // a provider that answers keeps its one session
     let mut supervisor =
-        ProviderSupervisor::new(|| provider_command("get-success"), Timeouts::all(SHORT));
+        ProviderSupervisor::new(|| provider_command("get-success"), short_requests());
     for _ in 0..3 {
         assert!(supervisor.request(&get(false)).is_ok());
     }
@@ -264,4 +243,56 @@ fn a_hello_timeout_counts_toward_the_kills() {
         supervisor.request(&get(false)),
         Err(ExchangeError::NotRestarted)
     ));
+}
+
+#[test]
+fn a_request_a_provider_does_not_read_is_killed_at_the_limit_too() {
+    // the provider says hello and reads nothing: a request over the size of the
+    // pipe cannot be written, and the deadline covers the write as well as the wait
+    let mut session = ProviderSession::spawn_with(provider_command("no-read"), short_requests())
+        .expect("provider says hello");
+    let request = Request {
+        package: Some("p".repeat(900 * 1024)),
+        ..get(false)
+    };
+    let started = Instant::now();
+    let error = session.request(&request).expect_err("nobody reads it");
+    assert!(timed_out(&error), "{error}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(session.killed());
+}
+
+#[test]
+fn a_provider_that_stays_after_its_stdin_closed_is_killed_and_reported() {
+    let session = ProviderSession::spawn_with(provider_command("hang-on-close"), short_requests())
+        .expect("provider says hello");
+    let started = Instant::now();
+    let error = session
+        .close_within(Duration::from_millis(300))
+        .expect_err("it never exits");
+    assert!(error.to_string().contains("did not exit"), "{error}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_session_gives_back_the_stderr_of_its_provider() {
+    let quiet = ProviderSession::spawn_with(provider_command("get-success"), short_requests())
+        .expect("provider says hello");
+    assert_eq!(quiet.close_with_stderr().expect("clean exit"), "");
+    let noted = ProviderSession::spawn_with(provider_command("stderr-note"), short_requests())
+        .expect("provider says hello");
+    assert!(
+        noted
+            .close_with_stderr()
+            .expect("clean exit")
+            .contains("a note on stderr")
+    );
 }

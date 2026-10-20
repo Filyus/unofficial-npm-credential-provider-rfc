@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://registry.npmjs.org/","interactive":true,"token":"example-pasted-token"}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The pasted token was not stored: acme widgets! is not a list of scopes (@acme) and package names."}}}
+{"from":"client","event":"close"}

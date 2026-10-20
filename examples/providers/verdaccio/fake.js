@@ -11,7 +11,9 @@
 //
 //   users      { name: { password, groups, tfa } }; `tfa: { mode, otp }` enrols the user in
 //              2FA (flag `tfa`, off by default, experimental): `mode` is `auth-only` or
-//              `auth-and-writes`, `otp` the one code the fake accepts. Login (after the
+//              `auth-and-writes`, `otps` the codes the fake accepts, each once (Verdaccio's
+//              TfaStore refuses a TOTP step it has accepted, `lastUsedStep`, so a replayed
+//              code is a challenge again; `otp`, one code, is the same with a list of one). Login (after the
 //              password is checked, as user.ts does) and token creation (before it, as the
 //              route's middleware does) then need the code in `npm-otp`; without it, or with
 //              a wrong one, the answer is 401 with `WWW-Authenticate: otp`, `npm-notice`
@@ -109,7 +111,9 @@ const createFake = (state) => {
       return null
     }
     const sent = request.headers && request.headers['npm-otp']
-    if (sent && sent === tfa.otp) {
+    const used = (tfa.used ??= [])
+    if (sent && (tfa.otps || [tfa.otp]).includes(sent) && !used.includes(sent)) {
+      used.push(sent)
       state.otpAccepted += 1
       return null
     }

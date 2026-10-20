@@ -38,11 +38,16 @@
           "tier": "stage-only",
           "token": "example-pasted-token",
           "selects": {
-            "all": true
+            "scopes": [
+              "@acme"
+            ]
           },
           "issuedAt": 1792238400
         }
       ]
     }
-  }
+  },
+  "typed": [
+    "@acme"
+  ]
 }

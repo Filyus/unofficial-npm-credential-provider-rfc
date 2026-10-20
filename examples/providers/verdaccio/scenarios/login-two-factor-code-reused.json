@@ -1,0 +1,85 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ],
+        "tfa": {
+          "mode": "auth-and-writes",
+          "otps": [
+            "492817"
+          ]
+        }
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ],
+    "mint": {
+      "read": [
+        {
+          "token": "example-read-token",
+          "key": "example-key-read"
+        }
+      ],
+      "full": [
+        {
+          "token": "example-full-token",
+          "key": "example-key-full"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "store": {
+      "https://npm.example.test/verdaccio/": null
+    },
+    "state": {
+      "logins": 1,
+      "minted": [],
+      "otpAccepted": 1
+    }
+  },
+  "typed": [
+    "example-user",
+    {
+      "line": "example-password",
+      "secret": true
+    },
+    {
+      "line": "492817",
+      "secret": true
+    },
+    {
+      "line": "492817",
+      "secret": true
+    }
+  ]
+}

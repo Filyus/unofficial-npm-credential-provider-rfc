@@ -15,10 +15,16 @@ const startFake = (handle) =>
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8')
         let body = null
+        let malformed = false
         if (raw) {
-          body = req.headers['content-type']?.includes('json')
-            ? JSON.parse(raw)
-            : Object.fromEntries(new URLSearchParams(raw))
+          try {
+            body = req.headers['content-type']?.includes('json')
+              ? JSON.parse(raw)
+              : Object.fromEntries(new URLSearchParams(raw))
+          } catch {
+            // what a provider sent that is not JSON is an answer to give, not a crash of the run
+            malformed = true
+          }
         }
         const url = new URL(req.url, 'http://fake')
         const token = (req.headers.authorization || '').replace(/^Bearer /, '') || null
@@ -29,6 +35,9 @@ const startFake = (handle) =>
         requests.push(request)
         let answer
         try {
+          if (malformed) {
+            throw new Error('the request body is not valid JSON')
+          }
           answer = handle(request) || { status: 404, json: { error: 'no such route' } }
         } catch (error) {
           answer = { status: 500, json: { error: error.message } }

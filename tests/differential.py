@@ -41,15 +41,14 @@ SCHEMA = json.loads((ROOT / "spec" / "protocol-v1.schema.json").read_text(encodi
 CLASSIFY_JS = ROOT / "examples" / "providers" / "lib" / "classify.js"
 RUST = ROOT / "poc" / "rust"
 ROLES = ("hello", "request", "response")
-KNOWN_KINDS = {"login", "logout", "get", "erase"}
 GET = {"v": 1, "kind": "get", "registry": "https://registry.example.test/", "operation": "read",
        "command": "install", "interactive": False}
 
 FIELD_VALUES: dict[str, list[Any]] = {
     "v": [0, 1, 2, -1, 1.0, 1.5, "1", True, None, [1], [2], [], [1, 1], [1, 2], ["1"], [1.5], [-1], [2**32], [2**32 + 1],
           [True], [None], [[1]], 2**64, 1e0, 10**30],
-    "kind": ["get", "login", "logout", "erase", "Get", "", "constructor", "refresh", None, 1, ["get"]],
-    "operation": sorted(SUPPORTED_OPERATIONS) + ["Read", "", "frobnicate", "constructor", None, 1],
+    "kind": ["get", "login", "logout", "erase", "Get", "", "constructor", "refresh", "login\n", "x-y", "9x", None, 1, ["get"]],
+    "operation": sorted(SUPPORTED_OPERATIONS) + ["Read", "read\n", "", "frobnicate", "constructor", "x-y", None, 1],
     "granularity": ["registry", "scope", "package", "Registry", "", "global", None, 1, ["scope"]],
     "registry": ["", "x", "https://x/", "http://[", None, 1, ["https://x/"], "https://registry.example.test/\u0000"],
     "scope": ["@a", "@", "a", "@a/b", "", None, 1, "@ü", "@a\n"],
@@ -339,16 +338,12 @@ def verdict_python(role: str, message: Any) -> str:
 
 
 def applies(role: str, message: Any) -> dict[str, bool]:
-    """Which readers read this case. The Rust crate is the client: a request
-    with a kind or an operation it has no name for is one it cannot send."""
-    readers = {"schema": True, "python": True, "rust": True, "js": role == "request"}
-    if role == "request" and isinstance(message, dict):
-        kind, operation = message.get("kind"), message.get("operation")
-        known_kind = isinstance(kind, str) and kind in KNOWN_KINDS
-        known_operation = "operation" not in message or (isinstance(operation, str) and operation in SUPPORTED_OPERATIONS)
-        if not (known_kind and known_operation):
-            readers["rust"] = False
-    return readers
+    """Which readers read this case. All four read every case but the JavaScript
+    bridge, which reads requests only. (The Rust reader classifies a request
+    as a provider receives it, `validate_received`: a kind or an operation it
+    has no variant for is a well-formed name and answered, one that is not a
+    name does not parse, as in the others.)"""
+    return {"schema": True, "python": True, "rust": True, "js": role == "request"}
 
 
 def rust_verdicts(lines: list[bytes]) -> list[str]:
@@ -420,16 +415,28 @@ def generate(seed: int, count: int, pool: dict[str, list[dict]] | None = None) -
     return cases
 
 
-def shrink_case(case: Case, still: Any) -> Case:
-    """Leaves out the operations that do not matter to `still(case)`."""
-    ops = list(case.ops)
-    for index in range(len(ops) - 1, -1, -1):
-        if index >= len(ops):
-            continue  # an earlier removal also took the operations that did nothing without it
-        trial = ops[:index] + ops[index + 1:]
-        if trial and still(Case(case.role, case.base, trial)):
-            ops = Case(case.role, case.base, trial).ops
-    return Case(case.role, case.base, ops)
+def shrink_case(case: Case, still: Any, many: Any = None) -> Case:
+    """Leaves out the operations that do not matter to `still(case)`, until
+    leaving out any one more would matter. `many(cases)`, when given, answers
+    `still` for a list at once: a round tries every single omission in one
+    call, which for the real judge is one `cargo run` and one `node` for the
+    round instead of one each per candidate. When several omissions each keep
+    the case, they are tried together and, if that fails, the last alone."""
+    many = many or (lambda cases: [still(each) for each in cases])
+    current = Case(case.role, case.base, list(case.ops))
+    while len(current.ops) > 1:
+        ops = current.ops
+        trials = [Case(case.role, case.base, ops[:index] + ops[index + 1:]) for index in range(len(ops))]
+        wins = [index for index, kept in enumerate(many(trials)) if kept]
+        if not wins:
+            break
+        if len(wins) > 1:
+            together = Case(case.role, case.base, [op for index, op in enumerate(ops) if index not in wins])
+            if together.ops and many([together])[0]:
+                current = together
+                continue
+        current = trials[wins[-1]]
+    return current
 
 
 def signature(entry: dict) -> tuple:

@@ -24,6 +24,19 @@ const SESSION_SECONDS = 7200 // the session token's two hours; the API gives no 
 const WAIT_MS = 4.5 * 60 * 1000
 const WAIT_TEXT = '4 minutes 30 seconds'
 
+// What the person's terminal is shown from outside the provider (a package name
+// in a prompt, the registry's `loginUrl`): a control character in it could move
+// the cursor or rewrite the line above, so each becomes `?`.
+const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
+
+// The time npm gives a `logout` is 30 seconds; the calls it makes end inside it.
+const LOGOUT_MS = 25 * 1000
+
+// What a pasted token's selection may name: a scope or a package, as the npm
+// registry spells them (lowercase, no control characters or spaces).
+const SCOPE_NAME = /^@[a-z0-9~-][a-z0-9._~-]*$/
+const PACKAGE_NAME = /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/
+
 const HELLO = {
   v: [1],
   capabilities: ['login', 'logout', 'erase', 'retry-context'],
@@ -34,18 +47,22 @@ const HELLO = {
 // presence policy; stage-only tokens are the ones the user pre-authorized
 // for CI (examples/npmjs.md, CI). A token never serves a tier it is not
 // listed for, so the read token is never handed out for a publish and the
-// stage-read token never for a read.
+// stage-read token never for a read. `escalatesTo` is the one tier a 403 may
+// move an operation up to: where an operation spans two tiers, the RFC lets a
+// provider start with the lower credential and move up on a 403 "under the
+// same policy and its presence checks" (Operations). It is not a tier the
+// first answer comes from, and it needs a new presence prompt.
 const OPERATIONS = {
   read: { tiers: ['read'], write: false },
   'stage-read': { tiers: ['stage-read'], write: false },
   stage: { tiers: ['stage-only'], write: true },
   deprecate: { tiers: ['stage-only'], write: true },
   'dist-tag': { tiers: ['stage-only'], write: true },
-  publish: { tiers: ['publish'], write: true },
+  publish: { tiers: ['publish'], escalatesTo: ['session'], write: true },
   // a granular token, not the session token that serves `access`: as
   // documented, the session token does not serve `trust`
   trust: { tiers: ['trust'], write: true },
-  unpublish: { tiers: ['publish', 'session'], write: true },
+  unpublish: { tiers: ['publish', 'session'], escalatesTo: ['session'], write: true },
   owner: { tiers: ['session'], write: true },
   'stage-reject': { tiers: ['session'], write: true },
   access: { tiers: ['session'], write: true },
@@ -111,14 +128,23 @@ const create = async (args) => {
 
   const describe = (request) => {
     const name = fullName(request)
-    return `${request.operation}${name ? ` ${name}${request.version ? ` ${request.version}` : ''}` : ''}`
+    return plain(`${request.operation}${name ? ` ${name}${request.version ? ` ${request.version}` : ''}` : ''}`)
   }
 
   // The whoami check before declaring a login dead: the 401 may be one a
-  // lockfile chose, so ask the registry about the token itself.
+  // lockfile chose, so ask the registry about the token itself. `true`: it
+  // knows the token; `false`: it says it does not (401); `null`: it did not
+  // say (a 5xx, a 403, no answer), which proves nothing either way.
   const tokenIsLive = async (token) => {
-    const { status } = await ctx.request('GET', `${REGISTRY}-/whoami`, { token })
-    return status !== 401
+    try {
+      const { status } = await ctx.request('GET', `${REGISTRY}-/whoami`, { token })
+      if (status === 200) {
+        return true
+      }
+      return status === 401 ? false : null
+    } catch {
+      return null
+    }
   }
 
   const release = async (request, tiers) => {
@@ -156,28 +182,34 @@ const create = async (args) => {
     }
     if (request.retry && request.httpStatus === 401) {
       const found = candidates(op.tiers, request)
-      if (found.length) {
-        const what = `${request.operation} token${request.scope ? ` for ${request.scope}` : ''}`
-        if (!(await tokenIsLive(found[0].entry.token))) {
-          return err('other', `The stored ${what} was rejected. Run npm logout and npm login.`)
-        }
-        // alive: the 401 came from the URL or the registry, not from the token, and no other
-        // credential is released for this request, so the same token again could only fail the same way
-        return err(
-          'other',
-          `npm says the stored ${what} is still valid, so the 401 did not come from the token but from the registry or the URL. No other credential is released for this request, and no token is handed out again.`,
-        )
+      const what = `${request.operation} token${request.scope ? ` for ${request.scope}` : ''}`
+      if (!found.length) {
+        // a retry is never `not-found`: what was rejected has been removed from the store since
+        return err('other', `No stored ${what} is left for this request; run npm login.`)
       }
+      const live = await tokenIsLive(found[0].entry.token)
+      if (live === false) {
+        return err('other', `The stored ${what} was rejected. Run npm logout and npm login.`)
+      }
+      if (live === null) {
+        return err('other', `The registry would not say whether the stored ${what} is valid, so nothing was concluded; try again.`)
+      }
+      // alive: the 401 came from the URL or the registry, not from the token, and no other
+      // credential is released for this request, so the same token again could only fail the same way
+      return err(
+        'other',
+        `npm says the stored ${what} is still valid, so the 401 did not come from the token but from the registry or the URL. No other credential is released for this request, and no token is handed out again.`,
+      )
     } else if (request.retry && request.httpStatus === 403) {
-      // widen only a publish or an unpublish (the session token serves both), only
-      // from a token that was neither stage-only nor the session token, only to the
-      // session token, under the write policy and a new presence prompt
+      // widen only an operation that names a tier to escalate to (a publish or an unpublish),
+      // only from a token that was neither stage-only nor the session token, only to that
+      // tier, under the write policy and a new presence prompt
       const first = handedOut.get(contextKey(request)) || (candidates(op.tiers, request)[0] || {}).entry?.tier
-      const widens = ['publish', 'unpublish'].includes(request.operation) && first !== 'stage-only' && first !== 'session'
+      const widens = Boolean(op.escalatesTo) && first !== 'stage-only' && first !== 'session'
       if (!widens) {
         return err('other', `${request.operation} was refused with 403 and no other credential is released for it.`)
       }
-      const widened = await release(request, ['session'])
+      const widened = await release(request, op.escalatesTo)
       // nothing wider is stored: the retry could only fail the same way
       return widened.Err && widened.Err.kind === 'not-found'
         ? err('other', `${request.operation} was refused with 403 and no other credential is released for it.`)
@@ -195,17 +227,33 @@ const create = async (args) => {
   }
 
   // A pasted granular token comes with no label, and the session-only token
-  // list cannot tell its tier, so the person is asked what it is for; a
-  // write token stored as the read credential would go out with every
-  // install. It is stored for the whole registry: its package selection is
-  // not readable either, and the registry refuses what it does not select.
-  // A read-only token the person keeps for the staged-version lookup, and not
-  // for installs, is stored as `stage-read`: that lookup names no package.
+  // list can tell neither its tier nor its package selection, so the person is
+  // asked what it is for and what it selects; a write token stored as the read
+  // credential would go out with every install, and one stored for the whole
+  // registry would be reused by npm for every scope though the registry answers
+  // 404 outside the selection. The selection is typed (a scope, a package, a
+  // list of them, empty for all packages) and is what `granularity` follows.
+  // A read-only token that selects all packages may also be kept for the
+  // staged-version lookup only, and not for installs: that lookup names no
+  // package, so only such a token can serve it.
   const PASTED_TIERS = [
     ['read', 'a read-only token'],
     ['stage-only', 'a stage-only token'],
     ['publish', 'a publish-and-stage token'],
   ]
+  // `null` for no answer in time, a `selects` for an answer, `false` for one that names nothing valid
+  const parseSelection = (line) => {
+    const names = line.split(',').map((name) => name.trim()).filter(Boolean)
+    if (!names.length) {
+      return { all: true }
+    }
+    const scopes = names.filter((name) => SCOPE_NAME.test(name))
+    const packages = names.filter((name) => !SCOPE_NAME.test(name) && PACKAGE_NAME.test(name))
+    if (scopes.length + packages.length !== names.length) {
+      return false
+    }
+    return { ...(scopes.length ? { scopes } : {}), ...(packages.length ? { packages } : {}) }
+  }
   const storePasted = async (request) => {
     if (!request.interactive) {
       return err('other', 'A pasted token is stored only after the person says what it is for; this request is not interactive.')
@@ -216,6 +264,10 @@ const create = async (args) => {
       const left = until - ctx.clockMs()
       return left > 0 ? ctx.confirmWithin(question, left) : null
     }
+    const askLine = (question) => {
+      const left = until - ctx.clockMs()
+      return left > 0 ? ctx.askWithin(question, left) : null
+    }
     const unanswered = () => err('other', `The pasted token was not stored: nobody answered within ${WAIT_TEXT}.`)
     for (const [asked, label] of PASTED_TIERS) {
       const answer = await ask(`Is the pasted token ${label}?`)
@@ -223,16 +275,24 @@ const create = async (args) => {
         return unanswered()
       }
       if (answer) {
+        const line = await askLine('Which scopes or packages does the token select (@acme, @acme/widgets, separated by commas)? Empty for all packages:')
+        if (line === null) {
+          return unanswered()
+        }
+        const selects = parseSelection(line)
+        if (!selects) {
+          return err('other', `The pasted token was not stored: ${plain(line.trim())} is not a list of scopes (@acme) and package names.`)
+        }
         let tier = asked
-        if (asked === 'read') {
-          const aside = await ask('Does it select all packages, and is it to be kept for the lookup of staged versions only, not for installs?')
+        if (asked === 'read' && selects.all) {
+          const aside = await ask('Is it to be kept for the lookup of staged versions only, not for installs?')
           if (aside === null) {
             return unanswered()
           }
           tier = aside ? 'stage-read' : 'read'
         }
         const store = ctx.readStore()
-        const tokens = [...(store.tokens || []), { tier, token: request.token, selects: { all: true }, issuedAt: ctx.now() }]
+        const tokens = [...(store.tokens || []), { tier, token: request.token, selects, issuedAt: ctx.now() }]
         ctx.writeStore({ ...store, tokens })
         return ok('login')
       }
@@ -258,7 +318,7 @@ const create = async (args) => {
     }
     // nobody can finish a login that was not shown: stop before the first poll,
     // with nothing stored (the unused login at the registry lapses on its own)
-    if (!ctx.showToPerson(`Open ${loginUrl} to log in to npmjs.com`)) {
+    if (!ctx.showToPerson(`Open ${plain(loginUrl)} to log in to npmjs.com`)) {
       return err('other', 'There is no terminal to show the login on; run npm login --registry https://registry.npmjs.org/ from a terminal.')
     }
     // the registry's Retry-After decides the wait; without one, the interval.
@@ -269,7 +329,8 @@ const create = async (args) => {
     // would fail anyway, and a delay beyond 2^31 ms makes a timer fire at once
     const until = ctx.clockMs() + (ctx.config.loginSeconds ?? 270) * 1000
     for (let attempt = 0; attempt < (ctx.config.pollLimit ?? 300); attempt += 1) {
-      const polled = await ctx.request('GET', doneUrl)
+      // a poll that hangs is cut at 15 s, so the last one still ends inside npm's 5 minutes
+      const polled = await ctx.request('GET', doneUrl, { timeoutMs: 15000 })
       if (polled.status === 200 && polled.json && polled.json.token) {
         const store = ctx.readStore()
         const tokens = (store.tokens || []).filter((entry) => entry.tier !== 'session')
@@ -296,9 +357,13 @@ const create = async (args) => {
     if (!tokens.length) {
       return err('not-found')
     }
+    // the local tokens go first, so that nothing the registry does or fails to do keeps
+    // them: the revocation is a best effort with the token in hand, cut at its budget
+    ctx.writeStore({ ...store, tokens: [] })
+    const until = ctx.clockMs() + LOGOUT_MS
     for (const entry of tokens.filter((t) => t.tier === 'session')) {
       try {
-        await ctx.request('DELETE', `${REGISTRY}-/user/token/${encodeURIComponent(entry.token)}`, { token: entry.token })
+        await ctx.request('DELETE', `${REGISTRY}-/user/token/${encodeURIComponent(entry.token)}`, { token: entry.token, until })
       } catch {
         log('npmjs: could not revoke the session token; it expires on its own')
       }
@@ -307,7 +372,6 @@ const create = async (args) => {
     if (granular) {
       log(`npmjs: removed ${granular} granular token(s) locally; revoke them on npmjs.com, which needs a one-time password`)
     }
-    ctx.writeStore({ ...store, tokens: [] })
     return ok('logout')
   }
 

@@ -1,4 +1,4 @@
 {"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout","retry-context"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","interactive":true}}
-{"from":"provider","message":{"Err":{"kind":"other","message":"gcloud auth login did not finish: the sign-in code expired before it was approved. Nothing was stored. Run npm login again."}}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The sign-in did not finish: the sign-in code expired before it was approved. Nothing was stored. Run npm login again."}}}
 {"from":"client","event":"close"}

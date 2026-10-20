@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.2.0","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The publish of @contoso/ui needs a person's presence or a credential minted for it, and the only credential here is an Entra token that is not limited to packaging. This provider releases that token for a write only when its own configuration says the machine's identity is a publisher (ciPublisher)."}}}
+{"from":"client","event":"close"}

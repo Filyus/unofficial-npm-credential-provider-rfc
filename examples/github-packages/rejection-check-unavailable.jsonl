@@ -1,0 +1,8 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"GitHub answered 503 when asked whether the stored token for the work account is alive, so nothing is known about it. Try again, and run npm logout and npm login for https://npm.pkg.github.com/ only if GitHub then rejects it."}}}
+{"from":"client","event":"close"}

@@ -7,8 +7,8 @@
   "config": {
     "clientId": "example-oauth-app",
     "owners": {
-      "@acme": "work",
-      "@octocat": "personal"
+      "@Acme": "work",
+      "@OctoCat": "personal"
     },
     "defaultAccount": "work"
   },

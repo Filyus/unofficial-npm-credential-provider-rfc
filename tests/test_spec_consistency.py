@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import unittest
 
-from tests import protocol_model
+import re
+
+from tests import generated_policy, protocol_model
 from tests.protocol_model import (
     CacheKey,
     CredentialClientModel,
@@ -17,6 +19,15 @@ from tests.protocol_model import (
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_SCHEMA_PATH = ROOT / "spec" / "protocol-v1.schema.json"
 POLICY_PATH = ROOT / "spec" / "policy-v1.json"
+
+
+def schema_pattern(policy: dict) -> str:
+    """The policy's identifier pattern as the schema spells it: `$` in Python's
+    `re.search` also matches before a final newline, so the schema ends the
+    pattern with a lookahead that only the end of the string satisfies."""
+    pattern = policy["forwardCompatibility"]["identifierPattern"]
+    assert pattern.endswith("$")
+    return pattern[:-1] + "(?![\\s\\S])"
 
 
 class SpecConsistencyTests(unittest.TestCase):
@@ -32,7 +43,7 @@ class SpecConsistencyTests(unittest.TestCase):
         schema_kind = self.schema["$defs"]["request"]["properties"]["kind"]
 
         self.assertNotIn("enum", schema_kind)
-        self.assertEqual(schema_kind["pattern"], self.policy["forwardCompatibility"]["identifierPattern"])
+        self.assertEqual(schema_kind["pattern"], schema_pattern(self.policy))
         self.assertEqual(set(schema_kind["examples"]), set(self.policy["wire"]["requestKinds"]))
         self.assertEqual(set(schema_kind["examples"]), protocol_model.SUPPORTED_REQUEST_KINDS)
 
@@ -40,16 +51,17 @@ class SpecConsistencyTests(unittest.TestCase):
         schema_operation = self.schema["$defs"]["request"]["properties"]["operation"]
 
         self.assertNotIn("enum", schema_operation)
-        self.assertEqual(schema_operation["pattern"], self.policy["forwardCompatibility"]["identifierPattern"])
+        self.assertEqual(schema_operation["pattern"], schema_pattern(self.policy))
         self.assertEqual(set(schema_operation["examples"]), set(self.policy["wire"]["operations"]))
         self.assertEqual(set(schema_operation["examples"]), protocol_model.SUPPORTED_OPERATIONS)
 
     def test_request_granularity_matches_response_granularity(self) -> None:
         defs = self.schema["$defs"]
 
+        # the request's is closed, the response's open: its known values are the same
         self.assertEqual(
             defs["request"]["properties"]["granularity"]["enum"],
-            defs["providerOk"]["properties"]["granularity"]["enum"],
+            defs["providerOk"]["properties"]["granularity"]["examples"],
         )
 
     def test_timeouts_match_python_model_and_interactive_get_gets_the_login_budget(self) -> None:
@@ -65,6 +77,7 @@ class SpecConsistencyTests(unittest.TestCase):
         self.assertNotIn("enum", schema_command)
         self.assertEqual(schema_command["type"], "string")
         self.assertTrue(self.policy["wire"]["knownCommands"])
+        self.assertEqual(generated_policy.KNOWN_COMMANDS, frozenset(self.policy["wire"]["knownCommands"]))
         request = {
             "v": 1,
             "kind": "get",
@@ -122,21 +135,40 @@ class SpecConsistencyTests(unittest.TestCase):
 
         self.assertEqual(schema_auth_types, set(self.policy["wire"]["authTypes"]))
         self.assertEqual(schema_auth_types, protocol_model.SUPPORTED_AUTH_TYPES)
+        # any other identifier is the third shape of `auth`, which npm fails as `other`
+        unknown = self.schema["$defs"]["unknownAuth"]["properties"]["type"]
+        self.assertEqual(unknown["pattern"], schema_pattern(self.policy))
+        self.assertEqual(set(unknown["not"]["enum"]), schema_auth_types)
 
     def test_cache_policy_enum_matches_policy_and_python_model(self) -> None:
-        schema_cache_policies = set(self.schema["$defs"]["providerOk"]["properties"]["cache"]["enum"])
+        schema_cache = self.schema["$defs"]["providerOk"]["properties"]["cache"]
+        schema_cache_policies = set(schema_cache["examples"])
+
+        self.assertNotIn("enum", schema_cache)
+        self.assertEqual(schema_cache["pattern"], schema_pattern(self.policy))
+        self.assertIn(self.policy["forwardCompatibility"]["unknownCache"], schema_cache_policies)
 
         self.assertEqual(schema_cache_policies, set(self.policy["wire"]["cachePolicies"]))
         self.assertEqual(schema_cache_policies, protocol_model.SUPPORTED_CACHE)
 
     def test_granularity_enum_matches_policy_and_python_model(self) -> None:
-        schema_granularities = set(self.schema["$defs"]["providerOk"]["properties"]["granularity"]["enum"])
+        schema_granularity = self.schema["$defs"]["providerOk"]["properties"]["granularity"]
+        schema_granularities = set(schema_granularity["examples"])
+
+        self.assertNotIn("enum", schema_granularity)
+        self.assertEqual(schema_granularity["pattern"], schema_pattern(self.policy))
+        self.assertIn(self.policy["forwardCompatibility"]["unknownGranularity"], schema_granularities)
 
         self.assertEqual(schema_granularities, set(self.policy["wire"]["granularities"]))
         self.assertEqual(schema_granularities, protocol_model.SUPPORTED_GRANULARITY)
 
     def test_error_kind_enum_matches_policy_and_python_model(self) -> None:
-        schema_error_kinds = set(self.schema["$defs"]["providerErr"]["properties"]["kind"]["enum"])
+        schema_error = self.schema["$defs"]["providerErr"]["properties"]["kind"]
+        schema_error_kinds = set(schema_error["examples"])
+
+        self.assertNotIn("enum", schema_error)
+        self.assertEqual(schema_error["pattern"], schema_pattern(self.policy))
+        self.assertIn(self.policy["forwardCompatibility"]["unknownErrorKind"], schema_error_kinds)
 
         self.assertEqual(schema_error_kinds, set(self.policy["wire"]["errorKinds"]))
         self.assertEqual(schema_error_kinds, protocol_model.ERROR_KINDS)
@@ -200,6 +232,26 @@ class SpecConsistencyTests(unittest.TestCase):
             entry.operation_independent,
             self.policy["cache"]["operationIndependentDefault"],
         )
+
+
+class UnusedPolicyValueTests(unittest.TestCase):
+    def test_the_phase_1_timeout_is_spec_data_pinned_to_the_text_not_a_model_constant(self) -> None:
+        """The Phase 1 model runs no helper, so it has no timeout to read: the
+        policy's `tokenHelper.timeoutSeconds` is not generated into the model,
+        and the text it summarizes is what pins it."""
+        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+        text = (ROOT / "phase-1-token-helper.md").read_text(encoding="utf-8")
+
+        self.assertIn(f"Running longer than {policy['tokenHelper']['timeoutSeconds']} seconds", text)
+        self.assertFalse(hasattr(protocol_model, "TOKEN_HELPER_TIMEOUT_SECONDS"))
+
+    def test_every_generated_python_constant_is_read_by_the_model_or_a_test(self) -> None:
+        generated = (ROOT / "tests" / "generated_policy.py").read_text(encoding="utf-8")
+        names = re.findall(r"^([A-Z_]+) = ", generated, re.MULTILINE)
+        sources = "".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").glob("*.py") if path.name != "generated_policy.py")
+        unread = [name for name in names if name not in sources]
+
+        self.assertEqual(unread, [])
 
 
 if __name__ == "__main__":

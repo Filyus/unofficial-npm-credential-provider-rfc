@@ -47,6 +47,7 @@
     },
     "state": {
       "revoked": [
+        "example-work-read-token",
         "example-pasted-token"
       ]
     }

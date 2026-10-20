@@ -59,6 +59,62 @@ class RefsTests(unittest.TestCase):
         self.assertFalse(refs.BRANCH_SOURCE.match("https://github.com/o/r/blob/" + "a" * 40 + "/a.md"))
         self.assertTrue(refs.PINNED_SOURCE.match("https://github.com/o/r/blob/" + "a" * 40 + "/a.md"))
 
+    def test_a_branch_other_than_master_and_main_and_a_tag_are_not_commits(self) -> None:
+        """A tag can be deleted and made again, so only a 40-hex id is a commit."""
+        for ref in ("develop", "v1.2.3", "release-1.x", "a" * 7, "a" * 39, "a" * 41, "A" * 40):
+            with self.subTest(ref=ref):
+                self.assertTrue(refs.BRANCH_SOURCE.match(f"https://github.com/o/r/blob/{ref}/a.go"))
+        self.assertFalse(refs.BRANCH_SOURCE.match("https://github.com/o/r/blob/" + "a" * 40 + "/a.go"))
+
+    def test_pinning_rewrites_whole_link_targets_only(self) -> None:
+        old, new = "https://github.com/o/r/blob/main/a.go", "https://github.com/o/r/blob/" + "a" * 40 + "/a.go"
+        text = (f"[a]({old}) [b]({old}2) <{old}> [c]({old}#L10) text {old} in prose\n"
+                "[d](https://github.com/o/r/blob/main/b.go)\n")
+        self.assertEqual(
+            refs.pin_text(text, {old: new}),
+            f"[a]({new}) [b]({old}2) <{new}> [c]({new}#L10) text {old} in prose\n"
+            "[d](https://github.com/o/r/blob/main/b.go)\n")
+
+    @staticmethod
+    def _robots(answer):
+        """An opener whose answer is a status code, an exception, or the body."""
+        import io
+        import urllib.error
+
+        class Opener:
+            def open(self, request, timeout=None):
+                if isinstance(answer, int):
+                    raise urllib.error.HTTPError(request.full_url, answer, "x", {}, io.BytesIO())
+                if isinstance(answer, Exception):
+                    raise answer
+                return io.BytesIO(answer)
+        return Opener()
+
+    def test_robots_txt_that_denies_or_cannot_be_read_is_not_permission(self) -> None:
+        url = "https://docs.example.test/a"
+        for code in (401, 403):
+            with self.subTest(code=code):
+                parser, why = refs.robots_of("docs.example.test", self._robots(code))
+                self.assertFalse(parser.can_fetch(refs.USER_AGENT, url))
+                self.assertIn("disallows", why)
+        for answer in (500, 503, 429, 301, ConnectionResetError("reset"), TimeoutError("slow")):
+            with self.subTest(answer=answer):
+                parser, why = refs.robots_of("docs.example.test", self._robots(answer))
+                self.assertIsNone(parser)
+                self.assertTrue(why.startswith(refs.UNREACHABLE), why)
+
+    def test_robots_txt_that_is_absent_or_read_is_obeyed_as_written(self) -> None:
+        url = "https://docs.example.test/a"
+        parser, why = refs.robots_of("docs.example.test", self._robots(404))
+        self.assertEqual((parser.can_fetch(refs.USER_AGENT, url), why), (True, ""))
+        parser, why = refs.robots_of("docs.example.test", self._robots(b"User-agent: *\nDisallow: /a\n"))
+        self.assertFalse(parser.can_fetch(refs.USER_AGENT, url))
+        self.assertTrue(parser.can_fetch(refs.USER_AGENT, "https://docs.example.test/b"))
+
+    def test_robots_txt_is_read_through_the_opener_that_refuses_other_hosts(self) -> None:
+        import inspect
+        self.assertIs(inspect.signature(refs.robots_of).parameters["opener"].default, refs.OPENER)
+
 
 if __name__ == "__main__":
     unittest.main()

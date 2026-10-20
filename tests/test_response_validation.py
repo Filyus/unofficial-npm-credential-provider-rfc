@@ -60,9 +60,11 @@ class ResponseValidationTests(unittest.TestCase):
 
         self.assertEqual(outcome, "ok")
 
-    def test_unknown_auth_type_is_rejected(self) -> None:
-        with self.assertRaises(ProtocolViolation):
+    def test_an_unknown_auth_type_fails_the_request_and_a_malformed_one_is_a_violation(self) -> None:
+        with self.assertRaises(ProviderFailure):
             self.client.handle_response(REQUEST, {"Ok": {"kind": "get", "auth": {"type": "digest", "token": "x"}}})
+        with self.assertRaises(ProtocolViolation):
+            self.client.handle_response(REQUEST, {"Ok": {"kind": "get", "auth": {"type": "Digest", "token": "x"}}})
 
     def test_login_logout_and_erase_ok_do_not_require_auth(self) -> None:
         for kind in ("login", "logout", "erase"):

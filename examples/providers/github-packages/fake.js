@@ -5,6 +5,7 @@
 //   tokens        the live classic tokens, each { user, scopes }: GET /user answers 200 with
 //                 the scopes in X-OAuth-Scopes for these, 401 for any other
 //   revoked       tokens revoked so far by POST /credentials/revoke
+//   userStatus    a status GET /user answers with whatever the token is (503: GitHub is down)
 //   apiPrefix     where the REST API is served: unset for github.com, whose API host has no
 //                 prefix, `/api/v3` for a GitHub Enterprise Server host, where /user and
 //                 /credentials/revoke answer under it and nowhere else
@@ -99,6 +100,9 @@ const createFake = (state) => {
         : json(200, { error: 'unsupported_grant_type' })
     }
     if (method === 'GET' && path === '/user') {
+      if (state.userStatus) {
+        return json(state.userStatus, { message: 'the fake is told to fail' })
+      }
       const held = token && Object.hasOwn(state.tokens, token) ? state.tokens[token] : null
       return held
         ? json(200, { login: held.user }, { 'x-oauth-scopes': held.scopes.join(', ') })

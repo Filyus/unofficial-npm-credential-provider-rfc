@@ -49,7 +49,7 @@ class OidcTests(unittest.TestCase):
         for per_registry in (False, True):
             with self.subTest(per_registry=per_registry):
                 outcome = resolve_chain(["fail"], per_registry=per_registry, stored_credential=True, oidc_token=True)
-                self.assertEqual(outcome, ("oidc", None, ()))
+                self.assertEqual((outcome.result, outcome.entry, outcome.warnings), ("oidc", None, ()))
 
     def test_without_the_exchanged_token_the_chain_decides(self) -> None:
         self.assertEqual(resolve_chain(["fail"], per_registry=True, stored_credential=False).result, "fail")
@@ -61,7 +61,12 @@ class OtpClassificationTests(unittest.TestCase):
             ('Bearer realm="x", ipaddress', "x", "eauthip"),
             ("otp", "", "otp"),
             ("OTP", "", "otp"),
-            ("ipaddress otp", "", "eauthip"),
+            ("ipaddress otp", "", "reject"),
+            ("ipaddress,otp", "", "eauthip"),
+            ('Bearer realm="x",otp', "", "otp"),
+            ('Basic realm="footprint"', "", "reject"),
+            ('Bearer realm="hipaddress"', "", "reject"),
+            ('Bearer otp="1"', "", "reject"),
             (None, "This operation requires a one-time password", "otp"),
             (None, "Unauthorized", "reject"),
             ('Bearer realm="x"', "You must provide a one-time pass to continue", "otp"),

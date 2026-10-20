@@ -1,0 +1,28 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "oauth": {
+      "next": []
+    }
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": null
+    },
+    "state": {
+      "oauth": {
+        "revoked": []
+      }
+    }
+  }
+}

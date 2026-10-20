@@ -1,0 +1,86 @@
+{
+  "hosts": [
+    "https://oauth2.googleapis.com",
+    "https://iamcredentials.googleapis.com",
+    "https://sts.googleapis.com"
+  ],
+  "now": 1792231800,
+  "config": {
+    "repositories": {
+      "https://us-central1-npm.pkg.dev/acme-prod/npm-all/": {
+        "read": {
+          "serviceAccount": "acme-reader@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1800
+        }
+      },
+      "https://us-central1-npm.pkg.dev/acme-prod/npm-private/": {
+        "read": {
+          "serviceAccount": "acme-reader@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1800
+        },
+        "write": {
+          "serviceAccount": "acme-writer@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1200
+        }
+      }
+    },
+    "adc": "fixtures/ci-adc.json"
+  },
+  "store": {
+    "gcloud": {
+      "adc": {
+        "refreshToken": "refresh-adc-1"
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "interval": 5,
+      "userCode": "WDJB-MJHT",
+      "verificationUrl": "https://www.google.com/device",
+      "account": "dev@example.test",
+      "sessions": {
+        "refresh-adc-1": {
+          "account": "dev@example.test"
+        }
+      }
+    },
+    "iam": {
+      "serviceAccounts": {
+        "acme-reader@acme-prod.iam.gserviceaccount.com": {
+          "roles": [
+            "roles/artifactregistry.reader"
+          ],
+          "tokenCreators": [
+            "dev@example.test"
+          ],
+          "tokens": [
+            "example-reader-token",
+            "example-reader-token-2"
+          ]
+        },
+        "acme-writer@acme-prod.iam.gserviceaccount.com": {
+          "roles": [
+            "roles/artifactregistry.writer"
+          ],
+          "tokenCreators": [
+            "dev@example.test"
+          ],
+          "tokens": [
+            "example-writer-token"
+          ]
+        }
+      },
+      "empty": true
+    }
+  },
+  "expect": {
+    "store": {
+      "gcloud": {
+        "adc": {
+          "refreshToken": "refresh-adc-1"
+        }
+      }
+    }
+  }
+}

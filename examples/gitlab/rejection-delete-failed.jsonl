@@ -1,0 +1,8 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-deploy-token"},"cache":"expires","expiresAt":1792198800,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"GitLab answered 500 to deleting a deploy token; it stays recorded"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true,"retry":true,"httpStatus":401}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-deploy-token-new"},"cache":"expires","expiresAt":1792202400,"operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","event":"close"}

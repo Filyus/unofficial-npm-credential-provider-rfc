@@ -11,7 +11,9 @@
     "org": "contoso"
   },
   "env": {},
-  "presence": [],
+  "presence": [
+    true
+  ],
   "store": {
     "contoso": {
       "authority": "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000",

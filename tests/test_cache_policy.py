@@ -94,9 +94,10 @@ class CachePolicyTests(unittest.TestCase):
         self.assertEqual(entry.cache, "session")
         self.assertEqual(entry.granularity, "registry")
 
-    def test_invalid_cache_policy_is_rejected(self) -> None:
+    def test_a_cache_policy_that_is_not_a_name_is_rejected(self) -> None:
+        # an unknown name is read as `never` (test_forward_compat_and_timeouts)
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(request(), ok("scope", cache="forever"))
+            self.client.handle_response(request(), ok("scope", cache="Forever"))
 
     def test_cache_expires_requires_expires_at(self) -> None:
         with self.assertRaises(ProtocolViolation):
@@ -106,9 +107,10 @@ class CachePolicyTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             self.client.handle_response(request(), ok("scope", cache="expires", expiresAt=True))
 
-    def test_invalid_granularity_is_rejected(self) -> None:
+    def test_a_granularity_that_is_not_a_name_is_rejected(self) -> None:
+        # an unknown name is read as `package` (test_forward_compat_and_timeouts)
         with self.assertRaises(ProtocolViolation):
-            self.client.handle_response(request(), ok("user"))
+            self.client.handle_response(request(), ok("User"))
 
     def test_operation_independent_must_be_boolean(self) -> None:
         with self.assertRaises(ProtocolViolation):

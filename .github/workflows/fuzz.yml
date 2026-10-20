@@ -19,6 +19,8 @@ permissions:
 
 env:
   SECONDS_EACH: ${{ inputs.seconds || '600' }}
+  # a test that needs node, cargo or jsonschema fails where it is missing, and does not skip
+  REQUIRE_TOOLS: '1'
 
 jobs:
   providers:
@@ -74,7 +76,7 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-fuzz
             poc/rust/fuzz/target
-          key: cargo-fuzz-${{ runner.os }}-0.13.2-${{ hashFiles('poc/rust/fuzz/Cargo.toml') }}
+          key: cargo-fuzz-${{ runner.os }}-0.13.2-${{ hashFiles('poc/rust/fuzz/Cargo.toml', 'poc/rust/fuzz/Cargo.lock') }}
       - run: command -v cargo-fuzz || cargo install cargo-fuzz --version 0.13.2 --locked
       - run: python3 tools/seed_fuzz_corpus.py poc/rust/fuzz/corpus/message
       - name: messages

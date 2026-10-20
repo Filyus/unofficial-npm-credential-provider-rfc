@@ -132,7 +132,7 @@ def render() -> str:
         "# What the examples show",
         "",
         "`●` a transcript the reference provider produces against its fake API; `○` a transcript only, written by hand because the registry has no reference provider (first row); "
-        "`n/a` the registry has no such situation; `task N` not done yet, tracked in the knowledge base.",
+        "`n/a` the registry has no such situation; `task N` not done yet: a gap, not a claim, planned under that number in the maintainer's own tracker (not in this repository).",
         "A cell is `n/a` or `task N` only because [coverage.json](coverage.json) says so, and "
         "`tests/test_examples.py` fails when a cell is empty without it.",
         "",

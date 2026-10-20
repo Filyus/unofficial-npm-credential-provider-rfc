@@ -26,14 +26,20 @@ permissions:
 jobs:
   conformance:
     runs-on: ubuntu-24.04
+    env:
+      # a test that needs node, cargo or jsonschema fails where it is missing, and does not skip
+      REQUIRE_TOOLS: '1'
     steps:
       - uses: actions/checkout@v7
       - name: links between the documents resolve
         run: node tools/check-links.js
       - name: generated files are fresh
         run: python3 tools/generate_from_policy.py --check
-      - name: the schema checks run rather than skip
-        run: python3 -c "import jsonschema"
+      - name: the tools the tests need are there, so that no check skips
+        run: |
+          python3 -c "import jsonschema"
+          node --version
+          cargo --version
       - name: python model
         run: python3 -m unittest discover -v
       - name: reference providers produce their transcripts

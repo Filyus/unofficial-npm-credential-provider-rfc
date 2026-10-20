@@ -44,8 +44,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..Hello::v1()
             },
         )?;
+    } else if scenario == "lists-other-form" {
+        // lists the `http:` form of the host the client asks about over `https:`
+        write_json_line(
+            &mut io::stdout(),
+            &Hello {
+                registries: Some(vec!["http://registry.example.test/".into()]),
+                ..Hello::v1()
+            },
+        )?;
     } else {
         write_json_line(&mut io::stdout(), &Hello::v1())?;
+    }
+
+    // a provider's diagnostics go to stderr, which npm logs
+    if scenario == "stderr-note" {
+        eprintln!("a note on stderr");
+    }
+
+    // says hello and then reads nothing: a client writing it a large request
+    // blocks on the full pipe
+    if scenario == "no-read" {
+        hang();
     }
 
     let stdin = io::stdin();
@@ -58,6 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Session lifecycle.
         let request = match read_json_line::<Request>(&mut reader) {
             Ok(Some(request)) => request,
+            Ok(None) if scenario == "hang-on-close" => hang(),
             Ok(None) => break,
             Err(ProtocolError::Io(error)) => return Err(error.into()),
             Err(ProtocolError::LineTooLong { limit }) => {
@@ -115,6 +136,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if scenario == "both-ok-err" {
             println!(r#"{{"Ok":{{"kind":"login"}},"Err":{{"kind":"other"}}}}"#);
+            continue;
+        }
+        // values of known fields that a newer provider may add: what npm reads
+        // them as is the client's business
+        if scenario == "unknown-error-kind" {
+            println!(r#"{{"Err":{{"kind":"permission-denied"}}}}"#);
+            continue;
+        }
+        if scenario == "unknown-cache-and-granularity" {
+            println!(
+                r#"{{"Ok":{{"kind":"get","auth":{{"type":"bearer","token":"test-token"}},"cache":"lease","granularity":"host"}}}}"#
+            );
+            continue;
+        }
+        if scenario == "unknown-auth-type" {
+            println!(r#"{{"Ok":{{"kind":"get","auth":{{"type":"digest","realm":"r"}}}}}}"#);
             continue;
         }
         if scenario == "malformed-auth" {

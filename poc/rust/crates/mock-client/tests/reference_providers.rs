@@ -92,6 +92,9 @@ fn run(name: &str, transcript: &Path) {
         }
     }
     let mut session: Option<ProviderSession> = None;
+    // what the providers wrote to stderr, which npm logs: the scenario checks
+    // that no secret of its own is in it, as run.js does
+    let mut stderr_of_providers = String::new();
     let mut provider = Some(ProviderCommand::new(
         command,
         vec!["--config".into(), setup.config_file.clone()],
@@ -109,11 +112,12 @@ fn run(name: &str, transcript: &Path) {
         let message = event.get("message").cloned();
         match (event["from"].as_str(), event.get("event")) {
             (Some("client"), Some(_)) => {
-                session
+                let noted = session
                     .take()
                     .unwrap()
-                    .close()
+                    .close_with_stderr()
                     .unwrap_or_else(|error| panic!("{at}: {error}"));
+                stderr_of_providers.push_str(&noted);
             }
             (Some("client"), None) => {
                 let raw = message.unwrap();
@@ -168,6 +172,12 @@ fn run(name: &str, transcript: &Path) {
         }
     }
 
+    writeln!(
+        helper_in,
+        "stderr {}",
+        serde_json::to_string(&stderr_of_providers).unwrap()
+    )
+    .unwrap();
     drop(helper_in);
     let mut stderr = String::new();
     helper

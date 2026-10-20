@@ -1,0 +1,18 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "presence": [
+    true
+  ],
+  "store": {},
+  "expect": {
+    "store": {
+      "tokens": null
+    }
+  },
+  "typed": [
+    "acme widgets!"
+  ]
+}

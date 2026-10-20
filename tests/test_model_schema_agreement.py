@@ -10,10 +10,10 @@ import re
 
 import copy
 import json
-import os
 from pathlib import Path
 import unittest
 
+from tests.tools_required import skip_or_fail
 from tests.protocol_model import (
     CredentialClientModel,
     ProtocolViolation,
@@ -71,11 +71,9 @@ class SchemaCrossCheckTests(unittest.TestCase):
     def test_the_schema_cross_check_ran(self) -> None:
         """Without jsonschema the two classes below pass with the schema half
         left out and say nothing. Where the library is meant to be there (CI
-        sets CI), its absence is a failure."""
-        if os.environ.get("CI") and _VALIDATOR is None:
-            self.fail("jsonschema is not installed, so the schema cross-check did not run")
+        sets REQUIRE_TOOLS=1), its absence is a failure."""
         if _VALIDATOR is None:
-            self.skipTest("jsonschema is not installed: the schema cross-check below did not run")
+            skip_or_fail(self, "jsonschema is not installed: the schema cross-check below did not run")
 
 
 class VectorsThroughModelTests(unittest.TestCase):
@@ -142,14 +140,15 @@ def rejected_cases() -> list[tuple[str, object]]:
     cases.append(("request-publish-version-empty", {**GET, "operation": "publish", "version": ""}))
     # Ok, on every kind (the cache/expiresAt rules carry no kind condition)
     for kind in KINDS:
-        cases.append((f"ok-{kind}-cache-unknown", ok_response(kind, cache="forever")))
+        cases.append((f"ok-{kind}-cache-not-an-identifier", ok_response(kind, cache="Forever")))
         cases.append((f"ok-{kind}-expires-without-expires-at", ok_response(kind, cache="expires")))
         for value in (-1, True, 1.5, "1"):
             cases.append((f"ok-{kind}-expires-at-{value!r}", ok_response(kind, cache="expires", expiresAt=value)))
-        cases.append((f"ok-{kind}-granularity-unknown", ok_response(kind, granularity="host")))
+        cases.append((f"ok-{kind}-granularity-not-an-identifier", ok_response(kind, granularity="Host")))
         cases.append((f"ok-{kind}-operation-independent-string", ok_response(kind, operationIndependent="no")))
         cases.append((f"ok-{kind}-bearer-token-empty", ok_response(kind, auth={"type": "bearer", "token": ""})))
-        cases.append((f"ok-{kind}-auth-type-unknown", ok_response(kind, auth={"type": "digest"})))
+        cases.append((f"ok-{kind}-auth-type-not-an-identifier", ok_response(kind, auth={"type": "Digest"})))
+        cases.append((f"ok-{kind}-auth-type-not-a-string", ok_response(kind, auth={"type": 1})))
     cases.append(("ok-get-missing-auth", {"Ok": {"kind": "get"}}))
     cases.append(("ok-kind-not-an-identifier", {"Ok": {"kind": "Get"}}))
     cases.append(("request-erase-without-granularity", {"v": 1, "kind": "erase", "registry": REGISTRY, "operation": "read"}))
@@ -163,6 +162,8 @@ def rejected_cases() -> list[tuple[str, object]]:
         ("bearer-token-not-string", {"type": "bearer", "token": 1}),
     ):
         cases.append((f"ok-get-{name}", ok_response("get", auth=auth)))
+    cases.append(("err-kind-not-an-identifier", {"Err": {"kind": "Permission-Denied"}}))
+    cases.append(("err-kind-empty", {"Err": {"kind": ""}}))
     cases.append(("err-message-not-string", {"Err": {"kind": "other", "message": 1}}))
     cases.append(("err-caused-by-not-strings", {"Err": {"kind": "other", "causedBy": [1]}}))
     return cases
@@ -194,6 +195,14 @@ def accepted_cases() -> list[tuple[str, object]]:
         cases.append((f"ok-{kind}-expires", ok_response(kind, cache="expires", expiresAt=0)))
         cases.append((f"ok-{kind}-basic", ok_response(kind, auth={"type": "basic", "username": "u", "password": "p"})))
     cases.append(("ok-logout-no-auth", {"Ok": {"kind": "logout"}}))
+    # unknown values of known response fields are well-formed: the client reads
+    # them as the most cautious known value, or fails the request
+    cases.append(("err-kind-unknown", {"Err": {"kind": "permission-denied"}}))
+    for kind in KINDS:
+        cases.append((f"ok-{kind}-cache-unknown", ok_response(kind, cache="forever")))
+        cases.append((f"ok-{kind}-granularity-unknown", ok_response(kind, granularity="host")))
+        cases.append((f"ok-{kind}-auth-type-unknown", ok_response(kind, auth={"type": "digest"})))
+    cases.append(("ok-get-auth-type-unknown-with-members", ok_response("get", auth={"type": "oauth2", "token": 1})))
     return cases
 
 

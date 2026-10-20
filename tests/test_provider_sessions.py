@@ -20,9 +20,10 @@ from pathlib import Path
 import unittest
 
 from tests.provider_harness import UNKNOWN_OPERATIONS, Session, all_indices, node_available, run_session, scenarios
+from tests.tools_required import needs
 
 
-@unittest.skipUnless(node_available(), "node is not installed")
+@needs(node_available(), "node is not installed")
 class ProviderSessionTests(unittest.TestCase):
     def test_random_sessions_keep_the_rfc_invariants(self) -> None:
         listed = scenarios()

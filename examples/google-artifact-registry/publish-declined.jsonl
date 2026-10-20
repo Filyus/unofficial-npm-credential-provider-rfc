@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout","retry-context"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-private/","scope":"@acme","package":"web-ui","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The publish of @acme/web-ui was not confirmed. No credential was released."}}}
+{"from":"client","event":"close"}

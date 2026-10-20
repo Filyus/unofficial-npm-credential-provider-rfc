@@ -33,6 +33,8 @@ Phase 1 changes nothing for anyone who has not configured a helper, Phase 2 noth
 | [tests/](tests) | An executable Python model of the client, with transcripts; [conformance matrix](tests/conformance_matrix.md) |
 | [poc/rust](poc/rust) | A Rust client and mock provider pair |
 
+Prerequisites, as the CI workflows have them: Python 3.12 (the runner's `python3`) with `jsonschema` installed (`pip install jsonschema`); Node 24 (the Phase 1 checks also run on 22.22.2 and 26.x); a Rust toolchain that takes edition 2024 (1.85 or newer) with `rustfmt` and `clippy` for `cargo test` (a nightly with `cargo-fuzz` only for the coverage fuzzing below). Several tests **skip, not fail**, when something is missing: the schema checks without `jsonschema` (`test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement`; with `CI` set the last one fails instead), `test_differential` without `cargo` and `node`, and the helper comparison of `test_helper_differential` unless `NPM_REGISTRY_FETCH` names a checkout carrying the Phase 1 prototype (see [prototype.md](prototype.md#reproducing-the-checks)). `python -m unittest discover -v` shows each skip with its reason; a run with skips has not run those checks.
+
 ```sh
 python tools/generate_from_policy.py --check
 python -m unittest discover -v
@@ -55,7 +57,7 @@ cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz
 cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
 ```
 
-End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype, as the `token-helper` branches or the patches of `poc/patches` applied (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit):
+End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [prototype.md](prototype.md#reproducing-the-checks):
 
 ```sh
 node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>

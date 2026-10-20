@@ -64,15 +64,43 @@ const mintedKey = (registry, tier, granularity, scope, pkg) => {
 // First 00:00 UTC strictly after the limit, as GitLab's date-only expiry.
 const expiryDate = (limit) => new Date((Math.floor(limit / 86400) + 1) * 86400 * 1000).toISOString().slice(0, 10)
 
+// What a person's terminal is shown from outside the provider: a URL or a code
+// from the vendor, a name from a request. A control character in it could move
+// the cursor or rewrite the line above, so each becomes `?`.
+const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
+
+// Inside the timeout npm gives each kind of request (RFC, Session lifecycle),
+// with room to answer: an interactive `get` and `login` wait for a person.
+const budgetMs = (req) => {
+  if (req.kind === 'erase') {
+    return 8 * 1000
+  }
+  if (req.kind === 'logout' || (req.kind === 'get' && !req.interactive)) {
+    return 25 * 1000
+  }
+  return WAIT_MS
+}
+
 const start = async (args) => {
   const ctx = loadContext(args.config)
-  const instance = args.instance || ctx.config.instance
+  // `--instance https://host/` and `https://host` are one instance
+  const instance = String(args.instance || ctx.config.instance).replace(/\/+$/, '')
   const clientId = ctx.config.clientId
   const apiUrl = (path) => `${instance}/api/v4${path}`
+  // the time (on the context's clock) by which the request in hand must be
+  // answered; every call to GitLab is held to it
+  let deadline = Infinity
+  const call = (method, url, options) => ctx.request(method, url, { ...options, until: deadline === Infinity ? undefined : deadline })
+  // an account the logout has already removed from the store: what is done
+  // with it afterwards (deleting its deploy tokens, revoking) writes nothing back
+  const detached = new WeakSet()
 
   // what this provider keeps for this instance: { oauth, minted }
   const readAccount = () => ctx.readStore()[instance] || {}
   const writeAccount = (account) => {
+    if (detached.has(account)) {
+      return
+    }
     const store = ctx.readStore()
     if (account && (account.oauth || Object.keys(account.minted || {}).length)) {
       store[instance] = account
@@ -83,11 +111,16 @@ const start = async (args) => {
   }
 
   const refresh = async (account) => {
-    const res = await ctx.request('POST', `${instance}/oauth/token`, {
+    const res = await call('POST', `${instance}/oauth/token`, {
       form: { client_id: clientId, grant_type: 'refresh_token', refresh_token: account.oauth.refreshToken },
     })
-    if (res.status !== 200 || !res.json || !res.json.access_token || !res.json.refresh_token) {
+    // only the OAuth error that says the grant is dead proves the login is: a 5xx, or a
+    // 200 without tokens, says nothing about it, and `npm login` would not help
+    if (res.status === 400 && res.json && res.json.error === 'invalid_grant') {
       throw new Answer(err('other', 'GitLab did not accept the stored login; run npm login'))
+    }
+    if (res.status !== 200 || !res.json || !res.json.access_token || !res.json.refresh_token) {
+      throw new Answer(err('other', `GitLab answered ${res.status} to refreshing the stored login; try again, and run npm login only if it keeps failing`))
     }
     // the refresh replaces both tokens: the new refresh token is stored
     // before anything else is done with the access token
@@ -109,10 +142,10 @@ const start = async (args) => {
   // one call with the access token; a 401 is checked once with a refresh
   // before it is believed
   const api = async (account, method, path, body) => {
-    let res = await ctx.request(method, apiUrl(path), { token: await accessToken(account), body })
+    let res = await call(method, apiUrl(path), { token: await accessToken(account), body })
     if (res.status === 401) {
       await refresh(account)
-      res = await ctx.request(method, apiUrl(path), { token: account.oauth.accessToken, body })
+      res = await call(method, apiUrl(path), { token: account.oauth.accessToken, body })
     }
     return res
   }
@@ -147,6 +180,17 @@ const start = async (args) => {
     writeAccount(account)
   }
 
+  // user presence for a write, as every write credential of this provider is
+  // released only on it where a person is there to give it: null once given,
+  // else the answer to send
+  const presence = async (question) => {
+    const answer = await ctx.confirmWithin(question, WAIT_MS)
+    if (answer === null) {
+      return err('other', 'the person did not answer within 4 minutes 30 seconds')
+    }
+    return answer ? null : err('other', 'the person declined a write credential')
+  }
+
   const get = async (req) => {
     const target = parseTarget(req.registry, instance)
     if (!target) {
@@ -156,11 +200,26 @@ const start = async (args) => {
     if (!write && !READ_OPERATIONS.has(req.operation)) {
       return err('operation-not-supported')
     }
+    const what = plain(`${req.scope ? `${req.scope}/` : ''}${req.package}${req.version ? `@${req.version}` : ''}`)
 
     if (process.env.CI_JOB_TOKEN) {
       // the job's own project on the job's own host, and nothing else
       if (process.env.CI_SERVER_HOST !== target.host || process.env.CI_PROJECT_ID !== target.projectId) {
         return err('not-found', 'the job token serves only its own project')
+      }
+      // the job token is the only credential here: one GitLab has just refused is not
+      // handed out again, since the retry could only fail the same way
+      if (req.retry) {
+        return err('other', `GitLab refused the job token with ${req.httpStatus}; the provider has no other credential to release for this request`)
+      }
+      // a pipeline authorizes its own publish and has nobody to ask. A request that
+      // says a person is there is not a pipeline's: the variable is the environment's,
+      // and a write on its strength needs the presence every other write here needs
+      if (write && req.interactive) {
+        const refused = await presence(`Use the CI job token to write packages to project ${target.projectId}, for ${req.operation} of ${what}?`)
+        if (refused) {
+          return refused
+        }
       }
       return ok('get', {
         auth: { type: 'bearer', token: process.env.CI_JOB_TOKEN },
@@ -172,34 +231,27 @@ const start = async (args) => {
 
     const account = readAccount()
     if (!account.oauth) {
-      return err('not-found')
+      // a retry is never `not-found`: what the rejected credential came from is gone
+      return req.retry ? err('other', 'no login is stored any more for this request; run npm login') : err('not-found')
     }
     if (write) {
       if (!req.interactive) {
         return err('other', 'a write credential needs the person to confirm, and this request is not interactive')
       }
-      const what = `${req.scope ? `${req.scope}/` : ''}${req.package}${req.version ? `@${req.version}` : ''}`
-      const answer = await ctx.confirmWithin(
-        `Create a deploy token that can write packages to project ${target.projectId}, for ${req.operation} of ${what}?`,
-        WAIT_MS,
-      )
-      if (answer === null) {
-        return err('other', 'the person did not answer within 4 minutes 30 seconds')
-      }
-      if (!answer) {
-        return err('other', 'the person declined a write credential')
+      const refused = await presence(`Create a deploy token that can write packages to project ${target.projectId}, for ${req.operation} of ${what}?`)
+      if (refused) {
+        return refused
       }
     }
 
     const tier = write ? 'write' : 'read'
     const granularity = write ? 'package' : req.scope ? 'scope' : 'registry'
     const key = mintedKey(req.registry, tier, granularity, req.scope, req.package)
-    // a retry after a rejection that sent no erase (a 403), or a second get
-    // for the same context: the token held for it is not handed out again.
-    // A 401 retry follows the erase that already deleted it.
-    if (!(req.retry && req.httpStatus === 401)) {
-      await release(account, key)
-    }
+    // the token held for this context is deleted before another is made, whether
+    // the get is a second one, a retry after a 403 (no erase came) or one after a 401
+    // (the erase deleted it, and the record with it). One whose deletion failed
+    // stays recorded, so it is tried again here and never overwritten and lost.
+    await release(account, key)
     const limit = ctx.now() + READ_LIFETIME
     const minted = await mint(account, target.projectId, tier, limit)
     account.minted = { ...account.minted, [key]: { id: minted.id, projectId: target.projectId } }
@@ -231,10 +283,16 @@ const start = async (args) => {
     if (!parseTarget(req.registry, instance)) {
       return err('url-not-supported')
     }
+    // a token the person supplied is not something this provider can use: it
+    // turns an OAuth login into deploy tokens, and a pasted token is neither. It is
+    // said, not dropped while a browser login is started in its place.
+    if (req.token) {
+      return err('other', 'this provider takes no pasted token: it mints deploy tokens from an OAuth login; run npm login without one')
+    }
     if (!req.interactive) {
       return err('other', 'login needs the person to approve it in a browser')
     }
-    const device = await ctx.request('POST', `${instance}/oauth/authorize_device`, {
+    const device = await call('POST', `${instance}/oauth/authorize_device`, {
       form: { client_id: clientId, scope: 'api' },
     })
     if (device.status !== 200 || !device.json || !device.json.device_code) {
@@ -242,7 +300,7 @@ const start = async (args) => {
     }
     // with no terminal to show the code on nobody can approve it: stop before polling,
     // with nothing stored; the unused device code expires at GitLab on its own
-    if (!ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)) {
+    if (!ctx.showToPerson(`Open ${plain(device.json.verification_uri)} and enter the code ${plain(device.json.user_code)}`)) {
       return err('other', 'There is no terminal to show the sign-in on; run npm login from a terminal.')
     }
     let wait = (device.json.interval ?? 5) * 1000
@@ -251,7 +309,10 @@ const start = async (args) => {
     const until = ctx.clockMs() + Math.min((device.json.expires_in ?? 300) * 1000, WAIT_MS)
     for (let attempt = 0; attempt < 120 && ctx.clockMs() + wait <= until; attempt += 1) {
       await ctx.sleep(wait)
+      // a poll that hangs is cut at 15 s, so the last one, which can start at the
+      // login's 4:30, ends inside npm's 5 minutes
       const res = await ctx.request('POST', `${instance}/oauth/token`, {
+        timeoutMs: 15000,
         form: {
           client_id: clientId,
           grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -286,24 +347,31 @@ const start = async (args) => {
     if (!account.oauth && !Object.keys(account.minted || {}).length) {
       return err('not-found')
     }
-    // best effort throughout: what cannot be done is warned about, and the
-    // local credentials go all the same
-    for (const key of Object.keys(account.minted || {})) {
+    // the local credentials go first, so that nothing the vendor does or fails to do
+    // keeps them: what is left to do, deleting the deploy tokens and revoking the
+    // OAuth tokens, is done with a copy that writes nothing back, and is best effort
+    // throughout. A deploy token whose deletion fails is not recorded anywhere
+    // afterwards, since nothing could authorize deleting it once the login is
+    // revoked; it ends on its own date, and the log line says so.
+    const held = structuredClone(account)
+    detached.add(held)
+    writeAccount(null)
+    for (const key of Object.keys(held.minted || {})) {
       try {
-        await release(account, key)
+        await release(held, key)
       } catch (error) {
         log('logout: a deploy token could not be deleted; it expires on its own date')
       }
     }
     for (const [hint, token] of [
-      ['access_token', account.oauth && account.oauth.accessToken],
-      ['refresh_token', account.oauth && account.oauth.refreshToken],
+      ['access_token', held.oauth && held.oauth.accessToken],
+      ['refresh_token', held.oauth && held.oauth.refreshToken],
     ]) {
       if (!token) {
         continue
       }
       try {
-        const res = await ctx.request('POST', `${instance}/oauth/revoke`, {
+        const res = await call('POST', `${instance}/oauth/revoke`, {
           form: { client_id: clientId, token, token_type_hint: hint },
         })
         if (res.status !== 200) {
@@ -313,12 +381,12 @@ const start = async (args) => {
         log(`logout: the ${hint} could not be revoked`)
       }
     }
-    writeAccount(null)
     return ok('logout')
   }
 
   // an answer raised from a helper is that handler's answer
   const guarded = (handler) => async (req) => {
+    deadline = ctx.clockMs() + budgetMs(req)
     try {
       return await handler(req)
     } catch (error) {

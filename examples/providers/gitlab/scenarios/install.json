@@ -4,7 +4,7 @@
   ],
   "now": 1792195200,
   "config": {
-    "instance": "https://gitlab.example.com",
+    "instance": "https://gitlab.example.com/",
     "clientId": "npm-credential-provider-gitlab"
   },
   "env": {},

@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.corp.example.com/","interactive":true,"token":"example-pasted-token"}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"This provider takes no pasted token: it signs in at the identity provider. Run 'npm login' without one."}}}
+{"from":"client","event":"close"}

@@ -20,9 +20,10 @@ from __future__ import annotations
 import unittest
 
 from tests.provider_harness import all_indices, node_available, run_session, scenarios
+from tests.tools_required import needs
 
 
-@unittest.skipUnless(node_available(), "node is not installed")
+@needs(node_available(), "node is not installed")
 class HostileInputTests(unittest.TestCase):
     def test_hostile_lines_get_an_error_and_the_session_goes_on(self) -> None:
         listed = scenarios()

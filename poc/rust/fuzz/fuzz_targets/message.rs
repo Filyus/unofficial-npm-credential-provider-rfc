@@ -38,11 +38,19 @@ fuzz_target!(|data: &[u8]| {
                 let _ = negotiate(&hello);
                 if hello.validate().is_ok() {
                     again(&hello);
+                    // an entry with no canonical form (a port over 65535) serves
+                    // nothing, not even itself; one that serves itself serves
+                    // what lies below it, and matching never panics on a
+                    // URL that is no entry
                     for entry in hello.registries.iter().flatten() {
-                        assert!(
-                            hello.serves(entry),
-                            "a hello does not serve a registry it lists"
-                        );
+                        if hello.serves(entry) {
+                            let slash = if entry.ends_with('/') { "" } else { "/" };
+                            let below = format!("{entry}{slash}x");
+                            assert!(
+                                hello.serves(&below),
+                                "a hello serves {entry:?} and not a path below it"
+                            );
+                        }
                     }
                 }
                 let _ = hello.serves(&String::from_utf8_lossy(line));

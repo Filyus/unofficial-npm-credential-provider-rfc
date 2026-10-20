@@ -1,0 +1,32 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "presence": [
+    true
+  ],
+  "store": {},
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "read",
+          "token": "example-pasted-token",
+          "selects": {
+            "scopes": [
+              "@acme"
+            ],
+            "packages": [
+              "@acme-tools/lint-rules"
+            ]
+          },
+          "issuedAt": 1792238400
+        }
+      ]
+    }
+  },
+  "typed": [
+    "@acme, @acme-tools/lint-rules"
+  ]
+}

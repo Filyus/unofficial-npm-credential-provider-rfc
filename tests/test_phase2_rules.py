@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from tests.generated_policy import LINE_SIZE_MINIMUM, SENTINEL_ARGUMENT, TIMEOUT_KILLS_BEFORE_NO_RESTART
 from tests.protocol_model import (
@@ -11,6 +12,7 @@ from tests.protocol_model import (
     CredentialClientModel,
     DeclinedRegistries,
     ProtocolViolation,
+    ProviderListing,
     ProviderRestarts,
     RequestContext,
     rejection_action,
@@ -65,6 +67,15 @@ class CacheBindingTests(unittest.TestCase):
         self.assertIsNone(model.lookup("http://registry.example.test/", "@scope", "pkg", "read"))
         self.assertTrue(POLICY["cache"]["schemeInKey"])
 
+    def test_the_policy_decides_whether_the_scheme_is_part_of_the_key(self):
+        # the model reads `cache.schemeInKey`: without it the two forms share an entry
+        from tests import protocol_model
+
+        with mock.patch.object(protocol_model, "SCHEME_IN_CACHE_KEY", False):
+            model = client()
+            get(model, "read", granularity="registry", registry="https://registry.example.test/")
+            self.assertIsNotNone(model.lookup("http://registry.example.test/", "@scope", "pkg", "read"))
+
     def test_queued_misses_find_the_scope_answer_ahead_of_them(self):
         model = client()
         get(model, "read", package="first", granularity="scope")
@@ -117,7 +128,7 @@ class RejectionTests(unittest.TestCase):
         cases = [
             ((401,), (True, True, "rejected")),
             ((401, "otp"), (False, False, "otp-prompt")),
-            ((401, "ipaddress otp"), (False, False, "eauthip")),
+            ((401, "ipaddress, otp"), (False, False, "eauthip")),
             ((403,), (False, True, "forbidden")),
             ((403, None, None, True), (False, False, "forbidden")),
         ]
@@ -158,32 +169,167 @@ class HelloRegistriesTests(unittest.TestCase):
         self.assertEqual(client(registries=[]).request_or_decline(RequestContext(registry=REGISTRY)), "try-next-provider")
         self.assertIsInstance(client().request_or_decline(RequestContext(registry=REGISTRY)), dict)
 
-    def test_the_policy_says_the_fallback_warning_is_limited_to_listed_hosts(self):
-        policy = json.loads((Path(__file__).resolve().parents[1] / "spec" / "policy-v1.json").read_text(encoding="utf-8"))
-        self.assertIs(policy["fallback"]["globalChainWarningOnlyWhenAProviderListsTheHost"], True)
+    def test_the_policy_says_when_the_fallback_warning_is_limited(self):
+        fallback = POLICY["fallback"]
+        key = "globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries"
+        self.assertIs(fallback[key], True)
+        self.assertNotIn("globalChainWarningOnlyWhenAProviderListsTheHost", fallback)
+        self.assertEqual(fallback["globalChainAllUrlNotSupportedOnListedHost"], "fail")
 
-    def test_the_fallback_warning_is_limited_to_hosts_a_listing_provider_serves(self):
-        warn = lambda host, listed: resolve_chain(["try-next-provider"], per_registry=False, stored_credential=True,
-                                                 registry_host=host, listed_hosts=listed).warnings
-        self.assertTrue(warn("gitlab.example.com", frozenset({"gitlab.example.com"})))
-        self.assertFalse(warn("registry.npmjs.org", frozenset({"gitlab.example.com"})))
-        self.assertTrue(warn("registry.npmjs.org", None), "a provider without a list leaves the warning on")
+    def test_the_fallback_warning_is_dropped_only_when_every_provider_lists_its_registries(self):
+        def warn(registry, *lists):
+            providers = [ProviderListing(f"p{n}", registries) for n, registries in enumerate(lists)]
+            return resolve_chain(["try-next-provider"] * len(lists), per_registry=False, stored_credential=True,
+                                 registry=registry, providers=providers)
+
+        gitlab = ["https://gitlab.example.com/"]
+        outcome = warn("https://registry.npmjs.org/", gitlab, ["https://other.example.com/"])
+        self.assertEqual((outcome.result, outcome.warnings), ("stored-credential", ()), "every provider lists, none this host")
+        for lists in ((gitlab, None), (None,)):
+            outcome = warn("https://registry.npmjs.org/", *lists)
+            self.assertEqual(outcome.result, "stored-credential")
+            self.assertTrue(outcome.warnings, "a provider without a list leaves the warning on")
+        # without the hellos the chain knows nothing and warns, as before
+        self.assertTrue(resolve_chain(["try-next-provider"], per_registry=False, stored_credential=True).warnings)
+
+
+class ListedHostFallbackTests(unittest.TestCase):
+    """A global chain every provider of which declined the registry sends no stored
+    credential where some provider's hello lists the registry's host."""
+
+    LISTS = ["https://registry.example.test/npm/"]
+
+    def chain(self, registry, *lists, stored=True, answers=None):
+        providers = [ProviderListing(f"p{n}", registries) for n, registries in enumerate(lists)]
+        return resolve_chain(answers or ["try-next-provider"] * len(lists), per_registry=False, stored_credential=stored,
+                             registry=registry, providers=providers)
+
+    def test_the_http_form_of_a_listed_https_host_fails(self):
+        outcome = self.chain("http://registry.example.test/npm/", self.LISTS)
+        self.assertEqual(outcome.result, "fail")
+        self.assertEqual(outcome.warnings, ())
+        self.assertIn("p0", outcome.message)
+        self.assertIn("https://registry.example.test/npm/", outcome.message, "it names the forms the provider lists")
+        self.assertIn("no stored credential", outcome.message)
+
+    def test_another_path_on_a_listed_host_fails(self):
+        for registry in ("https://registry.example.test/other/", "https://REGISTRY.example.test/", "https://registry.example.test:8443/npm/"):
+            with self.subTest(registry=registry):
+                self.assertEqual(self.chain(registry, self.LISTS).result, "fail")
+
+    def test_it_names_every_provider_that_lists_the_host_and_not_the_others(self):
+        outcome = self.chain("http://registry.example.test/", ["https://a.example.test/"], self.LISTS,
+                             ["http://registry.example.test:81/"])
+        self.assertEqual(outcome.result, "fail")
+        self.assertIn("p1 lists https://registry.example.test/npm/", outcome.message)
+        self.assertIn("p2 lists http://registry.example.test:81/", outcome.message)
+        self.assertNotIn("p0", outcome.message)
+
+    def test_it_fails_with_or_without_a_stored_credential(self):
+        self.assertEqual(self.chain("http://registry.example.test/npm/", self.LISTS, stored=False).result, "fail")
+
+    def test_an_unlisted_host_still_falls_back_with_the_warning(self):
+        outcome = self.chain("https://registry.npmjs.org/", self.LISTS, None)
+        self.assertEqual(outcome.result, "stored-credential")
+        self.assertEqual(len(outcome.warnings), 1)
+        self.assertEqual(self.chain("https://registry.npmjs.org/", None).result, "stored-credential")
+        self.assertEqual(self.chain("https://registry.npmjs.org/", None, stored=False).result, "anonymous")
+
+    def test_a_listed_npm_token_entry_is_not_affected(self):
+        outcome = self.chain("http://registry.example.test/npm/", self.LISTS, answers=["try-next-provider", "npm:token"])
+        self.assertEqual(outcome.result, "stored-credential", "the user put the stored credential in the chain")
+
+    def test_a_provider_that_answered_ok_or_not_found_decides_as_before(self):
+        self.assertEqual(self.chain("http://registry.example.test/npm/", self.LISTS, None,
+                                    answers=["try-next-provider", "ok"]).result, "ok")
+        outcome = self.chain("http://registry.example.test/npm/", self.LISTS, answers=["try-next-provider-not-found"])
+        self.assertEqual(outcome.result, "fail", "not-found at the end fails without the opt-in")
+        outcome = resolve_chain(["try-next-provider-not-found"], per_registry=False, stored_credential=True,
+                                legacy_fallback=True, registry="http://registry.example.test/npm/",
+                                providers=[ProviderListing("p0", self.LISTS)])
+        self.assertEqual(outcome.result, "stored-credential", "the legacy opt-in is for not-found, not for a declined form")
+
+    def test_a_provider_whose_hello_leaves_the_registry_out_is_declined_without_a_message(self):
+        # the whole path: the hello lists https, the lockfile URL is http
+        model = client(registries=self.LISTS)
+        registry = "http://registry.example.test/npm/"
+        self.assertEqual(model.request_or_decline(RequestContext(registry=registry)), "try-next-provider")
+        outcome = self.chain(registry, self.LISTS)
+        self.assertEqual(outcome.result, "fail")
+
+
+class NotFoundMemoTests(unittest.TestCase):
+    """`not-found` is remembered per provider, registry and scope for the command."""
+
+    def ask(self, model, declined, provider, scope, package, answer):
+        context = RequestContext(registry=REGISTRY, scope=scope, package=package)
+        request = model.request_or_decline(context, declined, provider)
+        if isinstance(request, str):
+            return request, False
+        return model.answer_in_chain(request, answer, declined, provider), True
+
+    def test_a_provider_that_holds_one_scope_is_asked_once_per_other_scope(self):
+        self.assertEqual(POLICY["chain"]["notFoundRemembered"], "per-provider-registry-and-scope-for-the-command")
+        model, declined = client(), DeclinedRegistries()
+        not_found = {"Err": {"kind": "not-found"}}
+        first = self.ask(model, declined, "gitlab", "@a", "x", not_found)
+        again = self.ask(model, declined, "gitlab", "@a", "y", not_found)
+        other_scope = self.ask(model, declined, "gitlab", "@b", "x", not_found)
+        self.assertEqual(first, ("try-next-provider-not-found", True))
+        self.assertEqual(again, ("try-next-provider-not-found", False), "@a/y is not asked: the answer is remembered")
+        self.assertEqual(other_scope, ("try-next-provider-not-found", True), "@b is a scope of its own")
+        self.assertEqual(self.ask(model, declined, "gitlab", "@b", "z", not_found)[1], False)
+
+    def test_an_unscoped_package_is_no_scope_and_not_a_scope_named_none(self):
+        model, declined = client(), DeclinedRegistries()
+        not_found = {"Err": {"kind": "not-found"}}
+        self.assertTrue(self.ask(model, declined, "p", None, "left-pad", not_found)[1])
+        self.assertFalse(self.ask(model, declined, "p", None, "lodash", not_found)[1])
+        self.assertTrue(self.ask(model, declined, "p", "@a", "x", not_found)[1], "a scope is asked even after the unscoped")
+
+    def test_it_is_per_provider_and_per_registry(self):
+        model, declined = client(), DeclinedRegistries()
+        not_found = {"Err": {"kind": "not-found"}}
+        self.ask(model, declined, "one", "@a", "x", not_found)
+        self.assertTrue(self.ask(model, declined, "two", "@a", "x", not_found)[1], "another provider is asked")
+        self.assertTrue(declined.should_ask("one", "https://other.example.test/", "@a"), "another registry too")
+
+    def test_a_remembered_not_found_still_counts_for_the_end_of_the_chain(self):
+        model, declined = client(), DeclinedRegistries()
+        self.ask(model, declined, "p", "@a", "x", {"Err": {"kind": "not-found"}})
+        remembered, _ = self.ask(model, declined, "p", "@a", "y", {"Err": {"kind": "not-found"}})
+        self.assertEqual(resolve_chain([remembered], per_registry=False, stored_credential=True).result, "fail")
+
+    def test_an_ok_is_not_remembered_and_url_not_supported_stays_per_registry(self):
+        model, declined = client(), DeclinedRegistries()
+        ok = {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "t"}, "granularity": "package"}}
+        self.assertEqual(self.ask(model, declined, "p", "@a", "x", ok), ("ok", True))
+        self.assertTrue(declined.should_ask("p", REGISTRY, "@a"))
+        self.ask(model, declined, "q", "@a", "x", {"Err": {"kind": "url-not-supported"}})
+        self.assertFalse(declined.should_ask("q", REGISTRY, "@zzz"), "the registry's decline holds for every scope")
+
+    def test_an_erase_answered_not_found_is_not_remembered(self):
+        model, declined = client(), DeclinedRegistries()
+        erase = {"v": 1, "kind": "erase", "registry": REGISTRY, "scope": "@a", "operation": "read", "granularity": "scope"}
+        model.answer_in_chain(erase, {"Err": {"kind": "not-found"}}, declined, "p")
+        self.assertTrue(declined.should_ask("p", REGISTRY, "@a"))
 
 
 class SessionTests(unittest.TestCase):
     def test_killed_twice_for_a_timeout_is_not_started_again(self):
         restarts = ProviderRestarts()
-        self.assertEqual(restarts.on_timeout(queued=3), 3, "the queued requests fail")
+        self.assertEqual(restarts.on_timeout(queued=["a", "b", "c"]), ["a", "b", "c"], "the queued requests fail")
         self.assertTrue(restarts.may_start(), "a first kill, at hello, allows a new session")
-        restarts.on_timeout(queued=0)
+        self.assertEqual(restarts.on_timeout(queued=[]), [])
         self.assertFalse(restarts.may_start())
+        self.assertEqual((restarts.kills, restarts.failed), (2, ["a", "b", "c"]))
         self.assertEqual(TIMEOUT_KILLS_BEFORE_NO_RESTART, 2)
         self.assertEqual(POLICY["credentialProvider"]["cacheAfterTimeout"], "keep")
 
     def test_policy_numbers(self):
         self.assertEqual(LINE_SIZE_MINIMUM, 1024 * 1024)
         self.assertEqual(SENTINEL_ARGUMENT, "--npm-credential-provider")
-        self.assertIn("TTY", POLICY["nonInteractive"]["interactiveRule"])
+        self.assertEqual(POLICY["nonInteractive"]["interactiveRule"], "stdin and stdout are TTYs and no CI is detected")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The OAuth app has the device flow disabled (device_flow_disabled). Enable it in the app settings, or log in with a token."}}}
+{"from":"client","event":"close"}

@@ -13,6 +13,10 @@
 // would trust) plus one EFFECT case where npm loads ~/.npmrc as both project
 // and user config because HOME is spelled with an 8.3 name: the file is the
 // user's own, so trusting it is right.
+//
+// NPM_CLI defaults to a checkout named npm-cli next to this repository's
+// directory (<repo>/../npm-cli). The 8.3 short-name cases need cmd.exe: on
+// Linux and macOS they are not generated, and the run says so once at start.
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
@@ -107,12 +111,14 @@ const SHORT = new Map()
 const shortOf = p => {
   if (SHORT.has(p)) return SHORT.get(p)
   let s = null
+  if (process.platform !== 'win32') return s
   try {
     s = execSync(`cmd /c for %I in ("${p}") do @echo %~sI`, { encoding: 'utf8' }).trim()
   } catch {}
   SHORT.set(p, s)
   return s
 }
+if (process.platform !== 'win32') console.log('not Windows: the 8.3 short-name cases are skipped')
 for (const d of Object.values(DIRS)) shortOf(d)
 for (const d of Object.values(PREFIXES)) shortOf(d)
 

@@ -29,13 +29,10 @@
   "clock": [
     1792231800,
     1792231800,
-    1792235400
+    1792232800
   ],
   "store": {
     "gcloud": {
-      "credentials": {
-        "refreshToken": "refresh-gcloud-1"
-      },
       "adc": {
         "refreshToken": "refresh-adc-1"
       }

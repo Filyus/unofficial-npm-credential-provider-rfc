@@ -20,8 +20,10 @@
 // terminal with `ctx.askWithin`, inside the login's budget (the RFC gives a
 // login five minutes; the provider takes 4:30, `loginSeconds` in a run). A
 // registry with 2FA answers 401 with `WWW-Authenticate: otp`; the provider asks
-// for the one-time password once and repeats that call with `npm-otp`, and a
-// code that is not typed, or not accepted, is answered `other`. The operator's CI provisioning is
+// for a one-time password and repeats that call with `npm-otp`, a fresh code for
+// each call that is challenged (Verdaccio accepts a TOTP step once), and a code
+// that is not typed, or not accepted, is answered `other`. The passwords and
+// codes are asked without echo where the terminal allows it (`secret`). The operator's CI provisioning is
 // `ciAccount`, the name of the account whose full token the machine holds.
 
 const { serve, ok, err, log } = require('../lib/protocol.js')
@@ -36,6 +38,8 @@ const VERBS = { publish: 'publish to', stage: 'stage to' }
 // An unverified `exp` is never trusted past this, nor a token with less than
 // this left released: npm stops using an entry a minute before it expires.
 const MARGIN_SECONDS = 60
+// the presence prompt of an interactive `get`, inside npm's 5 minutes
+const PRESENCE_MS = 4.5 * 60 * 1000
 const CEILING_SECONDS = 30 * 24 * 3600
 
 // `exp` of a JWT, read without verifying it, or null for any other token: the
@@ -176,7 +180,11 @@ const start = (args) => {
     }
 
     const subject = req.package ? ` ${req.scope ? `${req.scope}/` : ''}${req.package}${req.version ? `@${req.version}` : ''}` : ''
-    if (!(await ctx.confirm(`Release the full Verdaccio token to ${req.operation}${subject} at ${registry}?`))) {
+    const approved = await ctx.confirmWithin(`Release the full Verdaccio token to ${req.operation}${subject} at ${registry}?`, PRESENCE_MS)
+    if (approved === null) {
+      return err('other', `The full Verdaccio token for ${req.operation}${subject} was not approved within 4 minutes 30 seconds.`)
+    }
+    if (!approved) {
       return err('other', `The person did not approve the full Verdaccio token for ${req.operation}${subject}.`)
     }
     return release(req, token, tier)
@@ -206,8 +214,12 @@ const start = (args) => {
     const tokens = account.tokens || {}
     for (const tier of TIERS) {
       const entry = tokens[tier]
-      if (!entry || !entry.key || !tokens.full) {
-        log(`verdaccio: the ${tier} token was not revoked at the registry: it has no key, or there is no full token to authenticate the revocation`)
+      if (!entry) {
+        // never held (a supplied token is one full token): nothing to revoke
+        continue
+      }
+      if (!entry.key || !tokens.full) {
+        log(`verdaccio: the ${tier} token was not revoked at the registry: its key is not known, or there is no full token to authenticate the revocation`)
         continue
       }
       try {
@@ -258,8 +270,8 @@ const start = (args) => {
     // (npm gives a login five minutes; 4:30 leaves it room to answer). A line
     // never typed in time, or an empty one, is a question unanswered.
     const until = ctx.clockMs() + (ctx.config.loginSeconds ?? 270) * 1000
-    const typedLine = async (question) => {
-      const line = await ctx.askWithin(question, Math.max(0, until - ctx.clockMs()))
+    const typedLine = async (question, secret = false) => {
+      const line = await ctx.askWithin(question, Math.max(0, until - ctx.clockMs()), { secret })
       return typeof line === 'string' && line !== '' ? line : null
     }
     const unanswered = (what) => err('other', `No ${what} was typed for ${registry}. Nothing was stored. Run npm login again.`)
@@ -267,29 +279,29 @@ const start = (args) => {
     if (username === null) {
       return unanswered('username')
     }
-    const password = await typedLine(`Verdaccio password for ${registry}:`)
+    const password = await typedLine(`Verdaccio password for ${registry}:`, true)
     if (password === null) {
       return unanswered('password')
     }
     // 2FA (experimental, off by default): a 401 whose `WWW-Authenticate` has `otp` asks for a one-time
     // password, which goes back in `npm-otp` on that call. The registry answers a wrong or
-    // missing code the same way, so a code is asked for once and sent once on each call
-    // that wants it; a second challenge means the code was not accepted.
-    let otp = null
+    // missing code the same way, so a second challenge on a call means its code was not accepted.
+    // Each call that is challenged gets a code of its own: Verdaccio refuses a TOTP step it has
+    // already accepted (its `lastUsedStep`), so one code does not serve the login and the two
+    // token calls.
     let refusedOtp = false
     const challenged = (res) => res.status === 401 && /(^|[\s,])otp($|[\s,])/i.test(res.headers['www-authenticate'] || '')
     const send = async (method, path, options) => {
-      const go = () => ctx.request(method, url(path), { ...options, ...(otp ? { headers: { 'npm-otp': otp } } : {}) })
-      let res = await go()
-      if (challenged(res) && otp === null) {
-        otp = await typedLine(`Verdaccio one-time password for ${registry}:`)
+      let res = await ctx.request(method, url(path), options)
+      if (challenged(res)) {
+        const otp = await typedLine(`Verdaccio one-time password for ${registry}:`, true)
         if (otp === null) {
           return { unanswered: true }
         }
-        res = await go()
-      }
-      if (challenged(res)) {
-        refusedOtp = true
+        res = await ctx.request(method, url(path), { ...options, headers: { 'npm-otp': otp } })
+        if (challenged(res)) {
+          refusedOtp = true
+        }
       }
       return res
     }
@@ -297,8 +309,9 @@ const start = (args) => {
     if (put.unanswered) {
       return unanswered('one-time password')
     }
+    const otpRefused = () => err('other', `Verdaccio did not accept the one-time password at ${registry}. Nothing was stored. Run npm login again.`)
     if (refusedOtp) {
-      return err('other', `Verdaccio did not accept the one-time password at ${registry}. Nothing was stored. Run npm login again.`)
+      return otpRefused()
     }
     if (put.status === 401) {
       return err('other', `Verdaccio refused the login at ${registry}: bad username or password. Nothing was stored. Run npm login again.`)
@@ -314,10 +327,17 @@ const start = (args) => {
       minted.full = await mintToken(send, loginToken, password, false)
     } catch (error) {
       if (minted.read) {
-        // the one generated token must not outlive the login that failed
-        await ctx.request('DELETE', url(`-/npm/v1/tokens/token/${encodeURIComponent(minted.read.key)}`), { token: loginToken })
+        // the one generated token must not outlive the login that failed; what fails is said, not thrown
+        try {
+          const { status } = await ctx.request('DELETE', url(`-/npm/v1/tokens/token/${encodeURIComponent(minted.read.key)}`), { token: loginToken })
+          if (status !== 200) {
+            log(`verdaccio: the read token of the failed login was not revoked at the registry (HTTP ${status})`)
+          }
+        } catch (cleanup) {
+          log(`verdaccio: could not reach the registry to revoke the read token of the failed login: ${cleanup.message}`)
+        }
       }
-      return err('other', error.message)
+      return refusedOtp ? otpRefused() : err('other', error.message)
     }
     if (previous) {
       await revokeAll(previous)
@@ -332,15 +352,17 @@ const start = (args) => {
       return err('url-not-supported')
     }
     const account = readAccount()
-    if (account) {
-      await revokeAll(account)
-      // only a password login made a login token; a supplied token made none
-      if (account.account) {
-        log('verdaccio: the login token cannot be revoked (DELETE /-/user/token/* does nothing); it works until the password or the server secret changes')
-      }
-      writeAccount(null)
-      held.clear()
+    if (!account) {
+      // nothing to remove
+      return err('not-found')
     }
+    await revokeAll(account)
+    // only a password login made a login token; a supplied token made none
+    if (account.account) {
+      log('verdaccio: the login token cannot be revoked (its DELETE /-/user/token/* route does nothing in the source read); it works until the password or the server secret changes')
+    }
+    writeAccount(null)
+    held.clear()
     return ok('logout')
   }
 

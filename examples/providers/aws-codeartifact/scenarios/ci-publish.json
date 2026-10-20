@@ -44,7 +44,10 @@
           "example-ci-publish-token"
         ]
       }
-    }
+    },
+    "secrets": [
+      "example-ci-secret-key"
+    ]
   },
   "expect": {
     "store": {},
@@ -83,7 +86,8 @@
           "domain": "my-domain",
           "owner": "111122223333"
         }
-      ]
+      ],
+      "leaked": []
     }
   }
 }

@@ -73,8 +73,12 @@ def render_python(policy: dict) -> str:
             f"OPERATION_INDEPENDENT_DEFAULT = {cache['operationIndependentDefault']!r}",
             f"EXPIRY_MARGIN_SECONDS = {cache['expiryMarginSeconds']!r}",
             f"TOKEN_HELPER_CONFIG_SOURCES = frozenset({policy['tokenHelper']['allowedConfigSources']!r})",
-            f"TOKEN_HELPER_TIMEOUT_SECONDS = {policy['tokenHelper']['timeoutSeconds']!r}",
             f"IDENTIFIER_PATTERN = {policy['forwardCompatibility']['identifierPattern']!r}",
+            f"UNKNOWN_ERROR_KIND = {policy['forwardCompatibility']['unknownErrorKind']!r}",
+            f"UNKNOWN_CACHE = {policy['forwardCompatibility']['unknownCache']!r}",
+            f"UNKNOWN_GRANULARITY = {policy['forwardCompatibility']['unknownGranularity']!r}",
+            f"SCHEME_IN_CACHE_KEY = {cache['schemeInKey']!r}",
+            f"GLOBAL_CHAIN_LISTED_HOST_OUTCOME = {policy['fallback']['globalChainAllUrlNotSupportedOnListedHost']!r}",
             f"TIMEOUT_SECONDS = {policy['credentialProvider']['timeoutSeconds']!r}",
             f"STORED_CREDENTIAL_ENTRY = {policy['chain']['storedCredentialEntry']!r}",
             f"OPERATION_BOUND_EXCEPT = frozenset({cache['operationBoundExcept']!r})",
@@ -113,6 +117,9 @@ def render_rust(policy: dict) -> str:
             f"pub const DEFAULT_GRANULARITY: &str = {json.dumps(cache['defaultGranularity'])};",
             f"pub const OPERATION_INDEPENDENT_DEFAULT: bool = {str(cache['operationIndependentDefault']).lower()};",
             f"pub const EXPIRY_MARGIN_SECONDS: u64 = {cache['expiryMarginSeconds']};",
+            f"pub const UNKNOWN_ERROR_KIND: &str = {json.dumps(policy['forwardCompatibility']['unknownErrorKind'])};",
+            f"pub const UNKNOWN_CACHE: &str = {json.dumps(policy['forwardCompatibility']['unknownCache'])};",
+            f"pub const UNKNOWN_GRANULARITY: &str = {json.dumps(policy['forwardCompatibility']['unknownGranularity'])};",
             f"pub const LINE_SIZE_MINIMUM: usize = {policy['limits']['lineSizeMinimum']};",
             f"pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']};",
             f"pub const SENTINEL_ARGUMENT: &str = {json.dumps(policy['credentialProvider']['sentinelArgument'])};",
@@ -421,6 +428,25 @@ def render_vectors(policy: dict) -> str:
             },
         },
         {
+            "name": "response-ok-unknown-cache-and-granularity",
+            "message": {
+                "Ok": {
+                    "kind": "get",
+                    "auth": {"type": "bearer", "token": "token"},
+                    "cache": "lease",
+                    "granularity": "host",
+                }
+            },
+        },
+        {
+            "name": "response-ok-unknown-auth-type",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "digest", "realm": "registry"}}},
+        },
+        {
+            "name": "response-err-unknown-kind",
+            "message": {"Err": {"kind": "permission-denied", "message": "unknown kind example"}},
+        },
+        {
             "name": "response-ok-basic-expires",
             "message": {
                 "Ok": {
@@ -588,8 +614,20 @@ def render_vectors(policy: dict) -> str:
             "message": {"Ok": {"auth": {"type": "bearer", "token": "token"}}},
         },
         {
-            "name": "response-unknown-error-kind",
-            "message": {"Err": {"kind": "permission-denied"}},
+            "name": "response-error-kind-not-an-identifier",
+            "message": {"Err": {"kind": "Permission-Denied"}},
+        },
+        {
+            "name": "response-cache-not-an-identifier",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}, "cache": "Lease"}},
+        },
+        {
+            "name": "response-granularity-not-an-identifier",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}, "granularity": ""}},
+        },
+        {
+            "name": "response-auth-type-not-an-identifier",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "Digest"}}},
         },
     ]
 

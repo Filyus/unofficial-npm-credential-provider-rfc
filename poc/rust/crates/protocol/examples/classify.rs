@@ -8,7 +8,9 @@
 //! the reason, or `panic` if the crate panicked on it. The message goes
 //! through `read_json_line`, the path a client or a provider reads it by, then
 //! through the validation the role has: a hello is `negotiate`d, a request is
-//! `validate`d, a response is `validate_for` a `get`.
+//! `validate_received` (what a provider may be sent: a kind or an operation this
+//! build has no variant for is a well-formed name, and one that is not a name
+//! does not parse), a response is `validate_for` a `get`.
 
 use credential_provider_protocol::{
     Hello, ProtocolError, ProviderResponse, Request, RequestKind, negotiate, read_json_line,
@@ -34,7 +36,7 @@ fn classify(role: &str, message: &[u8]) -> Result<(), String> {
             let request: Request = read_json_line(&mut line)
                 .map_err(at_the_end)?
                 .ok_or("empty")?;
-            request.validate().map_err(at_the_end)
+            request.validate_received().map_err(at_the_end)
         }
         "response" => {
             let response: ProviderResponse = read_json_line(&mut line)

@@ -72,6 +72,10 @@ const runTranscript = async (name, transcriptFile) => {
     }
     const code = await exited
     assert.equal(code, 0, `${label}: provider exited ${code}\n${stderr}`)
+    // one answer per request and nothing after the last: a line the provider
+    // wrote beyond the transcript (or after stdin closed) is a failure too
+    const extra = await lines.next()
+    assert.ok(extra.done, `${label}: the provider wrote a line the transcript does not have: ${extra.value}\n${stderr}`)
     run.finish(stderr)
   } finally {
     if (child && child.exitCode === null) {

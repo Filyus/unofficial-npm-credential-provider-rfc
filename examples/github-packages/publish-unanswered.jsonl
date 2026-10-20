@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The publish of @acme/widgets 2.4.1 was not confirmed within 4 minutes 30 seconds. No credential was released."}}}
+{"from":"client","event":"close"}

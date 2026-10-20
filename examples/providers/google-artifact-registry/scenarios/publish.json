@@ -31,9 +31,6 @@
   ],
   "store": {
     "gcloud": {
-      "credentials": {
-        "refreshToken": "refresh-gcloud-1"
-      },
       "adc": {
         "refreshToken": "refresh-adc-1"
       }

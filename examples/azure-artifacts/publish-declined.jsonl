@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.2.0","operation":"publish","command":"publish","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The publish of @contoso/ui@3.2.0 was not confirmed. No credential was released."}}}
+{"from":"client","event":"close"}

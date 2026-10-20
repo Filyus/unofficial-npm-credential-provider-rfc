@@ -28,7 +28,7 @@
         "registries": {
           "description": "The registries this provider serves. npm matches requests against them itself (scheme compared) and sends the provider nothing about any other registry. An empty list serves none.",
           "type": "array",
-          "items": { "type": "string", "pattern": "^https?://[^/?#\\s@\\\\]+(/[^?#\\s\\\\]*)?$" },
+          "items": { "type": "string", "pattern": "^https?://[^/?#\\s@\\\\]+(/[^?#\\s\\\\]*)?(?![\\s\\S])" },
           "uniqueItems": true
         }
       },
@@ -43,7 +43,7 @@
         "kind": {
           "description": "Open-ended so new kinds can be added within v1. A provider answers a kind it does not know with operation-not-supported and keeps serving. Known: login, logout, get, erase.",
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
           "examples": ["login", "logout", "get", "erase"]
         },
         "registry": {
@@ -53,7 +53,7 @@
         "scope": {
           "description": "The package's scope; absent for an unscoped package.",
           "type": "string",
-          "pattern": "^@[^/]+$"
+          "pattern": "^@[^/]+(?![\\s\\S])"
         },
         "package": {
           "type": "string",
@@ -66,7 +66,7 @@
         "operation": {
           "description": "The npm action the credential must authorize. The provider maps it to its own permission tier. Open-ended so new actions can be added within v1: a provider answers an operation it does not know with operation-not-supported, never as read. Known: read, publish, stage, stage-read, deprecate, dist-tag, unpublish, owner, access, trust, stage-reject, account.",
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
           "examples": ["read", "publish", "stage", "stage-read", "deprecate", "dist-tag", "unpublish", "owner", "access", "trust", "stage-reject", "account"]
         },
         "granularity": {
@@ -164,12 +164,15 @@
         "kind": {
           "description": "Must equal the request's kind. Open, as request kinds are: a newer client may add a kind within v1.",
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*$",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
           "examples": ["login", "logout", "get", "erase"]
         },
         "auth": { "$ref": "#/$defs/auth" },
         "cache": {
-          "enum": ["never", "session", "expires"]
+          "description": "Open: an unknown value is read as never.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
+          "examples": ["never", "session", "expires"]
         },
         "expiresAt": {
           "type": "integer",
@@ -180,7 +183,10 @@
           "type": "boolean"
         },
         "granularity": {
-          "enum": ["registry", "scope", "package"]
+          "description": "Open: an unknown value is read as package.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
+          "examples": ["registry", "scope", "package"]
         }
       },
       "allOf": [
@@ -208,7 +214,8 @@
     "auth": {
       "oneOf": [
         { "$ref": "#/$defs/bearerAuth" },
-        { "$ref": "#/$defs/basicAuth" }
+        { "$ref": "#/$defs/basicAuth" },
+        { "$ref": "#/$defs/unknownAuth" }
       ]
     },
     "bearerAuth": {
@@ -239,12 +246,28 @@
       },
       "additionalProperties": true
     },
+    "unknownAuth": {
+      "description": "An auth.type this version does not know: npm has nothing it can send, so it fails the request as an other answer naming the provider.",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
+          "not": { "enum": ["bearer", "basic"] }
+        }
+      },
+      "additionalProperties": true
+    },
     "providerErr": {
       "type": "object",
       "required": ["kind"],
       "properties": {
         "kind": {
-          "enum": ["url-not-supported", "not-found", "operation-not-supported", "other"]
+          "description": "Open: an unknown value is read as other.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
+          "examples": ["url-not-supported", "not-found", "operation-not-supported", "other"]
         },
         "message": {
           "type": "string"

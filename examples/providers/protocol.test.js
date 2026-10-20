@@ -10,7 +10,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { Readable } = require('node:stream')
 const test = require('node:test')
-const { readLines, parseRequest, validateRequest, MAX_LINE_BYTES } = require('./lib/protocol.js')
+const { readLines, parseRequest, validateRequest, MAX_LINE_BYTES, Answer, err, guarded } = require('./lib/protocol.js')
 
 const GET = { v: 1, kind: 'get', registry: 'https://r.test/', operation: 'read', interactive: true }
 const lines = async (chunks, limit) => {
@@ -111,7 +111,9 @@ test('lone surrogates and numbers beyond a double are refused wherever they are,
   assert.ok(rejected('{"v":1,"kind":"x","registry":"r","a":[{"b":1e400}]}'))
   assert.equal(rejected('{"v":1,"kind":"x","registry":"r","a":"\\ud83d\\ude00"}'), undefined)
   const deep = `{"v":1,"kind":"x","registry":"r","a":${'['.repeat(100000)}"\\ud800"${']'.repeat(100000)}}`
-  assert.ok(rejected(deep))
+  // refused for the surrogate, not for the depth: the same nesting without it is a request
+  assert.match(rejected(deep).Err.message, /lone surrogate/)
+  assert.equal(rejected(deep.replace('\\ud800', 'a')), undefined)
   const wide = `{"v":1,"kind":"x","registry":"r","a":[${'0,'.repeat(400000)}0]}`
   assert.equal(rejected(wide), undefined)
 })
@@ -120,15 +122,40 @@ test('the limit is the 1 MiB the RFC sets as the floor', () => {
   assert.equal(MAX_LINE_BYTES, 1048576)
 })
 
+test('a line of exactly 1 MiB with its newline is read, as the RFC floor requires, and the limit counts the line without it', async () => {
+  const count = async (chunks) => {
+    const found = []
+    for await (const line of readLines(Readable.from(chunks))) {
+      found.push(line.oversized ? 'OVERSIZED' : line.bytes.length)
+    }
+    return found
+  }
+  const line = (bytes) => Buffer.alloc(bytes, 0x20)
+  const nl = Buffer.from('\n')
+  // 1 MiB counting the newline: the floor every peer must accept, however the pieces fall
+  assert.deepEqual(await count([Buffer.concat([line(MAX_LINE_BYTES - 1), nl])]), [MAX_LINE_BYTES - 1])
+  assert.deepEqual(await count([line(MAX_LINE_BYTES - 1), nl]), [MAX_LINE_BYTES - 1])
+  assert.deepEqual(await count([line(1 << 19), line((1 << 19) - 1), Buffer.from('\nok\n')]), [MAX_LINE_BYTES - 1, 2])
+  // the limit is the choice of this reader (the RFC says at least 1 MiB, newline counted): it
+  // counts the bytes before the newline, so the line that is one byte over the floor is still read
+  assert.deepEqual(await count([Buffer.concat([line(MAX_LINE_BYTES), nl])]), [MAX_LINE_BYTES])
+  // and the first line over the limit is dropped whole, the next one read
+  assert.deepEqual(await count([Buffer.concat([line(MAX_LINE_BYTES + 1), nl, Buffer.from('ok\n')])]), ['OVERSIZED', 2])
+  assert.deepEqual(await count([line(MAX_LINE_BYTES + 1)]), ['OVERSIZED'])
+})
+
 test('what a handler throws is the answer, except that a parse error quotes nothing', async () => {
   const script = `
-    const { serve } = require(${JSON.stringify(path.join(__dirname, 'lib', 'protocol.js'))})
+    const { serve, Answer, err } = require(${JSON.stringify(path.join(__dirname, 'lib', 'protocol.js'))})
     serve(async () => ({
       hello: { v: [1] },
       handlers: {
         get: async (request) => {
           if (request.package === 'parse') {
             throw new SyntaxError('Unexpected token s, "client_secret: s3cr3t-value-xyz" is not valid JSON')
+          }
+          if (request.package === 'answer') {
+            throw new Answer(err('other', 'raised from a helper'))
           }
           throw new Error('the registry said no')
         },
@@ -170,6 +197,7 @@ test('what a handler throws is the answer, except that a parse error quotes noth
     assert.equal(parse.Err.kind, 'other')
     assert.ok(!JSON.stringify(parse).includes('s3cr3t'), JSON.stringify(parse))
     assert.equal((await answerTo('other')).Err.message, 'the registry said no')
+    assert.deepEqual(await answerTo('answer'), { Err: { kind: 'other', message: 'raised from a helper' } })
   } finally {
     child.kill()
     fs.rmSync(dir, { recursive: true, force: true })
@@ -238,4 +266,10 @@ test('every provider that shows a sign-in step stops when it could not be shown'
   }
   assert.ok(calls.length >= 8, `found ${calls.length} calls`)
   assert.deepEqual(calls.filter((call) => !call.checked).map((call) => call.where), [], 'a call that ignores whether the step was shown')
+})
+
+test('guarded turns a raised Answer into the answer and lets any other error through', async () => {
+  const answer = err('other', 'no')
+  assert.deepEqual(await guarded(async () => { throw new Answer(answer) })({}), answer)
+  await assert.rejects(guarded(async () => { throw new Error('boom') })({}), /boom/)
 })

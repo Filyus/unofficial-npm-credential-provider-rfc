@@ -7,6 +7,7 @@ import re
 import unittest
 
 from tests.protocol_model import load_transcript, validate_transcript
+from tests.tools_required import skip_or_fail
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
@@ -88,7 +89,7 @@ class TranscriptSchemaTests(unittest.TestCase):
         try:
             import jsonschema
         except ModuleNotFoundError as exc:
-            self.skipTest(f"jsonschema is not installed: {exc}")
+            skip_or_fail(self, f"jsonschema is not installed: {exc}")
         validators = {
             role: jsonschema.Draft202012Validator(
                 {**{k: v for k, v in SCHEMA.items() if k != "oneOf"}, "$ref": f"#/$defs/{role}"}
@@ -111,10 +112,6 @@ class TranscriptSchemaTests(unittest.TestCase):
                 with self.subTest(transcript=str(path.relative_to(ROOT)), line=number, role=role):
                     errors = sorted(validators[role].iter_errors(event["message"]), key=str)
                     self.assertEqual([e.message for e in errors], [])
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class CoverageTests(unittest.TestCase):
@@ -161,3 +158,7 @@ class CoverageTests(unittest.TestCase):
         self.assertIn("401-dead", coverage.features_of(EXAMPLES / "npmjs" / "rejection-dead-token.jsonl"))
         self.assertIn("login", coverage.features_of(EXAMPLES / "aws-codeartifact" / "login.jsonl"))
         self.assertIn("logout", coverage.features_of(EXAMPLES / "aws-codeartifact" / "login.jsonl"))
+
+
+if __name__ == "__main__":
+    unittest.main()

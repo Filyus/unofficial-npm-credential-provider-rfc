@@ -38,7 +38,10 @@
           "example-ci-token"
         ]
       }
-    }
+    },
+    "secrets": [
+      "example-ci-secret-key"
+    ]
   },
   "expect": {
     "store": {},
@@ -52,7 +55,8 @@
         }
       ],
       "assumed": [],
-      "checked": 1
+      "checked": 1,
+      "leaked": []
     }
   }
 }

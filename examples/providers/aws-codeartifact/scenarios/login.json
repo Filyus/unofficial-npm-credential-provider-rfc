@@ -48,12 +48,7 @@
   },
   "expect": {
     "store": {
-      "awsSsoCache": {
-        "dev": {
-          "accessToken": "sso-access-1",
-          "expiresAt": 1760028800
-        }
-      }
+      "awsSsoCache": null
     },
     "state": {
       "sso": {

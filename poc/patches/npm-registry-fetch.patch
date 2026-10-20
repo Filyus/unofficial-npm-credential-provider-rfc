@@ -1,4 +1,4 @@
-From 96d59c07151c2cf601930f9061a2fd6d139c59cc Mon Sep 17 00:00:00 2001
+From 5ffc89f30ed0b6e3d721aec98216cb327c1a6ea9 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -28,9 +28,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 +++
  lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  417 +++++++++++++++
- test/token-helper.js | 1164 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1721 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  426 +++++++++++++++
+ test/token-helper.js | 1172 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1738 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -262,10 +262,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..1aa85f6
+index 0000000..f0eacc3
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,426 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -482,8 +482,17 @@ index 0000000..1aa85f6
 +// environment without anything npm itself sets.
 +const NPM_SET =
 +  /^(npm_config_.*|node_options|editor|node_env|color|init_cwd|node|npm_execpath|npm_node_execpath|npm_command)$/i
-+const helperEnv = (env) =>
-+  Object.fromEntries(Object.entries(env).filter(([name]) => !NPM_SET.test(name)))
++// The helper is an absolute path, but a helper that is a script calls its tools
++// by name; when npm runs inside `npm run`, PATH leads with each
++// node_modules/.bin up the tree and npm's node-gyp-bin, so a dependency could
++// choose those tools. They are taken out of PATH, which is otherwise kept.
++const SCRIPT_PATH = /[\\/]node_modules[\\/]\.bin[\\/]?$|[\\/]node-gyp-bin[\\/]?$/i
++const withoutScriptPaths = (value, delimiter = path.delimiter) =>
++  value.split(delimiter).filter((entry) => !SCRIPT_PATH.test(entry)).join(delimiter)
++const helperEnv = (env, delimiter) =>
++  Object.fromEntries(Object.entries(env)
++    .filter(([name]) => !NPM_SET.test(name))
++    .map(([name, value]) => [name, /^path$/i.test(name) ? withoutScriptPaths(value, delimiter) : value]))
 +
 +// Stops a helper that outlived its deadline, or that printed too much. SIGTERM
 +// first, so a helper that cleans up can; SIGKILL if it ignores that. Windows
@@ -685,10 +694,10 @@ index 0000000..1aa85f6
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..ea1424e
+index 0000000..0493590
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1164 @@
+@@ -0,0 +1,1172 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1238,6 +1247,14 @@ index 0000000..ea1424e
 +    'NODE_ENV', 'COLOR', 'INIT_CWD', 'NODE', 'npm_execpath', 'npm_node_execpath', 'npm_command']
 +  const kept = { PATH: 'p', NODE_PATH: 'n', EDITORIAL: 'e' }
 +  t.same(helperEnv({ ...Object.fromEntries(dropped.map(name => [name, 'x'])), ...kept }), kept)
++})
++
++t.test('a helper\'s PATH loses the directories npm prepends for a script', async t => {
++  const posix = ['/repo/node_modules/.bin', '/repo/sub/node_modules/.bin/', '/usr/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin', '/usr/bin', '/opt/node_modules.bin']
++  t.same(helperEnv({ PATH: posix.join(':') }, ':'), { PATH: '/usr/bin:/opt/node_modules.bin' })
++  const windows = ['C:\\repo\\node_modules\\.bin', 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin']
++  t.same(helperEnv({ Path: windows.join(';') }, ';'), { Path: 'C:\\Windows\\System32' }, 'Windows spells it Path')
++  t.same(helperEnv({ PATHEXT: '.COM;.EXE' }, ';'), { PATHEXT: '.COM;.EXE' }, 'only PATH itself is filtered')
 +})
 +
 +t.test('empty output fails the request', async t => {

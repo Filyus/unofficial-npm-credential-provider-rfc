@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"]}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/","interactive":true,"token":"example-codeartifact-token"}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"A CodeArtifact token lasts at most 12 hours, so this provider does not store one. Run npm login without a token."}}}
+{"from":"client","event":"close"}

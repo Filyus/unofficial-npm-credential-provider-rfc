@@ -27,6 +27,8 @@
 //   sso.userCode, verificationUri what the device authorization shows
 //   throttle                      GetAuthorizationToken answers 429 this many times
 //   expirationFraction            added to the expiration a token answer gives
+//   secrets                       values that must never reach the fake (the secret half of
+//                                 a credential): `leaked` lists each request that carried one
 //   minted, assumed, checked      what the fake saw: authorization tokens issued
 //                                 (with caller, duration and domain), roles
 //                                 assumed (with duration, session policy and
@@ -44,6 +46,7 @@ const createFake = (state) => {
   state.minted = []
   state.assumed = []
   state.checked = 0
+  state.leaked = []
   let counter = 0
   let notBefore = null
   let tooSoon = 0
@@ -155,7 +158,7 @@ const createFake = (state) => {
     return json(400, { Error: { Code: 'InvalidAction' } })
   }
 
-  return (request) => {
+  const handle = (request) => {
     const { method, path, token, body, query, clock } = request
     if (method === 'POST' && path === '/device_authorization') {
       return json(200, {
@@ -191,6 +194,14 @@ const createFake = (state) => {
       return authorizationToken(request)
     }
     return null
+  }
+
+  return (request) => {
+    const seen = JSON.stringify([request.token, request.body, request.query, request.headers])
+    if ((state.secrets || []).some((secret) => seen.includes(secret))) {
+      state.leaked.push({ method: request.method, path: request.path })
+    }
+    return handle(request)
   }
 }
 

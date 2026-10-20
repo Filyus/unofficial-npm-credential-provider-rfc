@@ -40,7 +40,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "refs.json"
 SKIP = {".git", "target", "node_modules", ".refs", "__pycache__"}
 LINK = re.compile(r"\]\((https?://[^)\s]+)\)|<(https?://[^>\s]+)>")
-BRANCH_SOURCE = re.compile(r"^(https://github\.com/[^/]+/[^/]+/blob/)(master|main)(/.+)$")
+# Any ref that is not a full commit id: a branch moves, and so does a tag (it can be
+# deleted and made again), so only a 40-hex id keeps pointing at the file we read.
+BRANCH_SOURCE = re.compile(r"^(https://github\.com/[^/]+/[^/]+/blob/)(?![0-9a-f]{40}/)([^/]+)(/.+)$")
 PINNED_SOURCE = re.compile(r"^https://github\.com/[^/]+/[^/]+/blob/[0-9a-f]{40}/.+$")
 
 
@@ -110,6 +112,20 @@ def init() -> int:
     return 0
 
 
+def pin_text(text: str, changed: dict[str, str]) -> str:
+    """Rewrites the links whose whole target (anchor apart) is a key of `changed`; a
+    longer address that merely starts with one is another file and stays."""
+    def one(match: re.Match) -> str:
+        group = 1 if match.group(1) else 2
+        url = match.group(group)
+        base, hash_, fragment = url.partition("#")
+        if base not in changed:
+            return match.group(0)
+        start, end = match.start(group) - match.start(), match.end(group) - match.start()
+        return match.group(0)[:start] + changed[base] + hash_ + fragment + match.group(0)[end:]
+    return LINK.sub(one, text)
+
+
 def pin(day: str) -> int:
     changed: dict[str, str] = {}
     for url in cited():
@@ -117,25 +133,24 @@ def pin(day: str) -> int:
         if not match:
             continue
         owner_repo = "/".join(url.split("/")[3:5])
+        ref = match.group(2)
         path = match.group(3)[1:]
         sha = subprocess.run(
-            ["gh", "api", "--method", "GET", f"repos/{owner_repo}/commits", "-f", f"path={path}", "-f", f"until={day}T23:59:59Z", "-f", "per_page=1", "--jq", ".[0].sha"],
+            ["gh", "api", "--method", "GET", f"repos/{owner_repo}/commits", "-f", f"sha={ref}", "-f", f"path={path}", "-f", f"until={day}T23:59:59Z", "-f", "per_page=1", "--jq", ".[0].sha"],
             capture_output=True, text=True,
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
             print(f"no commit for {url} on or before {day}", file=sys.stderr)
             return 1
-        changed[url] = f"{match.group(1)}{sha}{path and '/' + path}"
+        changed[url] = f"{match.group(1)}{sha}/{path}"
     manifest = load()
     for path in documents():
         text = path.read_text(encoding="utf-8")
-        new = text
-        for old, pinned in changed.items():
-            new = new.replace(old, pinned)
+        new = pin_text(text, changed)
         if new != text:
             path.write_text(new, encoding="utf-8", newline="\n")
     for old, pinned in changed.items():
-        entry = manifest.pop(old, {"kind": "source", "cited": ""})
+        entry = manifest.pop(old, None) or {"kind": "source", "cited": first_cited(old) or time.strftime("%Y-%m-%d")}
         entry["pinned"] = day
         manifest[pinned] = entry
     save(manifest)
@@ -189,14 +204,41 @@ class SameHost(urllib.request.HTTPRedirectHandler):
 
 OPENER = urllib.request.build_opener(SameHost)
 USER_AGENT = "npm-auth-rfc-refs/1 (a private copy of pages this repository cites)"
+UNREACHABLE = "robots.txt unreachable"
+
+
+def robots_of(host: str, opener=OPENER) -> tuple[urllib.robotparser.RobotFileParser | None, str]:
+    """The rules of a host and, when there are none to obey, why the host is skipped.
+    A 2xx answer is parsed. 401 and 403 disallow everything (as the standard library
+    reads them, and the cautious reading of RFC 9309, which lets a crawler go on after
+    any 4xx). Another 4xx, 429 apart, means no rules. A 5xx, 429, a redirect to another
+    host or a network error is "unreachable", which RFC 9309 treats as disallow all:
+    the host is skipped for now and tried again on the next run."""
+    parser = urllib.robotparser.RobotFileParser(f"https://{host}/robots.txt")
+    request = urllib.request.Request(parser.url, headers={"User-Agent": USER_AGENT})
+    try:
+        with opener.open(request, timeout=30) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            parser.disallow_all = True
+            return parser, f"robots.txt disallows (HTTP {error.code})"
+        if 400 <= error.code < 500 and error.code != 429:
+            parser.allow_all = True
+            return parser, ""
+        return None, f"{UNREACHABLE}: HTTP {error.code}"
+    except (urllib.error.URLError, OSError) as error:
+        return None, f"{UNREACHABLE}: {error}"
+    parser.parse(body.decode("utf-8", errors="replace").splitlines())
+    return parser, ""
 
 
 def fetch(limit: int) -> int:
     manifest = load()
-    robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+    robots: dict[str, tuple[urllib.robotparser.RobotFileParser | None, str]] = {}
     last: dict[str, float] = {}
     refused: set[str] = set()
-    todo = [url for url, entry in manifest.items() if entry["kind"] != "source" and "sha256" not in entry and not entry.get("status")]
+    todo = [url for url, entry in manifest.items() if entry["kind"] != "source" and "sha256" not in entry and (not entry.get("status") or entry["status"].startswith(UNREACHABLE))]
     by_host: dict[str, list[str]] = {}
     for url in todo:
         by_host.setdefault(urllib.parse.urlsplit(url).netloc, []).append(url)
@@ -207,15 +249,14 @@ def fetch(limit: int) -> int:
         if host in refused:
             continue
         if host not in robots:
-            parser = urllib.robotparser.RobotFileParser(f"https://{host}/robots.txt")
-            try:
-                request = urllib.request.Request(parser.url, headers={"User-Agent": USER_AGENT})
-                parser.parse(urllib.request.urlopen(request, timeout=30).read().decode("utf-8", errors="replace").splitlines())
-                robots[host] = parser
-            except (urllib.error.URLError, OSError):
-                robots[host] = None
-        if robots[host] is not None and not robots[host].can_fetch(USER_AGENT, url):
-            manifest[url]["status"] = "robots.txt disallows"
+            robots[host] = robots_of(host)
+        parser, why = robots[host]
+        if parser is None:
+            manifest[url]["status"] = why
+            print(f"skipped ({why}): {url}")
+            continue
+        if not parser.can_fetch(USER_AGENT, url):
+            manifest[url]["status"] = why or "robots.txt disallows"
             print(f"skipped (robots.txt): {url}")
             continue
         wait = last.get(host, 0) + 2 - time.monotonic()

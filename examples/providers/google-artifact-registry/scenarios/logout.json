@@ -28,9 +28,6 @@
   },
   "store": {
     "gcloud": {
-      "credentials": {
-        "refreshToken": "refresh-gcloud-1"
-      },
       "adc": {
         "refreshToken": "refresh-adc-1"
       }
@@ -78,6 +75,13 @@
   "expect": {
     "store": {
       "gcloud": null
+    },
+    "state": {
+      "oauth": {
+        "revoked": [
+          "refresh-adc-1"
+        ]
+      }
     }
   }
 }

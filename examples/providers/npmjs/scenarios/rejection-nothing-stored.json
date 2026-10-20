@@ -1,0 +1,13 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "store": {},
+  "state": {},
+  "expect": {
+    "store": {
+      "tokens": null
+    }
+  }
+}

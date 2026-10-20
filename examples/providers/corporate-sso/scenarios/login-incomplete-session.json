@@ -1,0 +1,32 @@
+{
+  "hosts": [
+    "https://idp.corp.example.com",
+    "https://npm.corp.example.com",
+    "https://npm-eu.corp.example.com"
+  ],
+  "now": 1792196100,
+  "config": {
+    "idp": "https://idp.corp.example.com"
+  },
+  "store": {},
+  "state": {
+    "idp": {
+      "interval": 0,
+      "userCode": "WDJB-MJHT",
+      "verificationUri": "https://idp.corp.example.com/device",
+      "omit": [
+        "refresh_token"
+      ]
+    }
+  },
+  "expect": {
+    "store": {
+      "session": null
+    },
+    "state": {
+      "idp": {
+        "devices": 1
+      }
+    }
+  }
+}

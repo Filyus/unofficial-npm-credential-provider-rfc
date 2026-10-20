@@ -734,6 +734,11 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
+  "https://github.com/verdaccio/verdaccio/blob/30601b3416afa2d5384d806f1aad9df1d7116a85/packages/auth/src/tfa-store.ts": {
+    "kind": "source",
+    "cited": "2026-10-21",
+    "pinned": "2026-10-21"
+  },
   "https://github.com/verdaccio/verdaccio/blob/31e18e8bf2a78ed510c0fafc9ca0a7869617ede0/packages/plugins/htpasswd/src/utils.ts": {
     "kind": "source",
     "cited": "2026-10-20",
