@@ -16,6 +16,7 @@ const loadContext = (configPath) => {
   const storePath = path.resolve(path.dirname(configPath), config.store)
   const scripted = config.person && config.person.mode === 'scripted'
   const answers = scripted ? [...(config.person.presence || [])] : []
+  const typed = scripted ? [...(config.person.typed || [])] : []
 
   const readStore = () => {
     try {
@@ -118,8 +119,10 @@ const loadContext = (configPath) => {
     return base ? base + url.slice(origin.length) : url
   }
 
-  const request = async (method, url, { token, body, form } = {}) => {
-    const headers = {}
+  // `headers` adds to what the call sets (an `Accept`, an `npm-otp`); it cannot
+  // replace the clock header a conformance run adds
+  const request = async (method, url, { token, body, form, headers: extra } = {}) => {
+    const headers = { ...(extra || {}) }
     if (token) {
       headers.authorization = `Bearer ${token}`
     }
@@ -164,6 +167,26 @@ const loadContext = (configPath) => {
     return askTerminal(question, signal)
   }
 
+  // A line the person types on the controlling terminal: a username, a
+  // password, a one-time password. Never stdin, which belongs to the protocol.
+  // The conformance run scripts the lines ("silent": nobody types, and the
+  // provider's own deadline decides). A real terminal echoes what is typed;
+  // turning echo off is the terminal's business and is not done here.
+  const ask = async (question, signal) => {
+    if (scripted) {
+      if (!typed.length) {
+        throw new Error(`no scripted line for: ${question}`)
+      }
+      fs.appendFileSync(path.resolve(path.dirname(configPath), config.person.log), `${question}\n`)
+      const line = typed.shift()
+      return line === 'silent' ? new Promise(() => {}) : line
+    }
+    return readTerminalLine(`${question} `, signal)
+  }
+
+  // `ask` that gives up: `null` when `ms` pass first
+  const askWithin = (question, ms) => withDeadline((signal) => ask(question, signal), ms)
+
   // A browser or device-code step the person completes. Scripted runs have
   // the fake identity provider complete it; a real run would open the URL.
   // Returns whether the person could be shown it: a provider that cannot show
@@ -186,7 +209,7 @@ const loadContext = (configPath) => {
   // a presence prompt that gives up: `null` when `ms` pass first, as the RFC wants an unanswered prompt to end in `other`
   const confirmWithin = (question, ms) => withDeadline((signal) => confirm(question, signal), ms)
 
-  return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, confirmWithin, showToPerson }
+  return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, confirmWithin, ask, askWithin, showToPerson }
 }
 
 // On Windows the device names, not `CONIN$` and `CONOUT$`: Node resolves a
@@ -209,24 +232,29 @@ const writeTerminal = (text) => {
 
 // Asynchronous, so that a provider's own deadline on the prompt can fire, and
 // abortable, so that once it has the read of the terminal does not hold the
-// process until someone presses Enter.
-const askTerminal = (question, signal) =>
+// process until someone presses Enter. An aborted read gives `null`.
+const readTerminalLine = (prompt, signal) =>
   new Promise((resolve, reject) => {
-    writeTerminal(`${question} [y/N] `)
+    writeTerminal(prompt)
     const input = fs.createReadStream(terminalPaths().input)
-    let answer = ''
+    let line = ''
     input.on('data', (chunk) => {
-      answer += chunk
-      if (answer.includes('\n')) {
+      line += chunk
+      if (line.includes('\n')) {
         input.destroy()
-        resolve(/^y(es)?$/i.test(answer.trim()))
+        resolve(line.slice(0, line.indexOf('\n')).replace(/\r$/, ''))
       }
     })
     input.on('error', reject)
     signal?.addEventListener('abort', () => {
       input.destroy()
-      resolve(false)
+      resolve(null)
     }, { once: true })
   })
+
+const askTerminal = async (question, signal) => {
+  const answer = await readTerminalLine(`${question} [y/N] `, signal)
+  return answer !== null && /^y(es)?$/i.test(answer.trim())
+}
 
 module.exports = { loadContext }

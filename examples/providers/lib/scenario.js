@@ -63,6 +63,11 @@ const collectSecrets = (value, secretContext = false, found = new Set()) => {
   return found
 }
 
+// a typed line marked `secret` (a password, a one-time password) must never reach stderr
+const typedSecrets = (scenario) => ({
+  token: (scenario.typed || []).filter((line) => typeof line === 'object' && line.secret).map((line) => line.line),
+})
+
 const fixtureSecrets = (name) => {
   const dir = path.join(providers, name, 'fixtures')
   const found = new Set()
@@ -106,7 +111,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
       store: 'store.json',
       endpoints,
       clock: 'clock',
-      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log', terminal: scenario.terminal },
+      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log', terminal: scenario.terminal, typed: (scenario.typed || []).map((line) => (typeof line === 'string' ? line : line.line)) },
     }),
   )
 
@@ -117,7 +122,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
     // that checks stderr itself
     secrets: () => [
       ...new Set([
-        ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config }),
+        ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config, typed: typedSecrets(scenario) }),
         ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
         ...collectSecrets(JSON.parse(fs.readFileSync(storeFile, 'utf8'))),
         ...collectSecrets(fakeState),
@@ -146,7 +151,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
         // A masked or partial value is not looked for, and neither is a secret of fewer
         // than six characters (see collectSecrets)
         const secrets = new Set([
-          ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config }),
+          ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env, config: scenario.config, typed: typedSecrets(scenario) }),
           ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
           ...collectSecrets(JSON.parse(fs.readFileSync(storeFile, 'utf8'))),
           ...collectSecrets(fakeState),
