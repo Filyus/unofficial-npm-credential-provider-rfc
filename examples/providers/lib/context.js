@@ -166,15 +166,20 @@ const loadContext = (configPath) => {
 
   // A browser or device-code step the person completes. Scripted runs have
   // the fake identity provider complete it; a real run would open the URL.
+  // Returns whether the person could be shown it: a provider that cannot show
+  // the step answers `other` at once, since nothing it started can be finished.
+  // A scenario models a run with no terminal with `person.terminal: false`.
   const showToPerson = (text) => {
     if (scripted) {
-      return
+      return config.person.terminal !== false
     }
     try {
       writeTerminal(`${text}\n`)
+      return true
     } catch {
       // no controlling terminal: say so on stderr, never on stdout
       process.stderr.write('no controlling terminal to show the sign-in step on\n')
+      return false
     }
   }
 

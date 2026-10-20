@@ -106,7 +106,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
       store: 'store.json',
       endpoints,
       clock: 'clock',
-      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log' },
+      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log', terminal: scenario.terminal },
     }),
   )
 
