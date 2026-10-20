@@ -20,6 +20,15 @@ class RequestTimeout extends Error {
   }
 }
 
+// Vendor text the person reads on the terminal (a verification address, a user
+// code, a package name) must not carry what a terminal acts on: C0 and C1
+// controls (escape sequences, a carriage return that overwrites the line) and
+// the bidirectional marks and overrides that reorder what is shown. Each is
+// replaced by `?`. `showToPerson`, `confirm` and `ask` apply it to what they
+// are given, so no provider can forget; a provider that puts the same text in
+// an error message uses it too.
+const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
+
 const loadContext = (configPath) => {
   if (typeof configPath !== 'string') {
     throw new Error('--config <file> is required: the settings of a reference provider are in a JSON file')
@@ -204,7 +213,8 @@ const loadContext = (configPath) => {
   // User presence. A real run asks on the controlling terminal, never on
   // stdin, which belongs to the protocol; the conformance run scripts the
   // answers. Only called when the request says `interactive: true`.
-  const confirm = async (question, signal) => {
+  const confirm = async (given, signal) => {
+    const question = plain(given)
     if (scripted) {
       if (!answers.length) {
         throw new Error(`no scripted answer for: ${question}`)
@@ -226,7 +236,8 @@ const loadContext = (configPath) => {
   // without echo where Node can turn it off (see `readSecretLine`, which says
   // where it cannot); a scripted line is logged as asked either way. An
   // unanswerable prompt (end of input, Ctrl-C) gives `null`.
-  const ask = async (question, signal, { secret = false } = {}) => {
+  const ask = async (given, signal, { secret = false } = {}) => {
+    const question = plain(given)
     if (scripted) {
       if (!typed.length) {
         throw new Error(`no scripted line for: ${question}`)
@@ -246,8 +257,15 @@ const loadContext = (configPath) => {
   // Returns whether the person could be shown it: a provider that cannot show
   // the step answers `other` at once, since nothing it started can be finished.
   // A scenario models a run with no terminal with `person.terminal: false`.
-  const showToPerson = (text) => {
+  // The text is shown line by line with `plain` applied to each, and a scripted
+  // run records what it was given, sanitised, in `person.shownLog` (the
+  // scenario's `expect.shown` checks it).
+  const showToPerson = (given) => {
+    const text = String(given).split('\n').map(plain).join('\n')
     if (scripted) {
+      if (config.person.shownLog) {
+        fs.appendFileSync(path.resolve(path.dirname(configPath), config.person.shownLog), `${JSON.stringify(text)}\n`)
+      }
       return config.person.terminal !== false
     }
     try {
@@ -357,6 +375,98 @@ const editSecret = (text, keys) => {
   return { text: line, done: false, cancelled: false }
 }
 
+// Raw mode that a secret prompt has turned on and not yet turned off. A provider
+// that is stopped while one is open (npm's SIGTERM when a prompt outlives its
+// time, an uncaught error, `process.exit`) must give the terminal back echoing:
+// `exit` and SIGTERM handlers, installed for as long as a prompt is open, turn it
+// off. The limits: SIGKILL and, on Windows, the termination of a process run no
+// handler of ours, so a console left in raw mode by those is the person's to
+// repair (`reset`, or closing the console); Ctrl-C while the prompt is open is the
+// person's key press, read as input and answered as a cancelled prompt, not a signal.
+const rawTerminals = new Set()
+const restoreRawModes = () => {
+  for (const terminal of rawTerminals) {
+    try {
+      terminal.setRawMode(false)
+    } catch {
+      // the stream is gone, and so is its mode
+    }
+  }
+  rawTerminals.clear()
+}
+const onSigterm = () => {
+  restoreRawModes()
+  process.exit(143)
+}
+// `terminal` is in raw mode from now on; the returned function ends that
+const guardRawMode = (terminal) => {
+  if (!rawTerminals.size) {
+    process.on('exit', restoreRawModes)
+    process.on('SIGTERM', onSigterm)
+  }
+  rawTerminals.add(terminal)
+  return () => {
+    try {
+      terminal.setRawMode(false)
+    } catch {
+      // the stream is going away either way
+    }
+    rawTerminals.delete(terminal)
+    if (!rawTerminals.size) {
+      process.removeListener('exit', restoreRawModes)
+      process.removeListener('SIGTERM', onSigterm)
+    }
+  }
+}
+
+// What a person typed before a question was asked belongs to no question: a
+// stray Enter, or a `y` meant for something else, must not answer a presence
+// prompt. Before a prompt is written, whatever the terminal has buffered is read
+// and thrown away: with the terminal in raw mode, which also releases a
+// half-typed line, for as long as `ms` (the time keys already pressed take to
+// arrive). The limits: Node has no `tcflush`, so this is a read for a short
+// moment and not a flush, and a key pressed after it and before the question is
+// shown still answers it; where the terminal cannot be put in raw mode (no TTY, a
+// console that refuses) nothing is discarded.
+const FLUSH_MS = 30
+const discardBuffered = (input, ms = FLUSH_MS) =>
+  new Promise((resolve) => {
+    const discard = () => {}
+    input.on('data', discard)
+    setTimeout(() => {
+      input.removeListener('data', discard)
+      resolve()
+    }, ms)
+  })
+
+const flushTypeAhead = async () => {
+  let fd
+  let terminal
+  try {
+    fd = fs.openSync(terminalPaths().input, 'r')
+    if (!tty.isatty(fd)) {
+      throw new Error('not a tty')
+    }
+    terminal = new tty.ReadStream(fd)
+    terminal.setRawMode(true)
+  } catch {
+    if (terminal) {
+      terminal.destroy()
+    } else if (fd !== undefined) {
+      fs.closeSync(fd)
+    }
+    return false
+  }
+  const release = guardRawMode(terminal)
+  try {
+    await discardBuffered(terminal)
+  } finally {
+    release()
+    terminal.destroy()
+  }
+  return true
+}
+
 // The line of a prompt whose answer is a secret (a password, a one-time
 // password), typed without echo where Node can: the terminal opened on its
 // path is a TTY, and `setRawMode` turns echo off for as long as the read lasts
@@ -382,7 +492,8 @@ const readSecretLine = (prompt, signal) => {
     }
     return readTerminalLine(`${prompt}(input is shown) `, signal)
   }
-  return new Promise((resolve) => {
+  const release = guardRawMode(terminal)
+  return new Promise((resolve, reject) => {
     const decoder = new StringDecoder('utf8')
     let text = ''
     let settled = false
@@ -391,11 +502,7 @@ const readSecretLine = (prompt, signal) => {
         return
       }
       settled = true
-      try {
-        terminal.setRawMode(false)
-      } catch {
-        // the stream is going away either way
-      }
+      release()
       terminal.destroy()
       try {
         writeTerminal('\n')
@@ -404,14 +511,6 @@ const readSecretLine = (prompt, signal) => {
       }
       resolve(value)
     }
-    writeTerminal(prompt)
-    terminal.on('data', (chunk) => {
-      const edited = editSecret(text, decoder.write(chunk))
-      text = edited.text
-      if (edited.done) {
-        settle(edited.cancelled ? null : text)
-      }
-    })
     terminal.on('end', () => settle(text === '' ? null : text))
     terminal.on('error', () => settle(null))
     if (signal) {
@@ -420,13 +519,40 @@ const readSecretLine = (prompt, signal) => {
       }
       signal.addEventListener('abort', () => settle(null), { once: true })
     }
+    // keys typed ahead are discarded, then the question is written
+    discardBuffered(terminal).then(() => {
+      if (settled) {
+        return
+      }
+      try {
+        writeTerminal(prompt)
+      } catch (error) {
+        // nowhere to ask: the caller says so, as for any prompt
+        settled = true
+        release()
+        terminal.destroy()
+        reject(error)
+        return
+      }
+      terminal.on('data', (chunk) => {
+        const edited = editSecret(text, decoder.write(chunk))
+        text = edited.text
+        if (edited.done) {
+          settle(edited.cancelled ? null : text)
+        }
+      })
+    })
   })
 }
 
 // Asynchronous, so that a provider's own deadline on the prompt can fire, and
 // abortable, so that once it has the read of the terminal does not hold the
 // process until someone presses Enter. An aborted read gives `null`.
-const readTerminalLine = (prompt, signal) => {
+const readTerminalLine = async (prompt, signal) => {
+  await flushTypeAhead()
+  if (signal && signal.aborted) {
+    return null
+  }
   writeTerminal(prompt)
   return readLineFrom(fs.createReadStream(terminalPaths().input), signal)
 }
@@ -436,4 +562,4 @@ const askTerminal = async (question, signal) => {
   return answer !== null && /^y(es)?$/i.test(answer.trim())
 }
 
-module.exports = { loadContext, readLineFrom, editSecret, RequestTimeout }
+module.exports = { loadContext, plain, readLineFrom, editSecret, discardBuffered, guardRawMode, restoreRawModes, RequestTimeout }

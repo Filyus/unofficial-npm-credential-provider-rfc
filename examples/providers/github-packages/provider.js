@@ -25,7 +25,7 @@
 // `error` member for a pending poll.
 
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 // npm kills a login, and a `get` that may wait for the person, at 5 minutes and a
 // device code lives for 15, so the provider stops first. One budget per request: a
@@ -42,12 +42,6 @@ class Answer extends Error {
 }
 
 const scopesOf = (header) => (header || '').split(/[\s,]+/).filter(Boolean)
-
-// Text that goes to the person's terminal and has a part it did not write: a package
-// name and version from the request, the code and address GitHub answers with. npm
-// strips control characters from what it shows, but this text bypasses npm, and an
-// escape sequence in it could redraw the prompt.
-const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, '?')
 
 const start = async (args) => {
   const ctx = loadContext(args.config)

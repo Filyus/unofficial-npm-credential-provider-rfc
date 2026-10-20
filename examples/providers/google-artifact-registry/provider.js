@@ -28,7 +28,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const CAPABILITIES = ['erase', 'login', 'logout', 'retry-context']
 const CLIENT_ID = 'example-gar-provider-client'
@@ -56,11 +56,6 @@ const ABSENT = {
 
 class Lapsed extends Error {}
 class Failed extends Error {}
-
-// Text that goes to the person's terminal and has a part it did not write: a package
-// name and version from the request, the address and code Google answers with. npm
-// strips control characters from what it shows, but this text bypasses npm.
-const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, '?')
 
 const start = (args) => {
   const ctx = loadContext(args.config)

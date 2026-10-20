@@ -1,0 +1,63 @@
+{
+  "hosts": [
+    "https://gitlab.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "instance": "https://gitlab.example.com/",
+    "clientId": "npm-credential-provider-gitlab"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://gitlab.example.com": {
+      "oauth": {
+        "refreshToken": "refresh-1"
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "refreshToken": "refresh-1",
+      "accessToken": "access-0",
+      "next": [
+        {
+          "accessToken": "access-1",
+          "refreshToken": "refresh-2"
+        }
+      ]
+    },
+    "tokens": [
+      "example-read-deploy-token"
+    ],
+    "nextId": 1
+  },
+  "expect": {
+    "store": {
+      "https://gitlab.example.com": null
+    },
+    "state": {
+      "oauth": {
+        "refreshToken": "refresh-2",
+        "next": []
+      },
+      "deployTokens": [
+        {
+          "id": 1,
+          "token": "example-read-deploy-token",
+          "scopes": [
+            "read_package_registry"
+          ],
+          "expires_at": "2026-10-18"
+        }
+      ],
+      "deleted": []
+    }
+  },
+  "concurrently": [
+    {
+      "on": "POST /api/v4/projects/42/deploy_tokens",
+      "store": {}
+    }
+  ]
+}

@@ -70,9 +70,9 @@ Run once, by hand, with `poc/stage-tiers/run.js` (so not re-run by CI, and not r
 
 No response carried `WWW-Authenticate`, and none was a one-time-password challenge.
 
-- **A read-only token serves the reads**, so a provider answers `stage-read` on npmjs.com with a separate read-only token, with no presence check, and `stage list`, `view` and `download` work in CI.
+- **Each token, read-only ones included, was answered 200 on the three reads** (plain HTTP GETs R1–R4 sent from Node's `fetch` with each token; one account, one package, one staged version; the stricter publishing-access setting was not tried). So, for these requests, a provider could answer `stage-read` on npmjs.com with a separate read-only token and no presence check. The `npm stage list`, `view` and `download` commands were not run with T2–T5, so that they work in CI is not shown by this test.
 - **The list is filtered by the account, not by the token:** T5, selected only to Q, still listed P's staged version, while the record and the tarball honoured its selection with 404.
-- **The dist-tag in `publishConfig` was not used:** `npm stage publish` reported staging "with tag latest", so approving this version would have moved `latest`.
+- **The dist-tag in `publishConfig` was not used:** `npm stage publish` reported staging "with tag latest" although `publishConfig.tag` named another tag. The version was rejected, never approved, so what approval would have done to `latest` was not observed.
 
 Afterwards the version was rejected under T1, which npm confirmed through the browser (its web one-time-password flow); `npm stage list` then showed no staged versions, T1 was logged out and T2–T5 revoked.
 

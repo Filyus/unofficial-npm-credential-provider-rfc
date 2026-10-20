@@ -1,8 +1,8 @@
 {
   "npmjs": {
-    "ci-publish": "n/a: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token; trusted publishing is held by npm, not by a provider",
-    "unsupported": "n/a: every operation of the protocol has an endpoint on this registry, so there is nothing for the provider to refuse",
-    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
+    "ci-publish": "by design: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token, and trusted publishing is held by npm, not by a provider, so the reference provider answers no interactive-false publish; this is the provider's choice, not a statement that npmjs.com has no such request",
+    "unsupported": "by design: the reference provider maps every operation of the protocol to an endpoint it documents for npmjs.com, so it never answers `operation-not-supported`; a provider that declines an operation would",
+    "401-erase": "by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one"
   },
   "gitlab": {
     "stage": "n/a: GitLab's npm registry page documents no staging or approval step (an absence in the docs, not a documented refusal); a publish is live at once (the page, Staging)"
@@ -12,22 +12,22 @@
   },
   "github-packages": {
     "stage": "n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)",
-    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
+    "401-erase": "by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one"
   },
   "google-artifact-registry": {
     "stage": "n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)",
-    "not-found": "n/a: the docs read do not say the registry hides a repository from an identity that cannot see it; the provider's not-found means nothing stored, and hello registries stops npm asking for unconfigured ones (the page, Rejection)"
+    "not-found": "by design: the docs read do not say whether the registry hides a repository from an identity that cannot see it; the reference provider's `not-found` would mean nothing stored, which it does not answer, and hello `registries` stops npm asking for unconfigured registries (the page, Rejection)"
   },
   "jfrog-artifactory": {
-    "stage": "n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer"
+    "stage": "n/a: no Artifactory page read describes staged publishing for npm, and the page itself marks the list of unsupported operations unverified, from memory (an absence, not a documented refusal); stage-unsupported.jsonl shows the reference provider's answer"
   },
   "azure-artifacts": {
     "stage": "n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)"
   },
   "aws-codeartifact": {
-    "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations"
+    "stage": "n/a: the CodeArtifact npm pages list no `/-/stage` endpoints; the page reads that as an inference from the absence in AWS's list, not an AWS statement, and the provider answers the stage operations with `operation-not-supported`"
   },
   "verdaccio": {
-    "401-erase": "n/a: the provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); that exchange is the 401-dead row"
+    "401-erase": "by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one"
   }
 }

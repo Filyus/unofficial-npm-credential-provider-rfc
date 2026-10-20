@@ -273,3 +273,55 @@ test('guarded turns a raised Answer into the answer and lets any other error thr
   assert.deepEqual(await guarded(async () => { throw new Answer(answer) })({}), answer)
   await assert.rejects(guarded(async () => { throw new Error('boom') })({}), /boom/)
 })
+
+test('what the person is shown or asked has its terminal controls and bidi marks replaced, whichever provider says it', async (t) => {
+  const fs = require('node:fs')
+  const { loadContext, plain } = require('./lib/context.js')
+  assert.equal(plain('a\u001b[2Jb\rc\u0085d‮e⁦f‎g؜h'), 'a?[2Jb?c?d?e?f?g?h')
+  assert.equal(plain('plain text, ünïcode ✓'), 'plain text, ünïcode ✓')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-sanitise-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const file = path.join(dir, 'config.json')
+  fs.writeFileSync(file, JSON.stringify({ store: 'store.json', person: { mode: 'scripted', presence: [true], typed: ['x'], log: 'asked.log', shownLog: 'shown.log' } }))
+  const ctx = loadContext(file)
+  assert.equal(ctx.showToPerson('Open https://e.test/\u001b]0;pwned\u0007 and enter ‮EDOC\nline two\r'), true)
+  await ctx.confirm('Publish \u001b[31mx\u001b[0m?')
+  await ctx.ask('Name‮:')
+  // a newline between the lines of a step is kept, everything else is not
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'shown.log'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)), ['Open https://e.test/?]0;pwned? and enter ?EDOC\nline two?'])
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'asked.log'), 'utf8').split('\n').filter(Boolean), ['Publish ?[31mx?[0m?', 'Name?:'])
+})
+
+test('no provider keeps a sanitiser of its own: the one of lib/context.js is the one every provider has', () => {
+  const fs = require('node:fs')
+  const own = fs.readdirSync(__dirname).filter((name) => fs.existsSync(path.join(__dirname, name, 'provider.js')) && /^const plain\b/m.test(fs.readFileSync(path.join(__dirname, name, 'provider.js'), 'utf8')))
+  assert.deepEqual(own, [])
+})
+
+test('the Azure provider compares the parsed URL: a path that climbs out of the organization, a port, user information or http are not served', async (t) => {
+  const fs = require('node:fs')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'azure-served-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ store: 'store.json', org: 'contoso' }))
+  const requests = [
+    ['https://pkgs.dev.azure.com/contoso/tools/', 'not-found'],
+    ['https://pkgs.dev.azure.com/contoso/../other-org/', 'url-not-supported'],
+    ['https://pkgs.dev.azure.com/contoso/%2e%2e/other-org/', 'url-not-supported'],
+    ['https://pkgs.dev.azure.com/contosoX/', 'url-not-supported'],
+    ['https://pkgs.dev.azure.com:8443/contoso/', 'url-not-supported'],
+    ['https://user@pkgs.dev.azure.com/contoso/', 'url-not-supported'],
+    ['http://pkgs.dev.azure.com/contoso/', 'url-not-supported'],
+  ]
+  const input = `${requests.map(([registry]) => JSON.stringify({ ...GET, registry, interactive: false })).join('\n')}\n`
+  const output = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'azure-artifacts', 'provider.js'), '--npm-credential-provider', '--config', path.join(dir, 'config.json')], { stdio: ['pipe', 'pipe', 'inherit'] })
+    let stdout = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    child.on('close', () => resolve(stdout))
+    child.stdin.end(input)
+  })
+  const answers = output.split('\n').filter(Boolean).slice(1).map((line) => JSON.parse(line))
+  assert.deepEqual(answers.map((answer) => answer.Err && answer.Err.kind), requests.map(([, kind]) => kind))
+})

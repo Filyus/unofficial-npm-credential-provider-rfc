@@ -20,7 +20,7 @@
 
 const crypto = require('node:crypto')
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const CAPABILITIES = ['login', 'logout', 'erase', 'retry-context']
 const API_PREFIX = '/artifactory/api/npm/'

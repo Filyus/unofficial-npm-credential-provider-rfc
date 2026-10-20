@@ -90,7 +90,37 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
   const scenario = JSON.parse(fs.readFileSync(scenarioFile, 'utf8'))
   const { createFake } = require(path.join(providers, name, 'fake.js'))
   const fakeState = structuredClone(scenario.state || {})
-  const fake = await startFake(createFake(fakeState))
+  const handle = createFake(fakeState)
+  const storeFileOf = { path: null }
+  // two things a scenario can do to any fake, by the request's `METHOD /path` (a
+  // prefix): `stall` requests are never answered (the provider's own deadline has
+  // to end them, so a scenario sets `config.requestTimeoutMs` small), and a
+  // `concurrently` rule replaces the provider's store, once, as another process
+  // would, just before that request is answered. `atRequest` rules say what the
+  // store must hold at the moment such a request arrives (a subset, as
+  // `expect.store`): a provider killed while a vendor stalls leaves just that.
+  const stalled = scenario.stall || []
+  const concurrent = [...(scenario.concurrently || [])]
+  const atRequest = scenario.atRequest || []
+  const problems = []
+  const fake = await startFake((request) => {
+    const line = `${request.method} ${request.path}`
+    for (const rule of atRequest.filter((candidate) => line.startsWith(candidate.on))) {
+      try {
+        assertSubset(JSON.parse(fs.readFileSync(storeFileOf.path, 'utf8')), rule.store, `${line}: store when it arrived`)
+      } catch (error) {
+        problems.push(error)
+      }
+    }
+    for (const [index, rule] of concurrent.entries()) {
+      if (line.startsWith(rule.on)) {
+        concurrent.splice(index, 1)
+        fs.writeFileSync(storeFileOf.path, JSON.stringify(rule.store))
+        break
+      }
+    }
+    return stalled.some((prefix) => line.startsWith(prefix)) ? { hang: true } : handle(request)
+  })
   owned.fake = fake
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), `provider-${name}-`))
   owned.scratch = scratch
@@ -101,6 +131,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
   const clock = [...(scenario.clock || [])]
   fs.writeFileSync(clockFile, String(scenario.now ?? 0))
   const storeFile = path.join(scratch, 'store.json')
+  storeFileOf.path = storeFile
   fs.writeFileSync(storeFile, JSON.stringify(scenario.store || {}))
   const endpoints = Object.fromEntries((scenario.hosts || []).map((origin) => [origin, fake.url]))
   const configFile = path.join(scratch, 'config.json')
@@ -111,7 +142,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
       store: 'store.json',
       endpoints,
       clock: 'clock',
-      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log', terminal: scenario.terminal, typed: (scenario.typed || []).map((line) => (typeof line === 'string' ? line : line.line)) },
+      person: { mode: 'scripted', presence: presence || scenario.presence || [], log: 'asked.log', shownLog: 'shown.log', terminal: scenario.terminal, typed: (scenario.typed || []).map((line) => (typeof line === 'string' ? line : line.line)) },
     }),
   )
 
@@ -160,11 +191,20 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
         const leaked = [...secrets].filter((secret) => stderr.includes(secret))
         assert.deepEqual(leaked, [], `${label}: the provider wrote a secret to stderr`)
       }
+      assert.deepEqual(problems.map((problem) => problem.message), [], `${label}: the store was not what the scenario says it is when a request arrived`)
       const askedFile = path.join(scratch, 'asked.log')
       const asked = fs.existsSync(askedFile) ? fs.readFileSync(askedFile, 'utf8').split('\n').filter(Boolean) : []
       // presence questions and typed lines share the log: each scripted answer must have been asked for
       const scripted = (scenario.presence || []).length + (scenario.typed || []).length
       assert.equal(asked.length, scripted, `${label}: the provider asked the person ${asked.length} times, the scenario scripts ${scripted} answers`)
+      // what the person was shown, sanitised (`expect.shown`: each entry must be a line of the log, whole)
+      if (scenario.expect?.shown) {
+        const shownFile = path.join(scratch, 'shown.log')
+        const shown = fs.existsSync(shownFile) ? fs.readFileSync(shownFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []
+        for (const text of scenario.expect.shown) {
+          assert.ok(shown.includes(text), `${label}: the person was not shown ${JSON.stringify(text)}; shown: ${JSON.stringify(shown)}`)
+        }
+      }
       if (scenario.expect?.store) {
         assertSubset(JSON.parse(fs.readFileSync(storeFile, 'utf8')), scenario.expect.store, `${label} store`)
       }

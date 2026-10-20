@@ -15,7 +15,7 @@
 // done poll answers 202 until the person finishes) are recalled, not read.
 
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const REGISTRY = 'https://registry.npmjs.org/'
 const SESSION_SECONDS = 7200 // the session token's two hours; the API gives no expiry
@@ -23,11 +23,6 @@ const SESSION_SECONDS = 7200 // the session token's two hours; the API gives no 
 // ends a presence prompt itself, first
 const WAIT_MS = 4.5 * 60 * 1000
 const WAIT_TEXT = '4 minutes 30 seconds'
-
-// What the person's terminal is shown from outside the provider (a package name
-// in a prompt, the registry's `loginUrl`): a control character in it could move
-// the cursor or rewrite the line above, so each becomes `?`.
-const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
 
 // The time npm gives a `logout` is 30 seconds; the calls it makes end inside it.
 const LOGOUT_MS = 25 * 1000
@@ -168,6 +163,11 @@ const create = async (args) => {
         }
       } else if (pick.entry.tier !== 'stage-only') {
         return err('other', `${describe(request)} needs user presence, and this request is not interactive.`)
+      } else if (!ctx.config.ciStageOnly) {
+        // `interactive: false` is also a dependency's lifecycle script, or `npm stage publish > log.txt`:
+        // nothing says a person authorized this process to use the token. Only the provider's own
+        // configuration (never an environment variable) says the machine is a pipeline that may.
+        return err('other', `${describe(request)} needs user presence, and this request is not interactive. The stored stage-only token is released without presence only where this provider's configuration says the machine is a pipeline (ciStageOnly).`)
       }
     }
     handedOut.set(contextKey(request), pick.entry.tier)

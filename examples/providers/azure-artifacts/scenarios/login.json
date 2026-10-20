@@ -19,8 +19,8 @@
     },
     "entra": {
       "interval": 0,
-      "userCode": "ABCD1234",
-      "verificationUri": "https://login.microsoft.com/device",
+      "userCode": "ABCD‮1234\u001b[2J",
+      "verificationUri": "https://login.microsoft.com/device",
       "refreshTokens": {},
       "pending": 1
     },
@@ -45,6 +45,9 @@
         "devices": 1,
         "pending": 0
       }
-    }
+    },
+    "shown": [
+      "Open https://login.microsoft.com/device? and enter the code ABCD?1234?[2J"
+    ]
   }
 }

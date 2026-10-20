@@ -12,8 +12,9 @@
 // device-code grant type on `/oauth/token`, `POST /oauth/revoke`, the
 // `api` scope a deploy-token call needs, and `expires_at` as a bare date.
 
+const crypto = require('node:crypto')
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 // The provider's own limit on a read token, seconds from now. GitLab's
 // expiry is a date, so it is only the backstop (see the page).
@@ -64,11 +65,6 @@ const mintedKey = (registry, tier, granularity, scope, pkg) => {
 // First 00:00 UTC strictly after the limit, as GitLab's date-only expiry.
 const expiryDate = (limit) => new Date((Math.floor(limit / 86400) + 1) * 86400 * 1000).toISOString().slice(0, 10)
 
-// What a person's terminal is shown from outside the provider: a URL or a code
-// from the vendor, a name from a request. A control character in it could move
-// the cursor or rewrite the line above, so each becomes `?`.
-const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
-
 // Inside the timeout npm gives each kind of request (RFC, Session lifecycle),
 // with room to answer: an interactive `get` and `login` wait for a person.
 const budgetMs = (req) => {
@@ -95,7 +91,8 @@ const start = async (args) => {
   // with it afterwards (deleting its deploy tokens, revoking) writes nothing back
   const detached = new WeakSet()
 
-  // what this provider keeps for this instance: { oauth, minted }
+  // what this provider keeps for this instance: { oauth, minted, signIn }, `signIn`
+  // being the id of the login that made the entry
   const readAccount = () => ctx.readStore()[instance] || {}
   const writeAccount = (account) => {
     if (detached.has(account)) {
@@ -108,6 +105,38 @@ const start = async (args) => {
       delete store[instance]
     }
     ctx.writeStore(store)
+  }
+
+  // What a call changed in an account object it read earlier (a long install: a
+  // refresh and a mint take time, and `npm logout` or `npm login` may run in
+  // another process meanwhile). The store is read again and only the part the call
+  // changed is written onto what it holds, and only if that is still the same
+  // login: an entry that was removed stays removed, and one that another login
+  // replaced is not overwritten with the stale one. `minted` names the one record
+  // of `account.minted` that changed (merged, so another call's records stay).
+  // Returns whether anything was written.
+  const persist = (account, { oauth = false, minted } = {}) => {
+    if (detached.has(account)) {
+      return false
+    }
+    const store = ctx.readStore()
+    const current = store[instance]
+    if (!current || current.signIn !== account.signIn) {
+      return false
+    }
+    if (oauth) {
+      current.oauth = account.oauth
+    }
+    if (minted !== undefined) {
+      current.minted = { ...current.minted }
+      if (account.minted && account.minted[minted]) {
+        current.minted[minted] = account.minted[minted]
+      } else {
+        delete current.minted[minted]
+      }
+    }
+    ctx.writeStore(store)
+    return true
   }
 
   const refresh = async (account) => {
@@ -129,7 +158,7 @@ const start = async (args) => {
       accessToken: res.json.access_token,
       accessExpiresAt: ctx.now() + (res.json.expires_in ?? 7200),
     }
-    writeAccount(account)
+    persist(account, { oauth: true })
   }
 
   const accessToken = async (account) => {
@@ -177,7 +206,7 @@ const start = async (args) => {
       throw new Answer(err('other', `GitLab answered ${res.status} to deleting a deploy token; it stays recorded`))
     }
     delete account.minted[key]
-    writeAccount(account)
+    persist(account, { minted: key })
   }
 
   // user presence for a write, as every write credential of this provider is
@@ -255,7 +284,7 @@ const start = async (args) => {
     const limit = ctx.now() + READ_LIFETIME
     const minted = await mint(account, target.projectId, tier, limit)
     account.minted = { ...account.minted, [key]: { id: minted.id, projectId: target.projectId } }
-    writeAccount(account)
+    persist(account, { minted: key })
     return ok('get', {
       auth: { type: 'bearer', token: minted.token },
       ...(write ? { cache: 'never' } : { cache: 'expires', expiresAt: limit }),
@@ -326,6 +355,7 @@ const start = async (args) => {
           accessToken: res.json.access_token,
           accessExpiresAt: ctx.now() + (res.json.expires_in ?? 7200),
         }
+        account.signIn = crypto.randomUUID()
         writeAccount(account)
         return ok('login')
       }

@@ -525,19 +525,17 @@
     "kind": "source",
     "cited": "2026-10-20"
   },
-  "https://github.com/NuGet/NuGet.Client": {
-    "kind": "page",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "430375dcea28eb4203a4497242a2615ffb60c6edd3304d21a043d63dc0113423",
-    "file": ".refs/github.com/NuGet_NuGet.Client.txt"
+  "https://github.com/NuGet/NuGet.Client/blob/4c4510d29a64fcbcba6360e29c3a1e8288a87f9f/src/NuGet.Core/NuGet.Credentials/CredentialService.cs": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
-  "https://github.com/git/git": {
-    "kind": "page",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "69c3b1425f6980380ec6aae266cb5684c596cdf2400906633c294190a026dcea",
-    "file": ".refs/github.com/git_git.txt"
+  "https://github.com/NuGet/NuGet.Client/blob/4c4510d29a64fcbcba6360e29c3a1e8288a87f9f/src/NuGet.Core/NuGet.Protocol/HttpSource/HttpSourceAuthenticationHandler.cs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/git/git/blob/c51408889c3b372814bc20b9431c3b74d0d268eb/http.c": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/github/roadmap/issues/558": {
     "kind": "discussion",
@@ -553,13 +551,6 @@
     "sha256": "7e973f1ba1dd6646bc777e40acbd1adc86c7818dbca1cd4850d2957f50d80783",
     "file": ".refs/github.com/google-github-actions_auth.txt"
   },
-  "https://github.com/jfrog/jfrog-cli": {
-    "kind": "page",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "5d815ff76cd58736b26e0eff043c3f6dc4a2b0e9ca5f8bd3c063e8131179330c",
-    "file": ".refs/github.com/jfrog_jfrog-cli.txt"
-  },
   "https://github.com/jfrog/jfrog-cli-core/blob/962c06a76108764450640c3d9c3cb0e010bd048b/artifactory/utils/weblogin.go": {
     "kind": "source",
     "cited": "2026-10-17",
@@ -570,6 +561,18 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
+  "https://github.com/jfrog/jfrog-cli/blob/b442e79c4aa5889b344e7970e45e13231ad51182/general/token/cli.go": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/jfrog/jfrog-cli/blob/b442e79c4aa5889b344e7970e45e13231ad51182/main.go": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/jfrog/jfrog-cli/blob/b442e79c4aa5889b344e7970e45e13231ad51182/utils/cliutils/commandsflags.go": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/jfrog/jfrog-client-go/blob/01bb7dcd43fc42436689fd23893b2a8595c00ac3/access/services/login.go": {
     "kind": "source",
     "cited": "2026-10-17",
@@ -579,6 +582,10 @@
     "kind": "source",
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
+  },
+  "https://github.com/jfrog/jfrog-client-go/blob/3b4b900d8174ba878d1ce7ef1df8d18fad341472/auth/authutils.go": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/jfrog/jfrog-client-go/blob/756731f0df6308ef5f2a688ad109b0d88ead7f41/access/services/accesstoken.go": {
     "kind": "source",
@@ -651,6 +658,10 @@
     "sha256": "b670ca170c650a0c1b569af5053461bae80938834e7eecdfdc0299d4b1a7dfbc",
     "file": ".refs/github.com/npm_cli_releases_tag_v9.0.0.txt"
   },
+  "https://github.com/npm/npm-registry-fetch/blob/6b4159a2519ce5aab26cc4dd8d4596a0b47781d2/lib/auth.js": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/npm/rfcs/blob/f291deccbb4c0d244a8b71f321de9042626922cb/accepted/0054-make-scripts-install-opt-in.md": {
     "kind": "source",
     "cited": "2026-10-04",
@@ -670,12 +681,29 @@
     "sha256": "e62547f475836bddc5c55af25be999dd06f9501c4016bfee6c007e49782fea17",
     "file": ".refs/github.com/orgs_community_discussions_63811.txt"
   },
-  "https://github.com/pnpm/pnpm": {
-    "kind": "page",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "f71953629439a6a73bc495923a86004c8ed45a363fe95f46a74c4391cb33a6c1",
-    "file": ".refs/github.com/pnpm_pnpm.txt"
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm/crates/network/src/token_helper.rs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/getNetworkConfigs.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/parseCreds.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/rescopeUnscopedCreds.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/docs/npmrc.md": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/network/auth-header/src/getAuthHeadersFromConfig.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/pnpm/pnpm/issues/12759": {
     "kind": "discussion",
@@ -684,19 +712,25 @@
     "sha256": "3b3b7857708d89f80f1252fb3996a6c30372074b61ee7e6a1dcbb4def2780284",
     "file": ".refs/github.com/pnpm_pnpm_issues_12759.txt"
   },
-  "https://github.com/raineorshine/npm-check-updates": {
-    "kind": "page",
-    "cited": "2026-10-17",
-    "fetched": "2026-10-20",
-    "sha256": "e4e5b62cad1187db7df223d6be0ea7c71fb2ef5841a1a12b665fab5870269be2",
-    "file": ".refs/github.com/raineorshine_npm-check-updates.txt"
+  "https://github.com/raineorshine/npm-check-updates/blob/161014ec672069303ce6595a4b8663f1245c0db9/src/package-managers/npm.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
-  "https://github.com/rust-lang/cargo": {
-    "kind": "page",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "4db8f29beb69ef092ed16efec17a92e4164586300942531e9e9a621fb28842dc",
-    "file": ".refs/github.com/rust-lang_cargo.txt"
+  "https://github.com/rust-lang/cargo/blob/16f0d1e84adb0aaa7ecbfa3cb6adb8a858282c84/credential/cargo-credential/src/lib.rs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/rust-lang/cargo/blob/16f0d1e84adb0aaa7ecbfa3cb6adb8a858282c84/src/sources/registry/http_remote.rs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/rust-lang/cargo/blob/16f0d1e84adb0aaa7ecbfa3cb6adb8a858282c84/src/util/auth/mod.rs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/rust-lang/cargo/blob/16f0d1e84adb0aaa7ecbfa3cb6adb8a858282c84/src/util/credential/process.rs": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/verdaccio/verdaccio": {
     "kind": "page",
@@ -743,6 +777,14 @@
     "kind": "source",
     "cited": "2026-10-20",
     "pinned": "2026-10-20"
+  },
+  "https://github.com/verdaccio/verdaccio/blob/3fc219a205814e4554da6c35c81ebe1e017fef8e/packages/api/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/verdaccio/verdaccio/blob/3fc219a205814e4554da6c35c81ebe1e017fef8e/packages/middleware/src/middlewares/token-auth.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/verdaccio/verdaccio/blob/5009e4d760373859b279d55ceaf66604d94b2a19/packages/api/src/user.ts": {
     "kind": "source",

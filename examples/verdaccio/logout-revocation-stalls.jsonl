@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"client","message":{"v":1,"kind":"logout","registry":"https://npm.example.test/verdaccio/"}}
+{"from":"provider","message":{"Ok":{"kind":"logout"}}}
+{"from":"client","event":"close"}

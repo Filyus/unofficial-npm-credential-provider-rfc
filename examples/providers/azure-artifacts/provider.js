@@ -32,10 +32,11 @@
 // `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798`
 // (a run cannot depend on az being installed, so the fake answers it over HTTP).
 
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { serve, ok, err, log, Answer } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const CLIENT_ID = 'example-npm-credential-provider'
 const AZURE_DEVOPS_RESOURCE = '499b84ac-1321-427f-aa17-267ca6975798'
@@ -62,6 +63,8 @@ const DEVICE_WAIT_MS = 90 * 1000
 const SERVED_OPERATIONS = new Set(['read', 'publish', 'deprecate', 'dist-tag', 'unpublish'])
 const AZ_URL = 'https://az.example.test/get-access-token'
 const PAT_USERNAME = 'npm'
+// the time npm gives a `logout` is 30 seconds; the calls it makes end inside it
+const LOGOUT_MS = 25 * 1000
 // inside npm's 5 minutes for an interactive `get`, as the AWS provider's prompts are
 const PRESENCE_MS = 4.5 * 60 * 1000
 // how a write names itself in the presence prompt
@@ -101,11 +104,30 @@ const start = (args) => {
   // an exact prefix: the path in the casing the user's config has, the legacy host in lowercase as
   // npm compares hosts, and `https:` only
   const prefixes = [`https://pkgs.dev.azure.com/${org}/`, `https://${org.toLowerCase()}.pkgs.visualstudio.com/`]
-  const served = (registry) => prefixes.some((prefix) => registry.startsWith(prefix))
+  // Judged on the parsed URL, whose path is normalised: a prefix of the raw text
+  // would serve `https://pkgs.dev.azure.com/contoso/../other-org/`, which a
+  // registry client resolves to another organization. https only, the default
+  // port, no user information.
+  const served = (registry) => {
+    let url
+    try {
+      url = new URL(registry)
+    } catch {
+      return false
+    }
+    if (url.protocol !== 'https:' || url.port || url.username || url.password) {
+      return false
+    }
+    return prefixes.some((prefix) => {
+      const own = new URL(prefix)
+      return url.host === own.host && url.pathname.startsWith(own.pathname)
+    })
+  }
   const sessionsUrl = (extra) => `https://vssps.dev.azure.com/${org}/_apis/Token/SessionTokens?api-version=7.1-preview.1${extra}`
 
   // what this provider keeps for the organization: { authority, refreshToken,
-  // accessToken, accessExpiresAt, pat, session: { token, expiresAt }, minted }
+  // accessToken, accessExpiresAt, pat, session: { token, expiresAt }, minted,
+  // signIn }, `signIn` being the id of the login or PAT that made the entry
   const readAccount = () => ctx.readStore()[org] || {}
   const writeAccount = (account) => {
     const store = ctx.readStore()
@@ -115,6 +137,30 @@ const start = (args) => {
       delete store[org]
     }
     ctx.writeStore(store)
+  }
+
+  // What a call changed in an account object it read earlier (a long install: a
+  // refresh or a mint takes time, and `npm logout` or `npm login` may run in
+  // another process meanwhile). The store is read again, and the keys are written
+  // onto what it holds only if that is still the same sign-in; an entry that was
+  // removed stays removed, and one that another login replaced is not overwritten
+  // with the stale one. A key the object no longer has is removed. Returns
+  // whether anything was written.
+  const persist = (account, keys) => {
+    const store = ctx.readStore()
+    const current = store[org]
+    if (!current || !Object.keys(current).length || current.signIn !== account.signIn) {
+      return false
+    }
+    for (const key of keys) {
+      if (account[key] === undefined) {
+        delete current[key]
+      } else {
+        current[key] = account[key]
+      }
+    }
+    ctx.writeStore(store)
+    return true
   }
 
   // the Entra token last handed out bare, and the one the registry rejected,
@@ -186,7 +232,7 @@ const start = (args) => {
   // An Entra access token for Azure DevOps from the stored login: the cached
   // one while it has time left, else a refresh. A refresh the authority
   // refuses means the login is gone, which only `npm login` mends.
-  const entraAccess = async (account) => {
+  const entraAccess = async (account, until) => {
     if (account.accessToken && account.accessExpiresAt - ctx.now() > ACCESS_MARGIN) {
       return account.accessToken
     }
@@ -197,6 +243,7 @@ const start = (args) => {
     const now = ctx.now()
     const refreshed = await ctx.request('POST', `${authority}/oauth2/v2.0/token`, {
       form: { grant_type: 'refresh_token', client_id: CLIENT_ID, refresh_token: account.refreshToken, scope: ENTRA_SCOPE },
+      until,
     })
     if (refreshed.status !== 200 || !refreshed.json || !refreshed.json.access_token) {
       throw fail(`Microsoft Entra did not renew the sign-in for the ${org} organization. Run npm login.`)
@@ -204,7 +251,7 @@ const start = (args) => {
     account.refreshToken = refreshed.json.refresh_token ?? account.refreshToken
     account.accessToken = refreshed.json.access_token
     account.accessExpiresAt = now + refreshed.json.expires_in
-    writeAccount(account)
+    persist(account, ['refreshToken', 'accessToken', 'accessExpiresAt'])
     return account.accessToken
   }
 
@@ -235,10 +282,11 @@ const start = (args) => {
 
   // Best effort at the service for every session token the account still holds a
   // handle of; what fails is said on stderr and never stops the rest.
-  const revokeMinted = async (account, why) => {
+  // `until`, if given, is the time on the context's clock by which it must be over
+  const revokeMinted = async (account, why, until) => {
     for (const held of account.minted || []) {
       try {
-        await revoke(account, held.authorizationId)
+        await revoke(account, held.authorizationId, until)
       } catch (error) {
         const cause = error instanceof Answer ? 'the sign-in is gone' : error.message
         log(`${why}: a session token could not be revoked, it expires on its own date (${cause})`)
@@ -246,9 +294,9 @@ const start = (args) => {
     }
   }
 
-  const revoke = async (account, authorizationId) => {
-    const access = await entraAccess(account)
-    const res = await ctx.request('DELETE', sessionsUrl(`&authorizationId=${encodeURIComponent(authorizationId)}`), { token: access })
+  const revoke = async (account, authorizationId, until) => {
+    const access = await entraAccess(account, until)
+    const res = await ctx.request('DELETE', sessionsUrl(`&authorizationId=${encodeURIComponent(authorizationId)}`), { token: access, until })
     if (res.status !== 200 && res.status !== 204) {
       throw new Error(`HTTP ${res.status}`)
     }
@@ -455,7 +503,7 @@ const start = (args) => {
     if (req.operation === 'unpublish') {
       // bound to the package and never reused
       const minted = await mint(account, MANAGE_SCOPE, MANAGE_SECONDS, `unpublish ${nameOf(req)} ${ctx.now()}`)
-      writeAccount(account)
+      persist(account, ['minted'])
       return ok('get', {
         auth: { type: 'basic', username: 'VssSessionToken', password: minted.token },
         cache: 'never',
@@ -468,7 +516,7 @@ const start = (args) => {
     if (!held || held.expiresAt - ctx.now() <= ACCESS_MARGIN) {
       held = await mint(account, WRITE_SCOPE, SESSION_SECONDS, `session ${ctx.now()}`)
       account.session = held
-      writeAccount(account)
+      persist(account, ['session', 'minted'])
     }
     return ok('get', {
       auth: { type: 'basic', username: 'VssSessionToken', password: held.token },
@@ -491,7 +539,7 @@ const start = (args) => {
     const account = readAccount()
     if (account.session && req.granularity !== 'package') {
       delete account.session
-      writeAccount(account)
+      persist(account, ['session'])
     }
     return ok('erase')
   }
@@ -510,7 +558,7 @@ const start = (args) => {
         return err('other', `Azure Artifacts did not accept the personal access token (HTTP ${checked.status}). Nothing was stored.`)
       }
       await revokeMinted(readAccount(), 'replaced')
-      writeAccount({ pat: req.token })
+      writeAccount({ pat: req.token, signIn: crypto.randomUUID() })
       return ok('login')
     }
     if (!req.interactive) {
@@ -526,6 +574,7 @@ const start = (args) => {
     // what the replaced sign-in minted is revoked with it, not left valid with no handle kept
     await revokeMinted(readAccount(), 'replaced')
     writeAccount({
+      signIn: crypto.randomUUID(),
       authority,
       refreshToken: granted.refresh_token,
       accessToken: granted.access_token,
@@ -546,8 +595,13 @@ const start = (args) => {
     if (account.pat) {
       log('logout: a personal access token cannot be revoked without an Entra token; it was removed here only')
     }
-    await revokeMinted(account, 'logout')
+    // the local credentials go first, so that a service that stalls or a logout that
+    // is killed cannot leave them stored: what the account minted is revoked from the
+    // copy, best effort, inside the 30 seconds npm gives a logout. The copy's refresh
+    // of the Entra token writes nothing back (`persist` finds the entry gone).
+    const copy = structuredClone(account)
     writeAccount({})
+    await revokeMinted(copy, 'logout', ctx.clockMs() + LOGOUT_MS)
     return ok('logout')
   }
 

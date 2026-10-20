@@ -43,8 +43,9 @@ const caseProbe = path.join(root, 'CaseProbe')
 write(caseProbe, '')
 const caseInsensitive = fs.existsSync(path.join(root, 'caseprobe'))
 info('filesystem is case-insensitive', caseInsensitive)
+const caseRealpath = caseInsensitive ? path.basename(fs.realpathSync.native(path.join(root, 'CASEPROBE'))) : null
 if (caseInsensitive) {
-  info('realpath of a case variant returns', path.basename(fs.realpathSync.native(path.join(root, 'CASEPROBE'))))
+  info('realpath of a case variant returns', caseRealpath)
 }
 
 const nfc = 'café'
@@ -53,9 +54,10 @@ fs.mkdirSync(path.join(root, nfc))
 const nfdReachesNfc = fs.existsSync(path.join(root, nfd))
 info('an NFD spelling reaches a directory created as NFC', nfdReachesNfc)
 info('readdir returns the name as', fs.readdirSync(root).includes(nfc) ? 'NFC' : 'NFD')
+const nfdRealpath = nfdReachesNfc ? (real => (real === nfc ? 'NFC' : real === nfd ? 'NFD' : real))(
+  path.basename(fs.realpathSync.native(path.join(root, nfd)))) : null
 if (nfdReachesNfc) {
-  const real = path.basename(fs.realpathSync.native(path.join(root, nfd)))
-  info('realpath of the NFD spelling returns', real === nfc ? 'NFC' : real === nfd ? 'NFD' : real)
+  info('realpath of the NFD spelling returns', nfdRealpath)
 }
 
 const tmpReal = fs.realpathSync.native(os.tmpdir())
@@ -63,6 +65,18 @@ info('os.tmpdir() is reached through a link', tmpReal !== os.tmpdir() ? `${os.tm
 const stat = p => fs.statSync(p, { bigint: true })
 info('dev:ino agree through the link', `${stat(root).ino === stat(fs.realpathSync.native(root)).ino}` +
   ` (ino ${stat(root).ino ? 'nonzero' : 'zero'})`)
+
+// What the macOS runners showed (CI log of run 39489980343, all three macOS jobs), asserted
+// there so that a runner that changes fails here instead of leaving the documents stale.
+if (process.platform === 'darwin') {
+  check('on macOS the filesystem is case-insensitive and realpath returns the stored case',
+    caseInsensitive && caseRealpath === 'CaseProbe', `${caseInsensitive} ${caseRealpath}`)
+  check('on macOS an NFD spelling reaches an NFC directory and realpath returns NFC',
+    nfdReachesNfc && nfdRealpath === 'NFC', `${nfdReachesNfc} ${nfdRealpath}`)
+  check('on macOS the temp directory is reached through /var -> /private/var, and dev and inode agree through it',
+    os.tmpdir().startsWith('/var/') && tmpReal === `/private${os.tmpdir()}` && stat(root).ino === stat(fs.realpathSync.native(root)).ino,
+    `${os.tmpdir()} -> ${tmpReal}`)
+}
 
 // ---------- the trust rule ----------
 
@@ -187,7 +201,14 @@ const runtime = async () => {
   const c = await outcome(crlf)
   check('a #! line with a carriage return is explained', c.includes('carriage return'), c)
 
-  info('a script without a #! line', await outcome(script('noshebang', 'echo tok-noshebang\n')))
+  const noShebang = await outcome(script('noshebang', 'echo tok-noshebang\n'))
+  info('a script without a #! line', noShebang)
+  if (process.platform === 'darwin') {
+    check('on macOS a script without a #! line fails with ENOEXEC', noShebang.includes('ENOEXEC'), noShebang)
+  }
+  if (process.platform === 'linux') {
+    check('on Linux a script without a #! line runs through /bin/sh', noShebang === 'header Bearer …', noShebang)
+  }
 
   if (process.platform === 'darwin') {
     const brewNode = fs.existsSync('/opt/homebrew/bin/node')

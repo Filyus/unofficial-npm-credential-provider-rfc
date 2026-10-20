@@ -114,12 +114,16 @@ class TranscriptSchemaTests(unittest.TestCase):
                     self.assertEqual([e.message for e in errors], [])
 
 
+EXPLANATION = r"^(n/a: .{10,}|by design: .{10,}|task \d+: .{5,})$"
+
+
 class CoverageTests(unittest.TestCase):
     """examples/COVERAGE.md says which situations the examples show, computed
     from the transcripts. A gap is allowed only when examples/coverage.json says
-    why (`n/a: reason`) or which task fills it (`task N: what`), and an
-    explanation may not outlive the gap it explained, so the page cannot differ
-    from the files in either direction."""
+    why (`n/a: reason`: the registry has no such situation; `by design: reason`:
+    the reference provider chooses not to show it) or which task fills it
+    (`task N: what`), and an explanation may not outlive the gap it explained,
+    so the page cannot differ from the files in either direction."""
 
     def test_every_empty_cell_is_explained_and_no_explanation_is_stale(self) -> None:
         table, notes = coverage.matrix(), coverage.explanations()
@@ -130,19 +134,29 @@ class CoverageTests(unittest.TestCase):
                     if cell:
                         self.assertIsNone(note, "the cell is filled; delete its explanation from coverage.json")
                     else:
-                        self.assertIsNotNone(note, "an empty cell needs `n/a: reason` or `task N: what` in coverage.json")
-                        self.assertRegex(note, r"^(n/a: .{10,}|task \d+: .{5,})$")
+                        self.assertIsNotNone(note, "an empty cell needs `n/a: reason`, `by design: reason` or `task N: what` in coverage.json")
+                        self.assertRegex(note, EXPLANATION)
         for registry in table:
             note = notes.get(registry, {}).get("provider")
             with self.subTest(registry=registry, feature="provider"):
                 if coverage.has_provider(registry):
                     self.assertIsNone(note, "the registry has a provider; delete its explanation from coverage.json")
                 else:
-                    self.assertRegex(note or "", r"^(n/a: .{10,}|task \d+: .{5,})$", "no provider: say why or name the task")
+                    self.assertRegex(note or "", EXPLANATION, "no provider: say why or name the task")
         for registry, cells in notes.items():
             self.assertIn(registry, table, "coverage.json names a registry that has no example")
             for feature in cells:
                 self.assertTrue(feature in coverage.FEATURES or feature == "provider", f"{registry}: no such situation")
+
+    def test_both_kinds_of_reason_are_accepted_and_a_bare_one_is_not(self) -> None:
+        for good in ("n/a: the registry has no such endpoint", "by design: the provider hands out the stored token", "task 12: write it"):
+            self.assertRegex(good, EXPLANATION)
+        for bad in ("by design", "by design: short", "n/a", "design: the provider does not", "n/a:the registry has none"):
+            self.assertNotRegex(bad, EXPLANATION)
+        self.assertEqual(coverage.mark("n/a: the registry has no endpoint"), "n/a")
+        self.assertEqual(coverage.mark("by design: the provider chooses so"), "by design")
+        self.assertEqual(coverage.mark("task 7: fill it"), "task 7")
+        self.assertEqual(coverage.mark(""), "?")
 
     def test_the_page_is_what_the_transcripts_say(self) -> None:
         page = (EXAMPLES / "COVERAGE.md").read_text(encoding="utf-8")

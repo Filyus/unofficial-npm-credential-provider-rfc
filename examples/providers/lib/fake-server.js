@@ -42,6 +42,11 @@ const startFake = (handle) =>
         } catch (error) {
           answer = { status: 500, json: { error: error.message } }
         }
+        // `hang`: a vendor that accepts the request and never answers it; the
+        // connection ends with the run (`close`) or when the caller gives up
+        if (answer.hang) {
+          return
+        }
         // `form`: an answer form-encoded, as some vendors send unless asked for JSON
         if (answer.form !== undefined) {
           res.writeHead(answer.status, { 'content-type': 'application/x-www-form-urlencoded', ...(answer.headers || {}) })

@@ -6,28 +6,28 @@ How the `tokenHelper` prototype described in [Phase 1](phase-1-token-helper.md) 
 
 | Repository | Size | What it adds |
 |---|---|---|
-| npm-registry-fetch | about 490 lines of code (493 added in `lib/`) and a README section | a `tokenHelper` module (own deadline and kill, one cached result per registry and process, stderr forwarded with credentials masked), a branch in `getAuth()`, and a step in `regFetch()` that waits for the helper while watching the request body and abort signal, skipped for `--offline` |
+| npm-registry-fetch | 526 lines added in `lib/` (`git diff --numstat 6b4159a d34217e -- lib`, counted on 2026-10-21 at the branch commit d34217e, which was amended while this was being checked; the patch in `poc/patches` has the same 526) and a README section | a `tokenHelper` module (own deadline and kill, one cached result per registry and process, stderr forwarded with credentials masked), a branch in `getAuth()`, and a step in `regFetch()` that waits for the helper while watching the request body and abort signal, skipped for `--offline` |
 | npm/cli | about 390 lines of code (394 added in `lib/` and `workspaces/config/lib/`) and 14 of docs | config trust (who selected a file, where it lies, what a parent npm passed on), `publishConfig` filtering, `publish`, `whoami`, `login`, `logout`, `profile`, `config set`/`ls` and OIDC handling, docs |
 
-Both are published as [patches](poc/patches) against upstream commits, and each comes with tests. Lines are counted as added lines of the diff in each patch outside `test/` (`git diff --numstat` over the patch gives the same); tap's coverage check, which fails `npm test` below 100%, is run by CI for npm-registry-fetch and `@npmcli/config` and, for the rest of npm/cli, by the `full-suites` job.
+Both are published as [patches](poc/patches) against upstream commits, and each comes with tests. Lines are counted as added lines of the diff in each patch outside `test/` (`git diff --numstat` over the patch gives the same); tap's coverage check, which fails `npm test` below 100%, runs in CI wherever `npm test` runs: for npm-registry-fetch and for `@npmcli/config`. For the rest of npm/cli it runs only inside the `full-suites` job, which runs each suite's `npm test` with and without the prototype and counts a suite that fails with no failing test file as a regression, but only where the base passes, so a coverage shortfall in a suite that already fails on the base is not caught. The workflow's targeted step for the npm/cli commands runs with `--no-coverage` and checks no coverage.
 
 ## How it is checked
 
 | Check | What it shows | Where |
 |---|---|---|
 | Unit tests | every rule in the RFC; coverage is enforced by tap, as described above | the patches |
-| End to end (56 checks in the last run counted; the script lists each check and fails on any that does not pass, but asserts no total) | a real npm against a local registry: helpers in user config work; project, `publishConfig`, child-process and `--prefix` routes are refused; no token reaches output, logs, timing or cache; redirects and tarballs on other hosts get none; `login` refuses | [`poc/npm-e2e/run.js`](poc/npm-e2e/run.js) |
-| Config matrix | 2048 combinations of project, environment, command line and user file setting `userconfig`, `globalconfig` and `prefix`: no project-chosen helper in effect, none lost | [`poc/npm-config-matrix/run.js`](poc/npm-config-matrix/run.js) |
+| End to end (58 checks in a local run on 2026-10-21, counted by hand; the script lists each check and fails on any that does not pass, but asserts no total) | a real npm against a local registry: helpers in user config work; project, `publishConfig`, child-process and `--prefix` routes are refused; no token reaches output, logs, timing or cache; redirects and tarballs on other hosts get none; `login` refuses | [`poc/npm-e2e/run.js`](poc/npm-e2e/run.js) |
+| Config matrix | 2048 combinations of project, environment, command line and user file setting `userconfig`, `globalconfig` and `prefix`: no project-chosen helper in effect (in every combination npm loads); none lost, asserted only where the project chose none of the three and the user file, the environment or the command line sets `globalconfig` or `prefix`, and not for a command-line `prefix` with no `globalconfig` | [`poc/npm-config-matrix/run.js`](poc/npm-config-matrix/run.js) |
 | Trust fuzzer | random layer, path-spelling and home-directory combinations | [`poc/npm-config-fuzz/fuzz.js`](poc/npm-config-fuzz/fuzz.js), run by hand: at its seed it still reports cases on the safe side, which its header lists, so it is no pass-or-fail gate; the workflow runs `spellings.js` and the 2048-combination matrix instead |
 | Spelling fuzzer | the key spelled every way ini, environment expansion and flattening allow, from every untrusted source, in-process and with a real npm | [`poc/npm-config-fuzz/spellings.js`](poc/npm-config-fuzz/spellings.js) |
-| Leak oracle | 3000 generated outputs and stderr echoes (the test asserts the count): a printed token never survives into a logged line | npm-registry-fetch tests |
+| Leak oracle | 3000 seeded cases (one seed; tokens of 8 to 47 characters, 11 shapes of printed output, 7 shapes of stderr echo; the test asserts the count): for tokens of 8 or more characters, a printed token never survives into a logged line | npm-registry-fetch tests |
 | Platform probes | letter case, Unicode forms, linked temp directories, 8.3 names, `..\x` names, missing `#!` interpreters, `cmd.exe` special characters | [`poc/platform-probes/run.js`](poc/platform-probes/run.js) |
 | Every npm/cli suite | the root and its 16 workspaces (the four named in the root `package.json` plus the 12 under `workspaces/` at the base commit) pass with the prototype wherever they pass without it | [`poc/full-suites/compare.js`](poc/full-suites/compare.js) |
 | Claims | every piece of evidence [claims.md](claims.md) cites still exists | [`poc/claims/check.js`](poc/claims/check.js) |
 
 The [CI workflow](.github/workflows/prototype.yml) runs all of it on macOS, Linux and Windows, with Node 22.22.2, 24.15.0 and 26.x, except the comparison of every npm/cli suite with and without the prototype, which runs on Ubuntu and Windows with Node 24; on 26.x the prototype's own code runs with deprecations as errors.
 
-What the macOS runs confirmed about the platform: APFS is case-insensitive and realpath returns the stored case; an NFD spelling reaches an NFC directory and realpath returns the stored form; the temp directory is reached through `/var` → `/private/var`, and device and inode agree through the link; a helper script without a `#!` line fails with ENOEXEC there, while Linux runs it through `/bin/sh`.
+What the macOS runs showed about the platform: the temp volume is case-insensitive and realpath returns the stored case; an NFD spelling reaches an NFC directory and realpath returns the stored form; the temp directory is reached through `/var` → `/private/var`, and device and inode agree through the link; a helper script without a `#!` line fails with ENOEXEC there, while Linux runs it through `/bin/sh`. Until 2026-10-21 the probes only printed these (`info` lines), and they were read from the CI log of run 39489980343 (all three macOS jobs and the Linux ones); since then the probes assert them on macOS (and the last one on Linux too), which CI has not run yet. The probes do not name the file system, so APFS is not claimed.
 
 ## Reproducing the checks
 
@@ -74,13 +74,13 @@ Two scripts are run by hand rather than by CI. [`poc/npm-config-fuzz/fuzz.js`](p
 
 ## Audit history
 
-Rounds of automated review, then targeted test work. Each finding below is fixed and pinned by a test.
+Rounds of automated review, then targeted test work. The code findings below were fixed, and the rule each one broke has a test in the prototype (claims.md names it). Not pinned, because it cannot be reproduced now: the counts and what a round found in code that no longer exists (the 112 failing combinations of round 5 on the earlier fix, what the fuzz runs found before their fixes). Not tested at all: round 6's corrections to the RFC on Cargo, user presence during a publish and interactive timeouts, which are document edits resting on the sources in claims.md.
 
 | Round | Method | Found |
 |---|---|---|
 | 1 | review | a project `.npmrc` could set `userconfig` to a repository file and have its helper treated as the user's |
 | 2 | review | `user${UNSET?}config=` and a child npm inheriting the path still could |
-| 3 | review | output with a second line or a non-ASCII character reached the HTTP layer, whose error quotes the header and so printed the credential; on Windows a helper behind a `.cmd` wrapper that printed too much was left running |
+| 3 | review | output with a second line or a non-ASCII character reached the HTTP layer, whose error quotes the header and so printed the credential; on Windows a helper behind a `.cmd` wrapper that printed too much was left running (the fix ends the whole tree with `taskkill /T /F`; its test injects `taskkill`, so it pins the command line and the fallback, not that a real tree dies) |
 | 4 | review | a child npm, which always inherits `globalconfig` from its parent's environment, let a project `globalconfig` choose the global file |
 | 5 | review | the fix for round 4 modelled npm wrongly: the first layer to assign `globalconfig` stores it beneath all the others, so the layer holding the value in effect has to be asked; the config matrix found 112 failing combinations on the earlier fix and none after |
 | 6 | review for wrong mental models | `npm --prefix client` (or a prefix in a CI job's environment) made a repository's `client/etc/npmrc` the trusted global config; a repository's `node-options`, exported as `NODE_OPTIONS`, loaded code into a node-based helper that read the credential it printed, with no script running. It also corrected the RFC on Cargo, user presence during a publish, and interactive timeouts |

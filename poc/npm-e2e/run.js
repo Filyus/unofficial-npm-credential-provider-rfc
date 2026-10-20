@@ -359,6 +359,9 @@ const main = async () => {
       files: { 'child.js': childScript(JSON.stringify(elsewhere), true) },
     })
     children.push(outside)
+    // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
+    expect(outside, 'a script that drops the marker and starts npm outside the project reaches the registry', outside.requests.length > 0)
+    expect(outside, 'a script that drops the marker and starts npm outside the project gets the repository file\'s helper, the one limit of the rule (accepted)', auths(outside).includes('Bearer helper-token'))
     notes.push(`a script that drops the marker and starts npm outside the project: ${auths(outside).join(', ')} (accepted: the repository's code is already running)`)
 
     // a repository's node-options would reach a node-based helper through

@@ -38,7 +38,7 @@
 // provider's own configuration says the ambient role is a publisher.
 
 const { serve, ok, err, log, Answer } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const CLIENT_NAME = 'npm-credential-provider-codeartifact'
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'

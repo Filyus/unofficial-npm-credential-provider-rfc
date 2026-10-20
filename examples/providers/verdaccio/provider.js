@@ -41,6 +41,8 @@ const MARGIN_SECONDS = 60
 // the presence prompt of an interactive `get`, inside npm's 5 minutes
 const PRESENCE_MS = 4.5 * 60 * 1000
 const CEILING_SECONDS = 30 * 24 * 3600
+// the time npm gives a `logout` is 30 seconds; the calls it makes end inside it
+const LOGOUT_MS = 25 * 1000
 
 // `exp` of a JWT, read without verifying it, or null for any other token: the
 // default tokens are opaque AES strings that never expire.
@@ -210,7 +212,8 @@ const start = (args) => {
   // Revokes the generated tokens of an account, the read-only one first, with
   // the full one. Best effort: what fails is said on stderr and never stops
   // the rest.
-  const revokeAll = async (account) => {
+  // `until`, if given, is the time on the context's clock by which it must be over
+  const revokeAll = async (account, until) => {
     const tokens = account.tokens || {}
     for (const tier of TIERS) {
       const entry = tokens[tier]
@@ -223,7 +226,7 @@ const start = (args) => {
         continue
       }
       try {
-        const { status } = await ctx.request('DELETE', url(`-/npm/v1/tokens/token/${encodeURIComponent(entry.key)}`), { token: tokens.full.token })
+        const { status } = await ctx.request('DELETE', url(`-/npm/v1/tokens/token/${encodeURIComponent(entry.key)}`), { token: tokens.full.token, until })
         if (status !== 200) {
           log(`verdaccio: the ${tier} token was not revoked at the registry (HTTP ${status})`)
         }
@@ -356,13 +359,17 @@ const start = (args) => {
       // nothing to remove
       return err('not-found')
     }
-    await revokeAll(account)
+    // the local credentials go first, so that a registry that stalls or is killed
+    // mid-logout cannot leave them stored: the tokens are revoked from a copy, best
+    // effort and inside the 30 seconds npm gives a logout
+    const copy = structuredClone(account)
+    writeAccount(null)
+    held.clear()
     // only a password login made a login token; a supplied token made none
     if (account.account) {
       log('verdaccio: the login token cannot be revoked (its DELETE /-/user/token/* route does nothing in the source read); it works until the password or the server secret changes')
     }
-    writeAccount(null)
-    held.clear()
+    await revokeAll(copy, ctx.clockMs() + LOGOUT_MS)
     return ok('logout')
   }
 

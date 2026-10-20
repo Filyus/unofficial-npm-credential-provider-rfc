@@ -14,7 +14,7 @@ const readline = require('node:readline')
 const test = require('node:test')
 const http = require('node:http')
 const { PassThrough } = require('node:stream')
-const { loadContext, readLineFrom, editSecret, RequestTimeout } = require('./lib/context.js')
+const { loadContext, readLineFrom, editSecret, discardBuffered, guardRawMode, restoreRawModes, RequestTimeout } = require('./lib/context.js')
 const { startFake } = require('./lib/fake-server.js')
 const { SENTINEL } = require('./lib/protocol.js')
 
@@ -292,4 +292,29 @@ test('a malformed provider body is a 500 from the fake and the run goes on', asy
   } finally {
     await fake.close()
   }
+})
+
+test('what was typed before a question is discarded, and what is typed after it is not', async () => {
+  const input = new PassThrough()
+  input.write('y\ny\n')
+  const discarded = discardBuffered(input, 20)
+  input.write('half a li')
+  await within(discarded, 2000, 'discarding type-ahead')
+  input.write('real answer\n')
+  assert.equal(await within(readLineFrom(input), 2000, 'reading the answer'), 'real answer')
+})
+
+test('raw mode of a secret prompt is given back by the exit and SIGTERM handlers, and the handlers go with the prompt', () => {
+  const modes = []
+  const terminal = { setRawMode: (on) => modes.push(on) }
+  const before = { exit: process.listenerCount('exit'), term: process.listenerCount('SIGTERM') }
+  const release = guardRawMode(terminal)
+  assert.equal(process.listenerCount('exit'), before.exit + 1)
+  assert.equal(process.listenerCount('SIGTERM'), before.term + 1)
+  restoreRawModes()
+  assert.deepEqual(modes, [false], 'a stopped provider turns raw mode off')
+  release()
+  assert.deepEqual(modes, [false, false])
+  assert.equal(process.listenerCount('exit'), before.exit)
+  assert.equal(process.listenerCount('SIGTERM'), before.term)
 })

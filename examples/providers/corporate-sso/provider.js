@@ -16,7 +16,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { serve, ok, err, log } = require('../lib/protocol.js')
-const { loadContext } = require('../lib/context.js')
+const { loadContext, plain } = require('../lib/context.js')
 
 const REGISTRIES = ['https://npm.corp.example.com/', 'https://npm-eu.corp.example.com/']
 const CAPABILITIES = ['login', 'logout', 'erase', 'retry-context']
@@ -38,11 +38,6 @@ const WRITE_VERBS = {
   deprecate: 'Deprecate',
   unpublish: 'Unpublish',
 }
-
-// What the person's terminal is shown from outside the provider (a URL and a
-// code from the IdP, a package name from a request): a control character in it
-// could move the cursor or rewrite the line above, so each becomes `?`.
-const plain = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '?')
 
 // A device or refresh grant that answers 200 must answer with what a session is
 // made of; a missing field would be stored as `undefined` and an expiry of NaN.

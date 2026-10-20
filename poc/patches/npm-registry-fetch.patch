@@ -1,4 +1,4 @@
-From 5ffc89f30ed0b6e3d721aec98216cb327c1a6ea9 Mon Sep 17 00:00:00 2001
+From d34217e944485cb0fa7678cc91bfbf2a6658e140 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -28,9 +28,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 +++
  lib/auth.js          |   25 +-
  lib/index.js         |   59 ++-
- lib/token-helper.js  |  426 +++++++++++++++
- test/token-helper.js | 1172 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 1738 insertions(+), 8 deletions(-)
+ lib/token-helper.js  |  450 ++++++++++++++++
+ test/token-helper.js | 1203 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 1793 insertions(+), 8 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -262,10 +262,10 @@ index 91d450f..6f3c3d2 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..f0eacc3
+index 0000000..c627df8
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,450 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -294,6 +294,19 @@ index 0000000..f0eacc3
 +// failed run counts: it is cached like a success, so a broken helper is not
 +// started again for every request of an install.
 +const cache = new Map()
++
++// A value that is refused is not known to be a path: it can be a credential
++// pasted into the setting, or a command with its arguments (`aws ... --token
++// abc`), and the message is printed and logged. Only what comes before the
++// first whitespace is shown, and of a word that is not a path (no separator in
++// it) only the start, so that a token pasted whole is not echoed either.
++const display = (value) => {
++  if (typeof value !== 'string') {
++    return `<${typeof value}>`
++  }
++  const word = value.split(/\s/)[0]
++  return /[\\/]/.test(word) || word.length <= 6 ? word : `${word.slice(0, 3)}\u2026`
++}
 +
 +class TokenHelperError extends Error {
 +  // `cause` is limited to a code and a signal by the callers: the errors
@@ -427,11 +440,22 @@ index 0000000..f0eacc3
 +// mask() hides credentials the helper did not print but may be echoing, such
 +// as the one it fetched from somewhere else: `key: value` and `key=value` pairs
 +// for the usual key names, wherever the key is part of a longer name (JSON
-+// `"authorizationToken":"..."`, `NPM_TOKEN=...`), and `Bearer|Basic|Token
-+// <value>`. A value that starts a `Bearer <value>` is left to the second
-+// pattern, which does not take a lone `=` or `:` for the value.
++// `"authorizationToken":"..."`, `NPM_TOKEN=...`, `x-api-key: ...`,
++// `Credential=`), a `Cookie:` header to the end of the line, `Bearer|Basic|Token
++// <value>`, the rest of an `Authorization:` line that starts with `Digest`, `Negotiate` or `AWS4-HMAC-SHA256` (their
++// parameters are comma-separated, and the secret is not the first of them),
++// and the user information of a URL (`https://user:pass@host`). A value that
++// starts a `Bearer <value>` or one of those schemes is left to the later
++// patterns, which do not take a lone `=` or `:` for the value.
 +const mask = (line) => line
-+  .replace(/(authorization|token|password|secret)(["']?\s*[:=]\s*["']?)(?!(?:Bearer|Basic|Token)\s)[^\s"',}]+/gi, '$1$2***')
++  // not `\S+` before the `@`: it must stop at a `/`, so that an address with a
++  // path is not taken for user information, and it starts at a literal `://` so
++  // that a long run of letters costs one pass
++  .replace(/(:\/\/)[^\s/@]+@/g, '$1***@')
++  // a cookie header carries several pairs, separated by `; `
++  .replace(/(cookie["']?\s*[:=]\s*["']?)[^\s"',}].*$/gi, '$1***')
++  .replace(/(authorization|token|password|secret|api[-_]?key|cookie|credential|signature)(["']?\s*[:=]\s*["']?)(?!(?:Bearer|Basic|Token|Digest|Negotiate|AWS4-HMAC-SHA256)\s)[^\s"',}]+/gi, '$1$2***')
++  .replace(/(authorization["']?\s*[:=]\s*["']?)(Digest|Negotiate|AWS4-HMAC-SHA256)\s+(?![:=]).*$/gi, '$1$2 ***')
 +  // schemes as headers write them; matching `token` in any case would hide
 +  // ordinary words, as in "the token was refreshed"
 +  .replace(/\b(Bearer|bearer|BEARER|Basic|basic|BASIC|Token|TOKEN)\s+(?![:=])\S+/g, '$1 ***')
@@ -670,7 +694,7 @@ index 0000000..f0eacc3
 +const getTokenHelperHeader = (helper, regKey, timeout = TIMEOUT) => {
 +  const refused = refusal(helper)
 +  if (refused) {
-+    return Promise.reject(new TokenHelperError(helper, refused))
++    return Promise.reject(new TokenHelperError(display(helper), refused))
 +  }
 +  const key = `${regKey}\0${helper}`
 +  if (!cache.has(key)) {
@@ -694,10 +718,10 @@ index 0000000..f0eacc3
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..0493590
+index 0000000..af646b2
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1172 @@
+@@ -0,0 +1,1203 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1089,6 +1113,24 @@ index 0000000..0493590
 +  t.equal(mask('refreshing session'), 'refreshing session')
 +})
 +
++t.test('mask hides the other schemes, the other key names and the user information of a URL', async t => {
++  t.equal(mask('Authorization: Digest username="bob", realm="r", response="abc"'), 'Authorization: Digest ***')
++  t.equal(mask('proxy-authorization: Negotiate YIIabc=='), 'proxy-authorization: Negotiate ***')
++  t.equal(mask('Authorization: AWS4-HMAC-SHA256 Credential=AKIA/20261021/r/s/aws4_request, Signature=abc'),
++    'Authorization: AWS4-HMAC-SHA256 ***')
++  t.equal(mask('authorization=Digest a=b'), 'authorization=Digest ***', 'after = as well')
++  t.equal(mask('x-api-key: abc123'), 'x-api-key: ***')
++  t.equal(mask('API_KEY=abc123 and apikey: def456'), 'API_KEY=*** and apikey: ***')
++  t.equal(mask('Credential=AKIAEXAMPLE'), 'Credential=***')
++  t.equal(mask('Cookie: sid=abc; theme=dark'), 'Cookie: ***', 'every pair of a cookie header')
++  t.equal(mask('fetching https://user:pass@registry.example/pkg'), 'fetching https://***@registry.example/pkg')
++  t.equal(mask('git+https://ghp_abc123@github.com/o/r.git'), 'git+https://***@github.com/o/r.git', 'a token as the user')
++  t.equal(mask('https://registry.example/pkg?mail=a@b.example'), 'https://registry.example/pkg?mail=a@b.example',
++    'an @ after a path is not user information')
++  t.equal(mask('a digest of the file'), 'a digest of the file', 'an ordinary word')
++  t.equal(mask('Authorization: Digest ***'), 'Authorization: Digest ***', 'idempotent')
++})
++
 +t.test('mask hides key=value and JSON forms, keeping the key', async t => {
 +  t.equal(mask('{"authorizationToken":"eyJabc.def"}'), '{"authorizationToken":"***"}')
 +  t.equal(mask('Authorization: glpat-abc123'), 'Authorization: ***')
@@ -1234,7 +1276,8 @@ index 0000000..0493590
 +// linear on input built to make a backtracking pattern slow
 +t.test('mask stays fast on a megabyte of adversarial input', async t => {
 +  for (const line of ['token='.repeat(170000), 'Bearer '.repeat(150000), `"password": "${'a'.repeat(1e6)}`,
-+    `${'authorization'.repeat(80000)}:`, 'a'.repeat(1e6)]) {
++    `${'authorization'.repeat(80000)}:`, 'a'.repeat(1e6), '://'.repeat(300000), `://${'a'.repeat(1e6)}`,
++    `authorization: Digest ${' '.repeat(1e6)}`, 'cookie:'.repeat(140000), `${'authorization'.repeat(40000)} ${' '.repeat(5e5)}`]) {
 +    const start = process.hrtime.bigint()
 +    mask(line)
 +    const ms = Number(process.hrtime.bigint() - start) / 1e6
@@ -1637,6 +1680,18 @@ index 0000000..0493590
 +      code: 'ETOKENHELPER',
 +      message: /must be an absolute path with no arguments \(arguments are not supported\)/,
 +    }, String(helper))
++  }
++  // the refused value is not echoed whole: it may be a credential pasted into the setting
++  for (const [helper, shown] of [
++    ['aws codeartifact get-authorization-token --token s3cr3t', '"aws"'],
++    ['glpat-s3cr3tvalue', '"glp\u2026"'],
++    ['./helper.sh --password hunter2', '"./helper.sh"'],
++    [{ token: 's3cr3t' }, '"<object>"'],
++    [`${real} --token s3cr3t`, JSON.stringify(real.split(' ')[0])],
++  ]) {
++    const refused = await getTokenHelperHeader(helper, REG_KEY).catch(er => er)
++    t.equal(refused.message.split(' must be')[0], `Token helper ${shown}`, String(helper))
++    t.notMatch(JSON.stringify(refused.message) + refused.helper, /s3cr3t|hunter2/, 'no secret in the error')
 +  }
 +  // a missing path with a space in it is missing, not a command with arguments
 +  await t.rejects(getTokenHelperHeader(path.join(path.dirname(real), 'missing helper'), REG_KEY), {

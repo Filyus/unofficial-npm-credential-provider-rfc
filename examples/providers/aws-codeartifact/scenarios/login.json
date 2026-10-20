@@ -43,7 +43,9 @@
           "accessToken": "sso-access-1",
           "credentials": "example-dev-key-id"
         }
-      ]
+      ],
+      "userCode": "AB\u001b[2JCD-‮1234\r",
+      "verificationUri": "https://device.sso.example.test/\u001b]0;pwned\u0007"
     }
   },
   "expect": {
@@ -54,6 +56,9 @@
       "sso": {
         "next": []
       }
-    }
+    },
+    "shown": [
+      "Open https://device.sso.example.test/?]0;pwned? and enter the code AB?[2JCD-?1234?"
+    ]
   }
 }
