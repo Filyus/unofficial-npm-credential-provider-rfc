@@ -1,0 +1,56 @@
+{
+  "npmjs": {
+    "ci-publish": "n/a: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token; trusted publishing is held by npm, not by a provider",
+    "unsupported": "n/a: every operation of the protocol has an endpoint on this registry, so there is nothing for the provider to refuse"
+  },
+  "gitlab": {
+    "401-dead": "task 505: a revoked refresh token",
+    "stage": "task 505: GitLab's documentation is not read for staging yet",
+    "unsupported": "task 505: which operations GitLab has no endpoint for",
+    "other-write": "task 505: dist-tag, deprecate, unpublish"
+  },
+  "corporate-sso": {
+    "401-dead": "task 506: the IdP session is gone when the retry comes",
+    "stage": "n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)",
+    "unsupported": "task 506: the page says the answer is operation-not-supported, no transcript shows it",
+    "other-write": "task 506: dist-tag, deprecate, unpublish follow the publish policy",
+    "not-found": "n/a: the gateway answers `other`, never `not-found`, so that a refusal does not reveal that a package exists (the page)"
+  },
+  "github-packages": {
+    "stage": "n/a: no staging endpoints (the page, recalled and not documented; task 507 rechecks it)",
+    "other-write": "task 507: unpublish is documented, dist-tag is unverified",
+    "login-refused": "task 507: the device flow expires or is refused"
+  },
+  "google-artifact-registry": {
+    "401-dead": "task 508: the gcloud login lapsed and the provider cannot renew it",
+    "stage": "n/a: the pages read for the example describe no staging model (an absence, not a documented refusal; task 508 keeps that wording)",
+    "unsupported": "task 508: operations the pages do not describe",
+    "other-write": "task 508: dist-tag and deprecate",
+    "login-refused": "task 508: the gcloud sign-in is refused",
+    "not-found": "task 508: a repository the identity cannot see"
+  },
+  "jfrog-artifactory": {
+    "ci-publish": "task 509: a publish with interactive false",
+    "401-dead": "task 509: the stored identity token itself is rejected (the page, Rejection)",
+    "stage": "n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer",
+    "login-refused": "task 509: the web login is not completed"
+  },
+  "azure-artifacts": {
+    "ci-publish": "task 510: a pipeline job token or workload identity that may write",
+    "stage": "n/a: no staged-publishing endpoints (the page, recalled; task 510 rechecks it)",
+    "login-refused": "task 510: the Entra sign-in is not completed",
+    "not-found": "task 510: a feed the identity cannot see"
+  },
+  "aws-codeartifact": {
+    "401-dead": "task 511: the SSO session has lapsed and the provider cannot issue a token",
+    "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations",
+    "login-refused": "task 511: `aws sso login` is not completed",
+    "not-found": "task 511: a repository the principal cannot read"
+  },
+  "verdaccio": {
+    "ci-publish": "task 512: a token the operator provisioned for CI (the page, operations table)",
+    "unsupported": "task 512: access and trust have no endpoints here",
+    "login-refused": "task 512: a wrong password",
+    "not-found": "task 512: a package the user's group may not see"
+  }
+}

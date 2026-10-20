@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
+import re
 import unittest
 
 from tests.protocol_model import load_transcript, validate_transcript
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
+_spec = importlib.util.spec_from_file_location("example_coverage", ROOT / "tools" / "example_coverage.py")
+coverage = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(coverage)
 SCHEMA = json.loads((ROOT / "spec" / "protocol-v1.schema.json").read_text(encoding="utf-8"))
 
 
@@ -29,7 +34,7 @@ class PagesAndTranscriptsTests(unittest.TestCase):
     of them, so that a page cannot describe an exchange no file has."""
 
     def pages(self):
-        return sorted(page for page in EXAMPLES.glob("*.md") if page.name != "README.md")
+        return sorted(page for page in EXAMPLES.glob("*.md") if page.name not in ("README.md", "COVERAGE.md"))
 
     def test_every_transcript_is_linked_from_its_page(self) -> None:
         for page in self.pages():
@@ -110,3 +115,42 @@ class TranscriptSchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoverageTests(unittest.TestCase):
+    """examples/COVERAGE.md says which situations the examples show, computed
+    from the transcripts. A gap is allowed only when examples/coverage.json says
+    why (`n/a: reason`) or which task fills it (`task N: what`), and an
+    explanation may not outlive the gap it explained, so the page cannot differ
+    from the files in either direction."""
+
+    def test_every_empty_cell_is_explained_and_no_explanation_is_stale(self) -> None:
+        table, notes = coverage.matrix(), coverage.explanations()
+        for registry, cells in table.items():
+            for feature, cell in cells.items():
+                note = notes.get(registry, {}).get(feature)
+                with self.subTest(registry=registry, feature=feature):
+                    if cell:
+                        self.assertIsNone(note, "the cell is filled; delete its explanation from coverage.json")
+                    else:
+                        self.assertIsNotNone(note, "an empty cell needs `n/a: reason` or `task N: what` in coverage.json")
+                        self.assertRegex(note, r"^(n/a: .{10,}|task \d+: .{5,})$")
+        for registry, cells in notes.items():
+            self.assertIn(registry, table, "coverage.json names a registry that has no example")
+            for feature in cells:
+                self.assertIn(feature, coverage.FEATURES, f"{registry}: no such situation")
+
+    def test_the_page_is_what_the_transcripts_say(self) -> None:
+        page = (EXAMPLES / "COVERAGE.md").read_text(encoding="utf-8")
+        self.assertEqual(page, coverage.render(), "run: python tools/example_coverage.py")
+
+    def test_a_registry_with_a_directory_is_in_the_matrix(self) -> None:
+        directories = {path.name for path in EXAMPLES.iterdir() if path.is_dir() and path.name != "providers"}
+        self.assertEqual(directories, set(coverage.REGISTRIES))
+
+    def test_the_features_are_read_from_what_a_transcript_holds(self) -> None:
+        got = coverage.features_of(EXAMPLES / "github-packages" / "rejection-403.jsonl")
+        self.assertEqual(got, {"install", "403-retry"})
+        self.assertIn("401-dead", coverage.features_of(EXAMPLES / "npmjs" / "rejection-dead-token.jsonl"))
+        self.assertIn("login", coverage.features_of(EXAMPLES / "aws-codeartifact" / "login.jsonl"))
+        self.assertIn("logout", coverage.features_of(EXAMPLES / "aws-codeartifact" / "login.jsonl"))
