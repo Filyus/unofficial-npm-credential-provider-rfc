@@ -53,7 +53,13 @@ test('the npmjs.com provider waits out Retry-After on real timers', async (t) =>
   const fake = await startFake(require('./npmjs/fake.js').createFake(state))
   t.after(() => fake.close())
   // no `clock`: the provider runs on the system clock, as outside a run
-  const config = scratchConfig(t, { endpoints: { 'https://registry.npmjs.org': fake.url }, pollMs: 20 })
+  // the sign-in step is scripted, so a runner with no terminal still gets as far as the polling; the
+  // clock is not (no `clock`), which is what this test is about
+  const config = scratchConfig(t, {
+    endpoints: { 'https://registry.npmjs.org': fake.url },
+    pollMs: 20,
+    person: { mode: 'scripted', presence: [], log: 'asked.log' },
+  })
   const dir = path.dirname(config)
   // started with pipes and no console, as npm starts it, in a directory of
   // its own: the sign-in text must not land in a file there
@@ -78,11 +84,6 @@ test('the npmjs.com provider waits out Retry-After on real timers', async (t) =>
 
   assert.ok(took >= 950, `the login took ${took} ms, less than the Retry-After of 1 s`)
   assert.equal(state.tooSoon, undefined, 'a poll came sooner than Retry-After')
-  assert.deepEqual(
-    fs.readdirSync(dir).filter((name) => /^CON(IN|OUT)\$$|^tty$/i.test(name)),
-    [],
-    `the provider wrote a terminal name as a file\n${stderr}`,
-  )
   const stored = JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8'))
   const issuedAt = stored.tokens.find((entry) => entry.tier === 'session').issuedAt
   // inside the test's own window, whatever a slow runner makes of its length: the point is the system clock, not a fixed one
@@ -129,4 +130,41 @@ test('a deadline that passes gives null, and aborts what was waiting', async (t)
   assert.equal(answer, null)
   assert.ok(Date.now() - started >= 190)
   assert.ok(aborted, 'the task was told to stop')
+})
+
+test('with no run person, the sign-in step goes to the terminal or the login stops at once, and no terminal name becomes a file', async (t) => {
+  const state = { login: { pending: 0, token: 'example-session-token' } }
+  const fake = await startFake(require('./npmjs/fake.js').createFake(state))
+  t.after(() => fake.close())
+  const config = scratchConfig(t, { endpoints: { 'https://registry.npmjs.org': fake.url }, pollMs: 20 })
+  const dir = path.dirname(config)
+  // started with pipes and no console, as npm starts it, in a directory of its own
+  const child = spawn(process.execPath, [path.join(__dirname, 'npmjs', 'provider.js'), SENTINEL, '--config', config], {
+    cwd: dir,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+  t.after(() => child.kill())
+  let stderr = ''
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk
+  })
+  const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]()
+  assert.deepEqual(JSON.parse((await lines.next()).value).v, [1])
+  child.stdin.write(`${JSON.stringify({ v: 1, kind: 'login', registry: 'https://registry.npmjs.org/', interactive: true })}\n`)
+  const answer = JSON.parse((await lines.next()).value)
+  child.stdin.end()
+  await new Promise((resolve) => child.on('close', resolve))
+  // a runner may or may not have a terminal; both outcomes are right, and nothing in between
+  const shown = answer.Ok && answer.Ok.kind === 'login'
+  const stopped = answer.Err && answer.Err.kind === 'other' && /no terminal/i.test(answer.Err.message || '')
+  assert.ok(shown || stopped, `unexpected answer ${JSON.stringify(answer)}`)
+  if (stopped) {
+    assert.equal(state.polls ?? 0, 0, 'it polled a sign-in nobody could see')
+  }
+  assert.deepEqual(
+    fs.readdirSync(dir).filter((name) => /^CON(IN|OUT)\$$|^tty$/i.test(name)),
+    [],
+    `the provider wrote a terminal name as a file\n${stderr}`,
+  )
 })
