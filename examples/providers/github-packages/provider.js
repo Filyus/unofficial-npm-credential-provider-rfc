@@ -67,33 +67,12 @@ const start = async (args) => {
     ctx.writeStore(store)
   }
 
-  // GitHub's OAuth endpoints answer in a form unless asked for JSON, and
-  // ctx.request sets no header of its own, so this one is made here
-  const oauth = async (path, form) => {
-    const url = `${hosts.web}${path}`
-    const { origin } = new URL(url)
-    const mapped = ctx.config.endpoints && ctx.config.endpoints[origin]
-    const headers = { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }
-    if (ctx.config.clock) {
-      headers['x-conformance-clock'] = String(ctx.clockMs())
-    }
-    const response = await fetch(mapped ? mapped + url.slice(origin.length) : url, {
-      method: 'POST',
-      headers,
-      body: new URLSearchParams(form).toString(),
-      redirect: 'manual',
-    })
-    const text = await response.text()
-    try {
-      return { status: response.status, json: text ? JSON.parse(text) : null }
-    } catch {
-      return { status: response.status, json: null }
-    }
-  }
+  // GitHub's OAuth endpoints answer in a form unless asked for JSON
+  const asJson = { accept: 'application/json' }
 
   // the person approves a code on github.com; what comes back is { token, scopes }
   const deviceFlow = async (scope) => {
-    const device = await oauth('/login/device/code', { client_id: ctx.config.clientId, scope })
+    const device = await ctx.request('POST', `${hosts.web}/login/device/code`, { form: { client_id: ctx.config.clientId, scope }, headers: asJson })
     if (device.json && device.json.error === 'device_flow_disabled') {
       throw new Answer(err('other', 'The OAuth app has the device flow disabled (device_flow_disabled). Enable it in the app settings, or log in with a token.'))
     }
@@ -109,10 +88,13 @@ const start = async (args) => {
     const until = ctx.clockMs() + Math.min(device.json.expires_in ?? 900, DEVICE_LIMIT_MS / 1000) * 1000
     while (ctx.clockMs() + wait <= until) {
       await ctx.sleep(wait)
-      const res = await oauth('/login/oauth/access_token', {
-        client_id: ctx.config.clientId,
-        device_code: device.json.device_code,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      const res = await ctx.request('POST', `${hosts.web}/login/oauth/access_token`, {
+        form: {
+          client_id: ctx.config.clientId,
+          device_code: device.json.device_code,
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        },
+        headers: asJson,
       })
       const json = res.json || {}
       if (json.access_token) {

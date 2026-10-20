@@ -25,13 +25,19 @@ const startFake = (handle) =>
         // the provider's clock in a conformance run, in milliseconds
         const clockSent = 'x-conformance-clock' in req.headers
         const clock = clockSent ? Number(req.headers['x-conformance-clock']) : Date.now()
-        const request = { method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), token, body, clock, clockSent }
+        const request = { method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), token, body, clock, clockSent, headers: req.headers }
         requests.push(request)
         let answer
         try {
           answer = handle(request) || { status: 404, json: { error: 'no such route' } }
         } catch (error) {
           answer = { status: 500, json: { error: error.message } }
+        }
+        // `form`: an answer form-encoded, as some vendors send unless asked for JSON
+        if (answer.form !== undefined) {
+          res.writeHead(answer.status, { 'content-type': 'application/x-www-form-urlencoded', ...(answer.headers || {}) })
+          res.end(new URLSearchParams(answer.form).toString())
+          return
         }
         res.writeHead(answer.status, { 'content-type': 'application/json', ...(answer.headers || {}) })
         res.end(answer.json === undefined ? '' : JSON.stringify(answer.json))

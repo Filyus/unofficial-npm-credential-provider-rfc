@@ -66,7 +66,18 @@ const createFake = (state) => {
     return json(200, { access_token: login.token, token_type: 'bearer', scope })
   }
 
-  return ({ method, path, token, body, clock }) => {
+  // GitHub's OAuth endpoints answer form-encoded unless the request accepts JSON
+  const asAsked = (headers, answer) =>
+    answer && !String(headers?.accept || '').includes('json') && answer.json ? { status: answer.status, form: answer.json } : answer
+
+  return ({ method, path, token, body, clock, headers }) => {
+    if (method === 'POST' && path.startsWith('/login/')) {
+      return asAsked(headers, route({ method, path, token, body, clock }))
+    }
+    return route({ method, path, token, body, clock })
+  }
+
+  function route({ method, path, token, body, clock }) {
     if (method === 'POST' && path === '/login/device/code') {
       return body && body.client_id && body.scope ? deviceCode() : json(200, { error: 'incorrect_client_credentials' })
     }
