@@ -37,7 +37,7 @@ from tests.provider_harness import (
 PER_KIND_LIMIT = 3
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seconds", type=float, default=60)
     parser.add_argument("--seed", type=int, default=None)
@@ -103,6 +103,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print("no invariant broken")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Exit status 2 for an error in the harness itself (a missing tool, a bridge that
+    died): an invariant that broke is 1, and the two are not the same finding."""
+    try:
+        return run(argv)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        traceback.print_exc()
+        print("the harness itself failed; this is not an invariant that broke", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

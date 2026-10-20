@@ -345,3 +345,122 @@ fn workspace_manifest() -> PathBuf {
         .join("../..")
         .join("Cargo.toml")
 }
+
+// A line that is not a request is answered with one `Err`, never `Ok`, and the
+// session goes on (Phase 2, Session lifecycle). The reference providers in
+// Node get the same treatment from tests/test_provider_hostile.py.
+
+fn other_error(response: &ProviderResponse) -> &str {
+    match response {
+        ProviderResponse::Err(error) if error.kind == ErrorKind::Other => {
+            error.message.as_deref().unwrap_or("")
+        }
+        other => panic!("expected an Err of kind other, got {other:?}"),
+    }
+}
+
+fn still_serves(session: &mut ProviderSession) {
+    let answer = session
+        .request(&Request::get_install(
+            "https://registry.example.test/",
+            Some("@scope"),
+            "after",
+        ))
+        .expect("the provider answers the next request");
+    assert!(matches!(answer, ProviderResponse::Ok(_)), "{answer:?}");
+}
+
+#[test]
+fn a_line_that_is_not_json_is_answered_with_an_error_and_the_session_goes_on() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    for line in [
+        &b"{not json\n"[..],
+        b"[]\n",
+        b"null\n",
+        b"\xff\xfe\n",
+        b"7\n",
+    ] {
+        session.write_raw(line).expect("written");
+        let answer = session.read_answer().expect("one answer for the line");
+        assert!(
+            other_error(&answer).starts_with("malformed request"),
+            "{line:?}"
+        );
+    }
+    still_serves(&mut session);
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn a_request_against_the_schema_is_answered_with_an_error_and_never_served() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    for line in [
+        // a get with no interactive, a scope without @, a publish with no version
+        r#"{"v":1,"kind":"get","registry":"https://r.test/","operation":"read"}"#,
+        r#"{"v":1,"kind":"get","registry":"https://r.test/","operation":"read","interactive":true,"scope":"acme"}"#,
+        r#"{"v":1,"kind":"get","registry":"https://r.test/","operation":"publish","interactive":true}"#,
+        r#"{"v":2,"kind":"get","registry":"https://r.test/","operation":"read","interactive":true}"#,
+        r#"{"v":1,"kind":"get","registry":"https://r.test/","operation":"read","interactive":true,"retry":null}"#,
+    ] {
+        session
+            .write_raw(format!("{line}\n").as_bytes())
+            .expect("written");
+        let answer = session.read_answer().expect("one answer for the line");
+        assert!(
+            other_error(&answer).starts_with("malformed request"),
+            "{line}"
+        );
+    }
+    still_serves(&mut session);
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn a_line_over_the_limit_is_refused_whole_and_the_next_line_is_read() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    // a request that would be served, with padding that takes it past 1 MiB
+    let padding = "p".repeat(2 * 1024 * 1024);
+    let line = format!(
+        r#"{{"v":1,"kind":"get","registry":"https://r.test/","operation":"read","interactive":true,"padding":"{padding}"}}"#
+    );
+    session.write_raw(line.as_bytes()).expect("written");
+    session.write_raw(b"\n").expect("written");
+    let answer = session.read_answer().expect("one answer for the line");
+    assert!(
+        other_error(&answer).starts_with("a line over"),
+        "{answer:?}"
+    );
+    still_serves(&mut session);
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn blank_lines_are_skipped_and_get_no_answer() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    session.write_raw(b"\n  \r\n\t\n").expect("written");
+    // had a blank line been answered, this request would be given its answer
+    still_serves(&mut session);
+    session
+        .close()
+        .expect("clean exit, and nothing left unanswered");
+}
+
+#[test]
+fn a_kind_no_version_knows_is_not_malformed_even_with_nothing_else() {
+    let mut session =
+        ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
+    session
+        .write_raw(b"{\"v\":1,\"kind\":\"refresh\",\"registry\":\"x\"}\n")
+        .expect("written");
+    let answer = session.read_answer().expect("answered");
+    assert!(
+        matches!(&answer, ProviderResponse::Err(error) if error.kind == ErrorKind::OperationNotSupported),
+        "{answer:?}"
+    );
+    still_serves(&mut session);
+    session.close().expect("clean exit");
+}

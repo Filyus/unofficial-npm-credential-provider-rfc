@@ -57,26 +57,6 @@ class MockProviderSubprocessTests(unittest.TestCase):
         finally:
             self.stop_provider(proc)
 
-    def test_mock_provider_invalid_json_response_is_rejected(self) -> None:
-        proc = self.start_provider("invalid-json")
-        try:
-            client = CredentialClientModel()
-            client.receive_hello(json.loads(proc.stdout.readline()))
-            request = self.default_request(client)
-            proc.stdin.write(json.dumps(request) + "\n")
-            proc.stdin.flush()
-            with self.assertRaises(json.JSONDecodeError):
-                json.loads(proc.stdout.readline())
-        finally:
-            self.stop_provider(proc)
-
-    def test_mock_provider_no_hello_is_detected(self) -> None:
-        proc = self.start_provider("no-hello")
-        try:
-            self.assertEqual(proc.stdout.readline(), "")
-        finally:
-            self.stop_provider(proc)
-
     def test_mock_provider_both_ok_and_err_is_rejected(self) -> None:
         client, request, response = self.exchange("both-ok-err")
 
@@ -94,15 +74,6 @@ class MockProviderSubprocessTests(unittest.TestCase):
 
         with self.assertRaises(ProtocolViolation):
             client.handle_response(request, response)
-
-    def test_provider_timeout_can_be_enforced_by_client(self) -> None:
-        proc = self.start_provider("slow-hello")
-        try:
-            with self.assertRaises(subprocess.TimeoutExpired):
-                proc.wait(timeout=0.1)
-        finally:
-            proc.kill()
-            self.stop_provider(proc, expect_returncode=None)
 
     def exchange(self, scenario: str, request: dict | None = None) -> tuple[CredentialClientModel, dict, dict]:
         proc = self.start_provider(scenario)

@@ -5,6 +5,9 @@
 //   node --test examples/providers/
 
 const assert = require('node:assert/strict')
+const { spawn } = require('node:child_process')
+const os = require('node:os')
+const path = require('node:path')
 const { Readable } = require('node:stream')
 const test = require('node:test')
 const { readLines, parseRequest, validateRequest, MAX_LINE_BYTES } = require('./lib/protocol.js')
@@ -115,4 +118,80 @@ test('lone surrogates and numbers beyond a double are refused wherever they are,
 
 test('the limit is the 1 MiB the RFC sets as the floor', () => {
   assert.equal(MAX_LINE_BYTES, 1048576)
+})
+
+test('what a handler throws is the answer, except that a parse error quotes nothing', async () => {
+  const script = `
+    const { serve } = require(${JSON.stringify(path.join(__dirname, 'lib', 'protocol.js'))})
+    serve(async () => ({
+      hello: { v: [1] },
+      handlers: {
+        get: async (request) => {
+          if (request.package === 'parse') {
+            throw new SyntaxError('Unexpected token s, "client_secret: s3cr3t-value-xyz" is not valid JSON')
+          }
+          throw new Error('the registry said no')
+        },
+      },
+    }))
+  `
+  const fs = require('node:fs')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'serve-test-'))
+  const file = path.join(dir, 'provider.js')
+  fs.writeFileSync(file, script)
+  const child = spawn(process.execPath, [file, '--npm-credential-provider'], { stdio: ['pipe', 'pipe', 'inherit'] })
+  const lines = []
+  // a provider that never answers fails this test in seconds, not at the runner's limit
+  const waitFor = async (condition, what) => {
+    const stop = Date.now() + 10000
+    while (!condition()) {
+      assert.ok(Date.now() < stop, `no ${what} within 10 s`)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+  let buffered = ''
+  child.stdout.on('data', (chunk) => {
+    buffered += chunk
+    let at
+    while ((at = buffered.indexOf('\n')) !== -1) {
+      lines.push(JSON.parse(buffered.slice(0, at)))
+      buffered = buffered.slice(at + 1)
+    }
+  })
+  const answerTo = async (package_) => {
+    const before = lines.length
+    child.stdin.write(`${JSON.stringify({ ...GET, package: package_ })}\n`)
+    await waitFor(() => lines.length > before, 'answer')
+    return lines.at(-1)
+  }
+  try {
+    await waitFor(() => lines.length > 0, 'hello')
+    const parse = await answerTo('parse')
+    assert.equal(parse.Err.kind, 'other')
+    assert.ok(!JSON.stringify(parse).includes('s3cr3t'), JSON.stringify(parse))
+    assert.equal((await answerTo('other')).Err.message, 'the registry said no')
+  } finally {
+    child.kill()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a scenario that cannot be set up fails with its reason and leaves nothing listening', async () => {
+  const { prepare } = require('./lib/scenario.js')
+  const fs = require('node:fs')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenario-test-'))
+  try {
+    const scenarioFile = path.join(dir, 'bad.json')
+    fs.writeFileSync(scenarioFile, JSON.stringify({ hosts: 5 }))
+    const transcript = path.join(__dirname, '..', 'npmjs', 'install.jsonl')
+    await assert.rejects(prepare('npmjs', transcript, { scenarioFile }), /map is not a function|hosts/)
+    // the handle is released a moment after close() calls back
+    const stop = Date.now() + 2000
+    while (process.getActiveResourcesInfo().includes('TCPServerWrap') && Date.now() < stop) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.ok(!process.getActiveResourcesInfo().includes('TCPServerWrap'), 'a fake server is still listening')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

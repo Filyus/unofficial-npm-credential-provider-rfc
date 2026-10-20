@@ -26,7 +26,12 @@ import tempfile
 import threading
 from typing import Any, Callable, Iterable
 
-from tests.generated_policy import ERROR_KINDS, OPERATIONS_REQUIRING_VERSION, SUPPORTED_OPERATIONS
+from tests.generated_policy import (
+    ERROR_KINDS,
+    LINE_SIZE_MINIMUM,
+    OPERATIONS_REQUIRING_VERSION,
+    SUPPORTED_OPERATIONS,
+)
 from tests.protocol_model import (
     CredentialClientModel,
     ProtocolViolation,
@@ -42,9 +47,11 @@ SCENARIO = ROOT / "examples" / "providers" / "scenario.js"
 STEPS = 20
 READ_OPERATIONS = {"read", "stage-read"}
 FOREIGN = "https://elsewhere.example.test/"
-# operations no version knows; two of them are also names on every JavaScript object
+# operations no version knows; `constructor` is also a name every JavaScript object
+# has, through Object.prototype, so a provider that looks an operation up in a plain
+# object finds something; `prototype` is only another unknown one
 UNKNOWN_OPERATIONS = ["frobnicate", "constructor", "prototype"]
-LINE_FLOOR = 1024 * 1024  # Phase 2: a maximum line size of at least 1 MiB
+LINE_FLOOR = LINE_SIZE_MINIMUM  # Phase 2: a maximum line size of at least 1 MiB, the newline counted
 
 # how the reference providers say a line was rejected before it was a request
 REJECTION_PREFIXES = ("malformed request", "a line over")
@@ -554,6 +561,10 @@ class Session:
             code = self.provider.wait(timeout=10)
         except subprocess.TimeoutExpired:
             raise Violation("exit-0", f"{self.label}: the provider did not exit after stdin closed") from None
+        # the pipes close with the process; the reader threads may not have read the
+        # last of what it wrote, and stderr and the leftover lines are read after them
+        for lines in (self.err, self.out):
+            lines.thread.join(timeout=10)
         stderr = b"".join(self.err.text).decode("utf-8", "replace")
         if code != 0:
             raise Violation("exit-0", f"{self.label}: the provider exited {code}\n{stderr[-1500:]}")
@@ -610,12 +621,10 @@ def all_indices() -> list:
 
 
 def shrink(name: str, transcript: Path, seed: int, indices: list, violation: Violation, *, hostile: bool,
-           deadline: float = 10, runs: Callable[[], None] | None = None) -> tuple[list, Violation]:
+           deadline: float = 10) -> tuple[list, Violation]:
     """ddmin over the steps: the smallest list of steps that still breaks the
     same invariant."""
     def fails(candidate: list) -> Violation | None:
-        if runs:
-            runs()
         found, _ = run_session(name, transcript, seed, candidate, hostile=hostile, deadline=deadline)
         return found if found and found.invariant == violation.invariant else None
 

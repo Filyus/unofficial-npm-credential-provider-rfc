@@ -156,8 +156,9 @@ const create = async (args) => {
         )
       }
     } else if (request.retry && request.httpStatus === 403) {
-      // widen only a publish, only from a token that was not stage-only, only
-      // to the session token, under the write policy and a new presence prompt
+      // widen only a publish or an unpublish (the session token serves both), only
+      // from a token that was neither stage-only nor the session token, only to the
+      // session token, under the write policy and a new presence prompt
       const first = handedOut.get(contextKey(request)) || (candidates(op.tiers, request)[0] || {}).entry?.tier
       const widens = ['publish', 'unpublish'].includes(request.operation) && first !== 'stage-only' && first !== 'session'
       if (!widens) {
@@ -225,6 +226,9 @@ const create = async (args) => {
     // the registry's Retry-After decides the wait; without one, the
     // configured interval
     const interval = ctx.config.pollMs ?? 2000
+    // npm gives a login five minutes; a poll that must wait longer than what is left
+    // would fail anyway, and a delay beyond 2^31 ms makes a timer fire at once
+    const until = ctx.clockMs() + (ctx.config.loginSeconds ?? 270) * 1000
     for (let attempt = 0; attempt < (ctx.config.pollLimit ?? 300); attempt += 1) {
       const polled = await ctx.request('GET', doneUrl)
       if (polled.status === 200 && polled.json && polled.json.token) {
@@ -239,6 +243,9 @@ const create = async (args) => {
       }
       const retryAfter = Number(polled.headers['retry-after'])
       const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : interval
+      if (ctx.clockMs() + wait > until) {
+        return err('other', `The registry asked for ${Math.ceil(wait / 1000)} seconds before the next poll, longer than this login has left.`)
+      }
       await ctx.sleep(wait)
     }
     return err('other', 'The web login was not completed in time.')

@@ -36,8 +36,9 @@ class ProviderSessionTests(unittest.TestCase):
         self.assertGreater(requests, len(listed) * 5)
 
     def test_an_operation_no_version_knows_is_unsupported_not_served_as_a_read(self) -> None:
-        """`constructor` and `prototype` are names on every JavaScript object, so
-        a provider that looks an operation up in a plain object finds a tier."""
+        """`constructor` is a name every JavaScript object has, so a provider that
+        looks an operation up in a plain object finds a tier; `prototype` is not,
+        and is here as one more operation nobody knows."""
         first = {}
         for name, transcript in scenarios():
             first.setdefault(name, transcript)

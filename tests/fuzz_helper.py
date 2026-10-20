@@ -279,7 +279,7 @@ def judge_paths(prototype: Path, values: list[str]) -> list[dict]:
     return found
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--prototype", type=Path, required=True, help="the npm-registry-fetch checkout with the prototype")
     parser.add_argument("--seconds", type=float, default=30)
@@ -319,6 +319,19 @@ def main(argv: list[str] | None = None) -> int:
     if not kinds:
         print("the prototype and the model agreed, and nothing leaked")
     return 1 if kinds else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Exit status 2 for an error in the harness itself (a missing tool, a bridge that
+    died): an invariant that broke is 1, and the two are not the same finding."""
+    try:
+        return run(argv)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        traceback.print_exc()
+        print("the harness itself failed; this is not an invariant that broke", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

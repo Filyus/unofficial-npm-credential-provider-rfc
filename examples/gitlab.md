@@ -86,7 +86,7 @@ The erase deletes the deploy token the provider minted for that scope. It does n
 
 ## Login and logout
 
-[login.jsonl](gitlab/login.jsonl). `npm login --registry https://gitlab.example.com/api/v4/projects/42/packages/npm/` sends `login` with `interactive: true`. The provider starts the device authorization grant, or an authorization code flow with PKCE, prints the URL and code on the controlling terminal, polls, and keeps the refresh token in the OS keychain. It answers `{"Ok":{"kind":"login"}}`. No token is written to a file npm reads.
+[login.jsonl](gitlab/login.jsonl). `npm login --registry https://gitlab.example.com/api/v4/projects/42/packages/npm/` sends `login` with `interactive: true`. The provider starts the device authorization grant, or an authorization code flow with PKCE, prints the URL and code on the controlling terminal, polls, and keeps the refresh token in the OS keychain. It answers `{"Ok":{"kind":"login"}}`. No token is written to a file npm reads. It stops polling when the device code's life, which the server gives with it, is over, and answers `other` ([login-unapproved.jsonl](gitlab/login-unapproved.jsonl)); a person who has not approved it by then has not.
 
 [logout.jsonl](gitlab/logout.jsonl). `npm logout` sends `logout`. The provider revokes the OAuth tokens on a best effort basis, deletes any deploy tokens it still holds (`DELETE /projects/:id/deploy_tokens/:token_id`), removes the keychain entry, and answers `{"Ok":{"kind":"logout"}}` even if revocation failed, warning on stderr.
 

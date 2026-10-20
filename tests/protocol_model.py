@@ -512,7 +512,8 @@ def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and value != ""
 
 
-# the schema's `scope` pattern, anchored the way ECMA-262 `$` is (no trailing newline)
+# the schema's `scope` pattern `^@[^/]+$`: `[^/]` takes a newline, so "@scope\n" is a scope
+# here as in ECMA-262; fullmatch, because Python's `$` would also take one more after it
 _SCOPE = re.compile(r"@[^/]+")
 # the schema's `kind` and `operation` pattern: new values may appear within v1
 _IDENTIFIER = re.compile(IDENTIFIER_PATTERN)

@@ -9,6 +9,7 @@
 //   oauth.slowDown                          the first poll is answered slow_down; a poll sooner
 //                                           than 5 s after it slow_down again, a second one
 //                                           expired_token (RFC 8628)
+//   oauth.interval, deviceExpiresIn         the device grant's poll interval (0) and lifetime (300 s)
 //   oauth.revoked                           tokens revoked so far
 //   tokens                                  secrets the next deploy tokens get
 //   deployTokens                            live deploy tokens, as created
@@ -74,8 +75,8 @@ const createFake = (state) => {
         device_code: 'device-code',
         user_code: 'ABCD-1234',
         verification_uri: 'https://gitlab.example.com/oauth/device',
-        expires_in: 300,
-        interval: 0,
+        expires_in: oauth.deviceExpiresIn ?? 300,
+        interval: oauth.interval ?? 0,
       })
     }
     if (method === 'POST' && path === '/oauth/revoke') {

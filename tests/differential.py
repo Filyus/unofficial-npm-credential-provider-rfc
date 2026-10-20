@@ -10,9 +10,9 @@ module makes the messages (a valid one of each role from the transcripts, with
 fields dropped, retyped, added and respelled, and bytes mangled), asks each
 reader, and reports every case on which they do not all say the same.
 
-Verdicts are `ok`, `err`, `n/a` (the reader does not read this role, or this
-case is outside what it can represent: see `applies`), `crash` (the Python
-model raised something that is not a protocol violation) and `panic` (Rust).
+Verdicts are `ok`, `err`, `skip` (the JavaScript bridge does not read this role),
+`crash` (the Python model raised something that is not a protocol violation) and
+`panic` (Rust). A reader that cannot read a case is left out of it: see `applies`.
 """
 
 from __future__ import annotations
@@ -87,9 +87,10 @@ class Case:
     failing case can be shrunk by leaving some out."""
 
     def __init__(self, role: str, base: dict, ops: list[list]) -> None:
-        self.role, self.base, self.ops = role, base, ops
+        self.role, self.base = role, base
+        text, self.ops = apply_ops(base, ops)
         # one message to a line: a newline would be two
-        self.text = apply_ops(base, ops).replace(b"\n", b" ")
+        self.text = text.replace(b"\n", b" ")
 
     def line(self) -> bytes:
         return self.role.encode() + b"\t" + self.text
@@ -112,18 +113,24 @@ def get_at(value: Any, path: tuple) -> Any:
     return value
 
 
-def apply_ops(base: dict, ops: list[list]) -> bytes:
+def apply_ops(base: dict, ops: list[list]) -> tuple[bytes, list[list]]:
+    """The text the operations make, and the ones that did something: an
+    operation whose path is not in this message leaves no trace, and a shrunk
+    case or a saved repro must not name it."""
     message: Any = copy.deepcopy(base)
     text_ops = []
+    applied = []
     for op in ops:
         kind = op[0]
         try:
             if kind == "drop":
                 parent = get_at(message, tuple(op[1][:-1]))
-                if isinstance(parent, dict):
-                    parent.pop(op[1][-1], None)
+                if isinstance(parent, dict) and op[1][-1] in parent:
+                    del parent[op[1][-1]]
                 elif isinstance(parent, list) and isinstance(op[1][-1], int) and op[1][-1] < len(parent):
                     del parent[op[1][-1]]
+                else:
+                    continue
             elif kind == "set":
                 parent = get_at(message, tuple(op[1][:-1]))
                 if op[1]:
@@ -132,16 +139,18 @@ def apply_ops(base: dict, ops: list[list]) -> bytes:
                     message = copy.deepcopy(op[2])
             elif kind == "add":
                 parent = get_at(message, tuple(op[1]))
-                if isinstance(parent, dict):
-                    parent[op[2]] = copy.deepcopy(op[3])
+                if not isinstance(parent, dict):
+                    continue
+                parent[op[2]] = copy.deepcopy(op[3])
             else:
                 text_ops.append(op)
+            applied.append(op)
         except (KeyError, IndexError, TypeError):
             continue
     text = json.dumps(message, ensure_ascii=op_flag(ops)).encode("utf-8", "surrogatepass")
     for op in text_ops:
         text = text_op(text, op)
-    return text
+    return text, applied
 
 
 def op_flag(ops: list[list]) -> bool:
@@ -415,9 +424,11 @@ def shrink_case(case: Case, still: Any) -> Case:
     """Leaves out the operations that do not matter to `still(case)`."""
     ops = list(case.ops)
     for index in range(len(ops) - 1, -1, -1):
+        if index >= len(ops):
+            continue  # an earlier removal also took the operations that did nothing without it
         trial = ops[:index] + ops[index + 1:]
         if trial and still(Case(case.role, case.base, trial)):
-            ops = trial
+            ops = Case(case.role, case.base, trial).ops
     return Case(case.role, case.base, ops)
 
 

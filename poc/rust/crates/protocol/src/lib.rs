@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, BufRead, Write};
 
@@ -99,22 +100,23 @@ impl Hello {
     /// unique absolute `http:`/`https:` URLs, lowercase scheme, no user info,
     /// backslash, query or fragment.
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        // a set, not a scan of what came before: a hello may be a megabyte of
+        // entries, and comparing each with all the others would take minutes
         require(!self.v.is_empty(), "hello v must list a version")?;
-        for (index, version) in self.v.iter().enumerate() {
+        let mut seen = HashSet::new();
+        for version in &self.v {
             require(*version >= 1, "hello versions are integers from 1")?;
-            require(
-                !self.v[..index].contains(version),
-                "hello versions must be unique",
-            )?;
+            require(seen.insert(version), "hello versions must be unique")?;
         }
         if let Some(capabilities) = &self.capabilities {
-            for (index, capability) in capabilities.iter().enumerate() {
+            let mut seen = HashSet::new();
+            for capability in capabilities {
                 require(
                     !capability.is_empty(),
                     "hello capabilities must not be empty",
                 )?;
                 require(
-                    !capabilities[..index].contains(capability),
+                    seen.insert(capability.as_str()),
                     "hello capabilities must be unique",
                 )?;
             }
@@ -122,13 +124,14 @@ impl Hello {
         let Some(registries) = &self.registries else {
             return Ok(());
         };
-        for (index, entry) in registries.iter().enumerate() {
+        let mut seen = HashSet::new();
+        for entry in registries {
             require(
                 served_registry_is_well_formed(entry),
                 "hello registries must be absolute http(s) URLs without user info, backslash, query or fragment",
             )?;
             require(
-                !registries[..index].contains(entry),
+                seen.insert(entry.as_str()),
                 "hello registries must be unique",
             )?;
         }
@@ -391,7 +394,24 @@ impl Request {
         }
     }
 
+    /// What a client may send: a request the schema allows, of a kind and with
+    /// an operation this build knows.
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.validate_received()?;
+        require(
+            self.kind != RequestKind::Unsupported,
+            "a client must not send an unknown request kind",
+        )?;
+        require(
+            self.operation != Some(Operation::Unsupported),
+            "a client must not send an unknown operation",
+        )
+    }
+
+    /// What a provider may receive: a request the schema allows. A kind or an
+    /// operation this build does not know is well formed (a newer client sends
+    /// them) and is answered `operation-not-supported`, not refused as malformed.
+    pub fn validate_received(&self) -> Result<(), ProtocolError> {
         if self.v != PROTOCOL_VERSION {
             return Err(ProtocolError::InvalidMessage(
                 "request version must match negotiated protocol version".into(),
@@ -408,24 +428,15 @@ impl Request {
                     "erase carries the get's operation and the response's granularity",
                 )?;
             }
-            RequestKind::Login | RequestKind::Logout => {}
-            RequestKind::Unsupported => {
-                return Err(ProtocolError::InvalidMessage(
-                    "a client must not send an unknown request kind".into(),
-                ));
-            }
+            RequestKind::Login | RequestKind::Logout | RequestKind::Unsupported => {}
         }
-        if let Some(operation) = &self.operation {
+        if let Some(operation) = &self.operation
+            && operation.requires_version()
+        {
             require(
-                *operation != Operation::Unsupported,
-                "a client must not send an unknown operation",
+                self.version.is_some(),
+                "publish, stage and stage-reject require version",
             )?;
-            if operation.requires_version() {
-                require(
-                    self.version.is_some(),
-                    "publish, stage and stage-reject require version",
-                )?;
-            }
         }
         if let Some(token) = &self.token {
             require(!token.expose().is_empty(), "token must not be empty")?;
@@ -709,29 +720,63 @@ pub fn negotiate(hello: &Hello) -> Result<u32, ProtocolError> {
 }
 
 /// Reads one protocol line, refusing it whole once it passes `MAX_LINE_BYTES`
-/// rather than buffering whatever the peer chooses to send.
+/// rather than buffering whatever the peer chooses to send. What is left of an
+/// oversized line is thrown away as it is read, so the next call starts where a
+/// line starts. A line of nothing but spaces, tabs and carriage returns is
+/// skipped.
 pub fn read_json_line<T: DeserializeOwned>(
     reader: &mut impl BufRead,
 ) -> Result<Option<T>, ProtocolError> {
-    let mut line = Vec::new();
-    let bytes =
-        io::Read::take(&mut *reader, MAX_LINE_BYTES as u64 + 1).read_until(b'\n', &mut line)?;
-    if bytes == 0 {
-        return Ok(None);
+    loop {
+        let mut line = Vec::new();
+        let bytes =
+            io::Read::take(&mut *reader, MAX_LINE_BYTES as u64 + 1).read_until(b'\n', &mut line)?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+        if line.len() > MAX_LINE_BYTES {
+            if !line.ends_with(b"\n") {
+                skip_to_newline(reader)?;
+            }
+            return Err(ProtocolError::LineTooLong {
+                limit: MAX_LINE_BYTES,
+            });
+        }
+        if line
+            .iter()
+            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        {
+            continue;
+        }
+        // through `Value` first: a string with a lone surrogate is refused
+        // wherever it is, an unknown member's included, and a member named twice
+        // keeps its last value, as everywhere else
+        // not trimmed: JSON's own whitespace (space, tab, CR, LF) may follow the
+        // value and serde_json allows it, but ASCII whitespace such as a form feed
+        // is not JSON whitespace
+        let value: serde_json::Value = serde_json::from_slice(&line)?;
+        return Ok(Some(serde_json::from_value(value)?));
     }
-    if line.len() > MAX_LINE_BYTES {
-        return Err(ProtocolError::LineTooLong {
-            limit: MAX_LINE_BYTES,
-        });
+}
+
+/// Reads and drops the rest of the line, a buffer at a time.
+fn skip_to_newline(reader: &mut impl BufRead) -> Result<(), ProtocolError> {
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(());
+        }
+        match buffer.iter().position(|byte| *byte == b'\n') {
+            Some(at) => {
+                reader.consume(at + 1);
+                return Ok(());
+            }
+            None => {
+                let all = buffer.len();
+                reader.consume(all);
+            }
+        }
     }
-    // through `Value` first: a string with a lone surrogate is refused
-    // wherever it is, an unknown member's included, and a member named twice
-    // keeps its last value, as everywhere else
-    // not trimmed: JSON's own whitespace (space, tab, CR, LF) may follow the
-    // value and serde_json allows it, but ASCII whitespace such as a form feed
-    // is not JSON whitespace
-    let value: serde_json::Value = serde_json::from_slice(&line)?;
-    Ok(Some(serde_json::from_value(value)?))
 }
 
 pub fn write_json_line<T: Serialize>(
@@ -886,6 +931,81 @@ mod tests {
                 "{stray:?}"
             );
         }
+    }
+
+    // Found by a review of the crate (and then pinned): a hello can be a megabyte
+    // of entries, and the lines around it must stay in step.
+
+    #[test]
+    fn a_hello_of_a_megabyte_is_validated_in_a_moment() {
+        let versions: Vec<u64> = (1..=100_000).collect();
+        let capabilities: Vec<String> = (0..60_000).map(|number| format!("c{number}")).collect();
+        let registries: Vec<String> = (0..30_000)
+            .map(|number| format!("https://r{number}.example.test/"))
+            .collect();
+        let hello = Hello {
+            v: versions,
+            capabilities: Some(capabilities),
+            registries: Some(registries),
+        };
+        let started = std::time::Instant::now();
+        hello.validate().unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "validating took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_blank_line_is_skipped_and_an_oversized_one_leaves_the_next_line_readable() {
+        let mut input = io::Cursor::new(b"  \r\n\n\t\n{\"n\":1}\n".to_vec());
+        let first: serde_json::Value = read_json_line(&mut input).unwrap().unwrap();
+        assert_eq!(first["n"], 1);
+        assert!(
+            read_json_line::<serde_json::Value>(&mut input)
+                .unwrap()
+                .is_none()
+        );
+
+        let mut long = vec![b'x'; MAX_LINE_BYTES + 5000];
+        long.push(b'\n');
+        long.extend_from_slice(b"{\"n\":2}\n");
+        let mut input = io::Cursor::new(long);
+        assert!(matches!(
+            read_json_line::<serde_json::Value>(&mut input),
+            Err(ProtocolError::LineTooLong { .. })
+        ));
+        let next: serde_json::Value = read_json_line(&mut input).unwrap().unwrap();
+        assert_eq!(next["n"], 2, "the stream is where a line starts");
+    }
+
+    #[test]
+    fn a_line_of_exactly_the_limit_with_its_newline_is_read_and_one_byte_more_is_not() {
+        let at_limit = format!("{}{}\n", " ".repeat(MAX_LINE_BYTES - 3), "{}");
+        let mut input = io::Cursor::new(at_limit.into_bytes());
+        read_json_line::<serde_json::Value>(&mut input)
+            .unwrap()
+            .unwrap();
+        let over = format!("{}{}\n", " ".repeat(MAX_LINE_BYTES - 2), "{}");
+        let mut input = io::Cursor::new(over.into_bytes());
+        assert!(matches!(
+            read_json_line::<serde_json::Value>(&mut input),
+            Err(ProtocolError::LineTooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn a_request_a_provider_receives_may_have_a_kind_this_build_does_not_know() {
+        let request: Request = read(r#"{"v":1,"kind":"refresh","registry":"x"}"#).unwrap();
+        request.validate_received().unwrap();
+        assert!(request.validate().is_err(), "a client does not send it");
+        let known: Request =
+            read(r#"{"v":1,"kind":"get","registry":"x","operation":"read"}"#).unwrap();
+        assert!(
+            known.validate_received().is_err(),
+            "a get still needs interactive"
+        );
     }
 
     #[test]

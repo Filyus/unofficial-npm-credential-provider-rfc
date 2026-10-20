@@ -4,7 +4,7 @@ use credential_provider_protocol::{
     write_json_line,
 };
 use std::fmt;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +138,25 @@ impl ProviderSession {
         message: &serde_json::Value,
     ) -> Result<ProviderResponse, ExchangeError> {
         self.exchange(message)
+    }
+
+    /// Writes bytes to the provider as they are, newline and all, and reads no
+    /// answer: for a line that is not a request, or a blank one that gets none.
+    pub fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ExchangeError> {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or(ExchangeError::MissingPipe("stdin"))?;
+        stdin
+            .write_all(bytes)
+            .and_then(|()| stdin.flush())
+            .map_err(|error| ExchangeError::ProcessFailed(error.to_string()))
+    }
+
+    /// Reads the provider's next answer, whatever it is an answer to.
+    pub fn read_answer(&mut self) -> Result<ProviderResponse, ExchangeError> {
+        read_json_line::<ProviderResponse>(&mut self.reader)?
+            .ok_or_else(|| ExchangeError::Provider("provider exited before response".into()))
     }
 
     fn exchange<T: serde::Serialize>(

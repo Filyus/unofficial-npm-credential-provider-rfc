@@ -75,17 +75,20 @@ const fixtureSecrets = (name) => {
 }
 
 // `presence` replaces the scenario's scripted answers, for sessions that are
-// not the transcript's (tests/test_provider_sessions.py).
-const prepare = async (name, transcriptFile, { presence } = {}) => {
+// not the transcript's (tests/test_provider_sessions.py). `owned` is told what
+// has been started, so that a setup that fails can give it back.
+const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {}, owned = {}) => {
   const base = path.basename(transcriptFile, '.jsonl')
   const label = `${name}/${base}`
-  const scenarioFile = path.join(providers, name, 'scenarios', `${base}.json`)
+  const scenarioFile = given ?? path.join(providers, name, 'scenarios', `${base}.json`)
   assert.ok(fs.existsSync(scenarioFile), `${label}: no scenario at ${path.relative(examples, scenarioFile)}`)
   const scenario = JSON.parse(fs.readFileSync(scenarioFile, 'utf8'))
   const { createFake } = require(path.join(providers, name, 'fake.js'))
   const fakeState = structuredClone(scenario.state || {})
   const fake = await startFake(createFake(fakeState))
+  owned.fake = fake
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), `provider-${name}-`))
+  owned.scratch = scratch
 
   // `now` is the clock at the start; `clock`, if given, is the clock for
   // each client request in turn, so time can pass between requests
@@ -139,7 +142,9 @@ const prepare = async (name, transcriptFile, { presence } = {}) => {
     // after the session; `stderr` is the provider's, when the client kept it
     finish: (stderr) => {
       if (stderr !== null) {
-        // stderr is logged by npm: no secret may reach it, masked or not
+        // stderr is logged by npm: no secret of the scenario may appear in it as it is.
+        // A masked or partial value is not looked for, and neither is a secret of fewer
+        // than six characters (see collectSecrets)
         const secrets = new Set([
           ...collectSecrets({ store: scenario.store, state: scenario.state, env: scenario.env }),
           ...collectSecrets(readJsonl(transcriptFile).map((event) => event.message)),
@@ -166,6 +171,24 @@ const prepare = async (name, transcriptFile, { presence } = {}) => {
       await fake.close()
       fs.rmSync(scratch, { recursive: true, force: true })
     },
+  }
+}
+
+// A scenario that cannot be set up fails with its reason, and leaves no fake
+// server listening and no scratch directory behind: a run that hangs on a
+// bad scenario hides what was wrong with it.
+const prepare = async (name, transcriptFile, options = {}) => {
+  const owned = {}
+  try {
+    return await setUp(name, transcriptFile, options, owned)
+  } catch (error) {
+    if (owned.fake) {
+      await owned.fake.close()
+    }
+    if (owned.scratch) {
+      fs.rmSync(owned.scratch, { recursive: true, force: true })
+    }
+    throw error
   }
 }
 

@@ -7,12 +7,15 @@
 // What arrives is not trusted. A line over the size limit is dropped as it
 // arrives, never buffered, and one that is not UTF-8, not JSON, not an object
 // or not a request the schema accepts is answered with an error and the
-// session goes on: one answer per line, never an `Ok` for a line that is not
-// a valid request.
+// session goes on: one answer per line (a line of only spaces, tabs and
+// carriage returns is skipped, and gets none), never an `Ok` for a line that is
+// not a valid request.
 
 const SENTINEL = '--npm-credential-provider'
 
-// The floor Phase 2 sets for a maximum line size: 1 MiB, newline excluded.
+// The floor Phase 2 sets for a maximum line size is 1 MiB with the newline
+// counted. This one counts the newline out, so it takes one byte more than the
+// floor asks of it, as the RFC allows ("at least").
 const MAX_LINE_BYTES = 1024 * 1024
 
 const ok = (kind, fields = {}) => ({ Ok: { kind, ...fields } })
@@ -230,7 +233,9 @@ const serve = async (start) => {
     try {
       answer = handler ? await handler(message) : err('operation-not-supported')
     } catch (error) {
-      answer = err('other', error.message)
+      // a parse error quotes what it could not parse, and what a provider parses is
+      // its own store or an identity file: no part of that goes to npm
+      answer = err('other', error instanceof SyntaxError ? 'a file the provider reads is not valid JSON' : error.message)
     }
     write(answer)
   }

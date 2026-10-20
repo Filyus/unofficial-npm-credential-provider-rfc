@@ -33,8 +33,13 @@ fuzz_target!(|data: &[u8]| {
                 held > MAX_LINE_BYTES,
                 "a line within the limit was refused as too long"
             );
-            // refused whole: nothing read past the limit
-            assert!(input.position() <= MAX_LINE_BYTES as u64 + 1);
+            // refused whole, and the rest of the line thrown away: the stream is
+            // where the next line starts, and that line reads
+            assert_eq!(input.position(), held as u64);
+            let next: serde_json::Value = read_json_line(&mut input)
+                .expect("the line after an oversized one is readable")
+                .expect("and is there");
+            assert_eq!(next, serde_json::json!({}));
         }
         _ => assert!(
             held <= MAX_LINE_BYTES,

@@ -25,9 +25,9 @@ class ExampleTranscriptTests(unittest.TestCase):
 
 class TranscriptSchemaTests(unittest.TestCase):
     """Every message of every transcript, the examples' and the model's own,
-    against the JSON schema for its role. The reference providers must print
-    their examples' transcripts exactly, so this is also their answers
-    checked against the schema, independently of the Python model."""
+    against the JSON schema for its role, independently of the Python model.
+    (examples/providers/run.js makes the reference providers print their examples'
+    transcripts exactly, which is what ties these answers to the providers.)"""
 
     def test_every_transcript_message_matches_the_schema(self) -> None:
         try:

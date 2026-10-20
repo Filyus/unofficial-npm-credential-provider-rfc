@@ -141,7 +141,8 @@ def rust_timeouts(policy: dict) -> list[str]:
         "logout": "LOGOUT",
     }
     timeouts = policy["credentialProvider"]["timeoutSeconds"]
-    assert set(timeouts) == set(names), "update rust_timeouts for the new timeout"
+    if set(timeouts) != set(names):
+        raise SystemExit("update rust_timeouts for the new timeout kind: " + ", ".join(sorted(set(timeouts) ^ set(names))))
     return [f"pub const {names[key]}_TIMEOUT_SECONDS: u64 = {timeouts[key]};" for key in names]
 
 

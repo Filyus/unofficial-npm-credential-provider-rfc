@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 
 
 def write(message: dict) -> None:
@@ -33,21 +32,11 @@ def main() -> int:
             "other-error",
             "malformed-auth",
             "expires-missing-expiration",
-            "invalid-json",
-            "no-hello",
-            "slow-hello",
             "both-ok-err",
         ],
         default="get-success",
     )
     args = parser.parse_args()
-
-    if args.scenario == "no-hello":
-        return 0
-
-    if args.scenario == "slow-hello":
-        time.sleep(10)
-        return 0
 
     if args.scenario == "version-mismatch":
         write({"v": [2]})
@@ -62,9 +51,6 @@ def main() -> int:
             write({"Err": {"kind": "operation-not-supported"}})
         elif args.scenario == "other-error":
             write({"Err": {"kind": "other", "message": "provider failed"}})
-        elif args.scenario == "invalid-json":
-            sys.stdout.write("{not-json}\n")
-            sys.stdout.flush()
         elif args.scenario == "both-ok-err":
             write({"Ok": {"kind": "login"}, "Err": {"kind": "other"}})
         elif args.scenario == "malformed-auth":

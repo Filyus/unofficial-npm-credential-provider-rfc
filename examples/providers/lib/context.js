@@ -25,14 +25,20 @@ const loadContext = (configPath) => {
     }
   }
 
+  // Written whole or not at all: to a file beside it, then renamed over it, so a
+  // crash leaves the old store and not an empty one. The mode keeps the file to
+  // its owner where there are modes; on Windows it is ignored, and a real
+  // provider would use the credential store the platform has.
   const writeStore = (store) => {
-    const fd = fs.openSync(storePath, 'w', 0o600)
+    const temporary = `${storePath}.${process.pid}.tmp`
+    const fd = fs.openSync(temporary, 'w', 0o600)
     try {
       fs.writeSync(fd, `${JSON.stringify(store, null, 2)}\n`)
       fs.fsyncSync(fd)
     } finally {
       fs.closeSync(fd)
     }
+    fs.renameSync(temporary, storePath)
   }
 
   // Time comes from here, never from Date.now or setTimeout, so that a run
@@ -57,13 +63,48 @@ const loadContext = (configPath) => {
     return base + elapsedMs
   }
   const now = () => Math.floor(clockMs() / 1000)
+  // `sleep(ms)` is a promise with a `cancel()`. A real timer is cleared; a
+  // synthetic one gives back the time it had taken if it had not fired, so a
+  // deadline that was not the one to pass moves nothing.
   const sleep = (ms) => {
+    let cancel
+    let promise
     if (!clockPath) {
-      return new Promise((resolve) => setTimeout(resolve, ms))
+      promise = new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms)
+        cancel = () => clearTimeout(timer)
+      })
+    } else {
+      clockMs()
+      const taken = Math.max(0, ms)
+      elapsedMs += taken
+      promise = new Promise((resolve) => {
+        const immediate = setImmediate(() => {
+          cancel = () => {}
+          resolve()
+        })
+        cancel = () => {
+          clearImmediate(immediate)
+          elapsedMs -= taken
+        }
+      })
     }
-    clockMs()
-    elapsedMs += Math.max(0, ms)
-    return new Promise((resolve) => setImmediate(resolve))
+    promise.cancel = () => cancel()
+    return promise
+  }
+
+  // What `task` answers, or null once `ms` have passed; whichever comes second is
+  // given up: the timer is cleared and `signal` aborts what `task` waits on (the
+  // read of the terminal), so the provider can exit as soon as it is done.
+  const withDeadline = async (task, ms) => {
+    const controller = new AbortController()
+    const timer = sleep(ms)
+    try {
+      return await Promise.race([task(controller.signal), timer.then(() => null)])
+    } finally {
+      timer.cancel()
+      controller.abort()
+    }
   }
 
   // The address that answers for a registry or API URL: the configured
@@ -105,7 +146,7 @@ const loadContext = (configPath) => {
   // User presence. A real run asks on the controlling terminal, never on
   // stdin, which belongs to the protocol; the conformance run scripts the
   // answers. Only called when the request says `interactive: true`.
-  const confirm = async (question) => {
+  const confirm = async (question, signal) => {
     if (scripted) {
       if (!answers.length) {
         throw new Error(`no scripted answer for: ${question}`)
@@ -117,7 +158,7 @@ const loadContext = (configPath) => {
       // deadline, a `sleep`, decides
       return answer === 'silent' ? new Promise(() => {}) : answer
     }
-    return askTerminal(question)
+    return askTerminal(question, signal)
   }
 
   // A browser or device-code step the person completes. Scripted runs have
@@ -134,7 +175,7 @@ const loadContext = (configPath) => {
     }
   }
 
-  return { config, readStore, writeStore, now, clockMs, sleep, request, confirm, showToPerson }
+  return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, showToPerson }
 }
 
 // On Windows the device names, not `CONIN$` and `CONOUT$`: Node resolves a
@@ -155,8 +196,10 @@ const writeTerminal = (text) => {
   }
 }
 
-// Asynchronous, so that a provider's own deadline on the prompt can fire.
-const askTerminal = (question) =>
+// Asynchronous, so that a provider's own deadline on the prompt can fire, and
+// abortable, so that once it has the read of the terminal does not hold the
+// process until someone presses Enter.
+const askTerminal = (question, signal) =>
   new Promise((resolve, reject) => {
     writeTerminal(`${question} [y/N] `)
     const input = fs.createReadStream(terminalPaths().input)
@@ -169,6 +212,10 @@ const askTerminal = (question) =>
       }
     })
     input.on('error', reject)
+    signal?.addEventListener('abort', () => {
+      input.destroy()
+      resolve(false)
+    }, { once: true })
   })
 
 module.exports = { loadContext }

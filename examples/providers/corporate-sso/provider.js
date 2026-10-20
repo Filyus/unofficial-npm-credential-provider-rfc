@@ -202,7 +202,7 @@ const start = (args) => {
   // --- presence ----------------------------------------------------------------
 
   // the answer, or null when the deadline passes first
-  const confirmWithin = (question, ms) => Promise.race([ctx.confirm(question), ctx.sleep(ms).then(() => null)])
+  const confirmWithin = (question, ms) => ctx.withDeadline((signal) => ctx.confirm(question, signal), ms)
 
   // --- handlers ----------------------------------------------------------------
 

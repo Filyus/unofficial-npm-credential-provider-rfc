@@ -25,7 +25,7 @@ import time
 from tests import differential as d
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seconds", type=float, default=60)
     parser.add_argument("--seed", type=int, default=None)
@@ -74,6 +74,19 @@ def main(argv: list[str] | None = None) -> int:
         }, indent=2) + "\n", encoding="utf-8")
         print(f"\n{counts[signature]} x {role}: {verdicts}\n  {small.text[:300]!r}\n  repro: {path}")
     return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Exit status 2 for an error in the harness itself (a missing tool, a bridge that
+    died): an invariant that broke is 1, and the two are not the same finding."""
+    try:
+        return run(argv)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        traceback.print_exc()
+        print("the harness itself failed; this is not an invariant that broke", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

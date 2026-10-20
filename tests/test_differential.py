@@ -10,6 +10,7 @@ Needs `cargo` and `node`.
 from __future__ import annotations
 
 import collections
+import json
 import shutil
 import unittest
 from unittest import mock
@@ -53,10 +54,27 @@ class DifferentialTests(unittest.TestCase):
             self.assertGreater(len(d.judge(cases)), 20)
 
     def test_a_crash_is_a_disagreement_even_when_everyone_says_the_same(self) -> None:
+        """With every reader saying `crash`, the verdicts agree, and only the clause
+        that treats a crash as a finding can report the case."""
         cases = [d.Case("response", self.pool["response"][0], [["set", [], 1]])]
-        with mock.patch.object(d, "verdict_python", lambda role, message: "crash TypeError: x"):
+        crash = lambda *_: "crash TypeError: x"  # noqa: E731
+        with (
+            mock.patch.object(d, "verdict_python", crash),
+            mock.patch.object(d, "verdict_schema", crash),
+            mock.patch.object(d, "rust_verdicts", lambda lines: ["crash x"] * len(lines)),
+            mock.patch.object(d, "js_verdicts", lambda lines: ["crash x"] * len(lines)),
+        ):
             found = d.judge(cases)
         self.assertEqual(len(found), 1)
+        self.assertEqual({d.short(verdict) for verdict in found[0]["verdicts"].values()}, {"crash"})
+
+    def test_an_operation_that_did_nothing_is_not_kept(self) -> None:
+        """A drop of a member the message has not, or an add into something that is
+        not an object, changes nothing, and a shrunk case must not name it."""
+        base = {"v": [1]}
+        case = d.Case("hello", base, [["drop", ["capabilities"]], ["add", [], "x", 1], ["add", ["v"], "y", 2]])
+        self.assertEqual(case.ops, [["add", [], "x", 1]])
+        self.assertEqual(json.loads(case.text), {"v": [1], "x": 1})
 
     def test_shrinking_keeps_only_the_operations_that_matter(self) -> None:
         base = self.pool["hello"][0]

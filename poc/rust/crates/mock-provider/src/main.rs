@@ -1,6 +1,7 @@
 use credential_provider_protocol::{
-    ErrorKind, Granularity, Hello, Operation, ProviderErr, ProviderOk, ProviderResponse, Request,
-    RequestKind, generated::SENTINEL_ARGUMENT, read_json_line, write_json_line,
+    ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderErr, ProviderOk,
+    ProviderResponse, Request, RequestKind, generated::SENTINEL_ARGUMENT, read_json_line,
+    write_json_line,
 };
 use std::io::{self, BufReader};
 
@@ -44,7 +45,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
     let mut served = 0_u32;
-    while let Some(request) = read_json_line::<Request>(&mut reader)? {
+    loop {
+        // A line that is not a request (not UTF-8 JSON, not an object, over the
+        // size limit, against the schema) is answered with one `Err`, the line is
+        // not echoed (a login carries a token), and the session goes on: Phase 2,
+        // Session lifecycle.
+        let request = match read_json_line::<Request>(&mut reader) {
+            Ok(Some(request)) => request,
+            Ok(None) => break,
+            Err(ProtocolError::Io(error)) => return Err(error.into()),
+            Err(ProtocolError::LineTooLong { limit }) => {
+                refuse(format!("a line over {limit} bytes was rejected whole"))?;
+                continue;
+            }
+            Err(_) => {
+                refuse("malformed request: not UTF-8 JSON that is a request".into())?;
+                continue;
+            }
+        };
+        if let Err(problem) = request.validate_received() {
+            refuse(format!("malformed request: {problem}"))?;
+            continue;
+        }
         served += 1;
         // A kind or operation this provider does not know comes from a newer
         // client; the answer is a structured refusal, never a crash or a guess.
@@ -124,4 +146,17 @@ fn parse_scenario() -> String {
         }
     }
     "get-success".into()
+}
+
+/// The one answer a line that is not a request gets.
+fn refuse(message: String) -> Result<(), Box<dyn std::error::Error>> {
+    write_json_line(
+        &mut io::stdout(),
+        &ProviderResponse::Err(ProviderErr {
+            kind: ErrorKind::Other,
+            message: Some(message),
+            caused_by: None,
+        }),
+    )?;
+    Ok(())
 }

@@ -86,3 +86,45 @@ test('the npmjs.com provider waits out Retry-After on real timers', async (t) =>
   const issuedAt = stored.tokens.find((entry) => entry.tier === 'session').issuedAt
   assert.ok(Math.abs(issuedAt - Date.now() / 1000) < 5, 'the token was stamped with a time that is not now')
 })
+
+// A provider answers a presence prompt and has nothing more to do: it must be
+// able to exit, not wait out the deadline of the prompt. The deadline of a
+// prompt is minutes, and a timer that is not cleared holds the process.
+test('a deadline that did not pass does not keep the process alive', async (t) => {
+  const config = scratchConfig(t, {})
+  const script = `
+    const { loadContext } = require(${JSON.stringify(path.join(__dirname, 'lib', 'context.js'))})
+    const ctx = loadContext(${JSON.stringify(config)})
+    ctx.withDeadline(() => Promise.resolve("answered"), 30000).then((answer) => console.log(answer))
+  `
+  const started = Date.now()
+  const done = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'inherit'] })
+    let out = ''
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+    child.on('close', (code) => resolve({ code, out }))
+    t.after(() => child.kill())
+  })
+  assert.equal(done.out.trim(), 'answered')
+  assert.ok(Date.now() - started < 10000, `the process stayed ${Date.now() - started} ms for a half-minute deadline`)
+})
+
+test('a deadline that passes gives null, and aborts what was waiting', async (t) => {
+  const ctx = loadContext(scratchConfig(t, {}))
+  let aborted = false
+  const started = Date.now()
+  const answer = await ctx.withDeadline(
+    (signal) =>
+      new Promise(() => {
+        signal.addEventListener('abort', () => {
+          aborted = true
+        })
+      }),
+    200,
+  )
+  assert.equal(answer, null)
+  assert.ok(Date.now() - started >= 190)
+  assert.ok(aborted, 'the task was told to stop')
+})

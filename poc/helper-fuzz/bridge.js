@@ -33,6 +33,7 @@ const main = async () => {
   for await (const line of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     const { op, stdout, stderr, value } = JSON.parse(line)
     const out = Buffer.from(stdout ?? '', 'base64').toString('utf8')
+    const err = Buffer.from(stderr ?? '', 'base64').toString('utf8')
     let answer
     if (op === 'config') {
       answer = { refused: helper.refusal(value) }
@@ -43,10 +44,13 @@ const main = async () => {
         answer = { err: error.message }
       }
     } else {
-      answer = { lines: logged(Buffer.from(stderr, 'base64').toString('utf8'), out) }
+      answer = { lines: logged(err, out) }
     }
     process.stdout.write(`${JSON.stringify(answer)}\n`)
   }
 }
 
-main()
+main().catch((error) => {
+  console.error(error.message)
+  process.exitCode = 1
+})

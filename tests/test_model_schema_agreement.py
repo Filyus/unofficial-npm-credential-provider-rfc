@@ -10,6 +10,7 @@ import re
 
 import copy
 import json
+import os
 from pathlib import Path
 import unittest
 
@@ -35,7 +36,7 @@ try:
 
     _VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 except ModuleNotFoundError:  # the schema cross-check is skipped, the model check is not
-    _VALIDATOR = None
+    _VALIDATOR = None  # (and `test_the_schema_cross_check_ran` says so where it must run)
 
 
 def run_model(message: object) -> None:
@@ -64,6 +65,17 @@ def ok_response(kind: str, **changes: object) -> dict:
     ok = {"kind": kind, "auth": copy.deepcopy(BEARER)}
     ok.update(changes)
     return {"Ok": ok}
+
+
+class SchemaCrossCheckTests(unittest.TestCase):
+    def test_the_schema_cross_check_ran(self) -> None:
+        """Without jsonschema the two classes below pass with the schema half
+        left out and say nothing. Where the library is meant to be there (CI
+        sets CI), its absence is a failure."""
+        if os.environ.get("CI") and _VALIDATOR is None:
+            self.fail("jsonschema is not installed, so the schema cross-check did not run")
+        if _VALIDATOR is None:
+            self.skipTest("jsonschema is not installed: the schema cross-check below did not run")
 
 
 class VectorsThroughModelTests(unittest.TestCase):

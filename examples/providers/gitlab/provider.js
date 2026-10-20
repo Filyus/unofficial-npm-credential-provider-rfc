@@ -228,7 +228,9 @@ const start = async (args) => {
     }
     ctx.showToPerson(`Open ${device.json.verification_uri} and enter the code ${device.json.user_code}`)
     let wait = (device.json.interval ?? 5) * 1000
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    // the device code lives as long as the server says; polling past it is no use
+    const until = ctx.clockMs() + (device.json.expires_in ?? 300) * 1000
+    for (let attempt = 0; attempt < 120 && ctx.clockMs() + wait <= until; attempt += 1) {
       await ctx.sleep(wait)
       const res = await ctx.request('POST', `${instance}/oauth/token`, {
         form: {
