@@ -49,6 +49,7 @@ test('without a run clock, a request carries no run time', async (t) => {
 
 test('the npmjs.com provider waits out Retry-After on real timers', async (t) => {
   const state = { login: { pending: 1, token: 'example-session-token', retryAfter: 1 } }
+  const beganAt = Date.now()
   const fake = await startFake(require('./npmjs/fake.js').createFake(state))
   t.after(() => fake.close())
   // no `clock`: the provider runs on the system clock, as outside a run
@@ -84,7 +85,8 @@ test('the npmjs.com provider waits out Retry-After on real timers', async (t) =>
   )
   const stored = JSON.parse(fs.readFileSync(path.join(dir, 'store.json'), 'utf8'))
   const issuedAt = stored.tokens.find((entry) => entry.tier === 'session').issuedAt
-  assert.ok(Math.abs(issuedAt - Date.now() / 1000) < 5, 'the token was stamped with a time that is not now')
+  // inside the test's own window, whatever a slow runner makes of its length: the point is the system clock, not a fixed one
+  assert.ok(issuedAt >= beganAt / 1000 - 2 && issuedAt <= Date.now() / 1000 + 2, 'the token was stamped with a time that is not now')
 })
 
 // A provider answers a presence prompt and has nothing more to do: it must be

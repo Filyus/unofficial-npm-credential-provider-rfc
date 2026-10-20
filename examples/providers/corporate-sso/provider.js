@@ -213,7 +213,7 @@ const start = (args) => {
   // --- presence ----------------------------------------------------------------
 
   // the answer, or null when the deadline passes first
-  const confirmWithin = (question, ms) => ctx.withDeadline((signal) => ctx.confirm(question, signal), ms)
+  const confirmWithin = ctx.confirmWithin
 
   // --- handlers ----------------------------------------------------------------
 

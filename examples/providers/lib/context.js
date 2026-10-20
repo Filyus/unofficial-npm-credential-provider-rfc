@@ -175,7 +175,10 @@ const loadContext = (configPath) => {
     }
   }
 
-  return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, showToPerson }
+  // a presence prompt that gives up: `null` when `ms` pass first, as the RFC wants an unanswered prompt to end in `other`
+  const confirmWithin = (question, ms) => withDeadline((signal) => confirm(question, signal), ms)
+
+  return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, confirmWithin, showToPerson }
 }
 
 // On Windows the device names, not `CONIN$` and `CONOUT$`: Node resolves a
