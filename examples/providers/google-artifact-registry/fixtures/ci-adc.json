@@ -1,0 +1,1 @@
+{"type":"external_account","audience":"//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/providers/ci-oidc","subject_token":"example-oidc-subject-token"}

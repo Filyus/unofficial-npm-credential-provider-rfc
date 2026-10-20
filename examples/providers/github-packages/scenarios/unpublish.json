@@ -1,0 +1,31 @@
+{
+  "hosts": [
+    "https://api.github.com",
+    "https://github.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "clientId": "example-oauth-app",
+    "owners": {
+      "@acme": "work",
+      "@octocat": "personal"
+    },
+    "defaultAccount": "work",
+    "unpublish": "delete-token"
+  },
+  "env": {},
+  "presence": [
+    true
+  ],
+  "store": {
+    "https://npm.pkg.github.com/": {
+      "accounts": {
+        "work": {
+          "readToken": "example-work-read-token",
+          "deleteToken": "example-work-delete-token"
+        }
+      }
+    }
+  },
+  "state": {}
+}

@@ -1,0 +1,69 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/"
+  },
+  "env": {},
+  "presence": [
+    true
+  ],
+  "store": {
+    "https://npm.example.test/verdaccio/": {
+      "account": "example-user",
+      "tokens": {
+        "read": {
+          "token": "example-read-token",
+          "key": "example-key-read"
+        },
+        "full": {
+          "token": "example-full-token",
+          "key": "example-key-full"
+        }
+      }
+    }
+  },
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ],
+    "tokens": {
+      "example-read-token": {
+        "user": "example-user",
+        "readonly": true,
+        "key": "example-key-read"
+      },
+      "example-full-token": {
+        "user": "example-user",
+        "readonly": false,
+        "key": "example-key-full"
+      }
+    }
+  },
+  "expect": {}
+}

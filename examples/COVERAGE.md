@@ -6,21 +6,21 @@ A cell is `n/a` or `task N` only because [coverage.json](coverage.json) says so,
 
 | Situation | npmjs | GitLab | SSO gateway | GitHub | Google AR | JFrog | Azure | AWS | Verdaccio |
 |---|---|---|---|---|---|---|---|---|---|
-| reference provider | ● | ● | ● | task 513 | task 514 | task 515 | task 516 | task 517 | task 518 |
-| install | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| login | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| logout | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| publish | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| ci-read | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| ci-publish | n/a | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| 401-erase | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| 401-dead | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| 403-retry | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| stage | ● | n/a | n/a | n/a | n/a | n/a | n/a | n/a | ○ |
-| unsupported | n/a | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| other-write | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| login-refused | ● | ● | ● | ○ | ○ | ○ | ○ | ○ | ○ |
-| not-found | ● | ● | n/a | ○ | n/a | ○ | n/a | n/a | n/a |
+| reference provider | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| install | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| login | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| logout | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| publish | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| ci-read | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| ci-publish | n/a | ● | ● | ● | ● | ● | ● | ● | ● |
+| 401-erase | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| 401-dead | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| 403-retry | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| stage | ● | n/a | n/a | n/a | n/a | n/a | n/a | n/a | ● |
+| unsupported | n/a | ● | ● | ● | ● | ● | ● | ● | ● |
+| other-write | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| login-refused | ● | ● | ● | ● | ● | ● | ● | ● | ● |
+| not-found | ● | ● | n/a | ● | n/a | ● | n/a | n/a | n/a |
 
 ## Situations
 
@@ -48,17 +48,11 @@ A cell is `n/a` or `task N` only because [coverage.json](coverage.json) says so,
 - SSO gateway, stage: n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)
 - SSO gateway, not-found: n/a: the gateway answers `other`, never `not-found`, so that a refusal does not reveal that a package exists (the page)
 - GitHub, stage: n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)
-- GitHub, provider: task 513: the 2026-10-18 decision (task 487) covered the three most different registries; GitHub adds registry facts, not new protocol paths
 - Google AR, stage: n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)
 - Google AR, not-found: n/a: the docs read do not say the registry hides a repository from an identity that cannot see it; the provider's not-found means nothing stored, and hello registries stops npm asking for unconfigured ones (the page, Rejection)
-- Google AR, provider: task 514: the 2026-10-18 decision (task 487) covered the three most different registries; Google adds registry facts, not new protocol paths
 - JFrog, stage: n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer
-- JFrog, provider: task 515: the 2026-10-18 decision (task 487) covered the three most different registries; JFrog adds registry facts, not new protocol paths
 - Azure, stage: n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)
 - Azure, not-found: n/a: the provider holds an organization-wide credential and feed visibility is decided by feed roles at request time; no page says an unreadable feed is hidden, a refusal reaches the provider as a 401 or 403 retry (the page, Rejection)
-- Azure, provider: task 516: the 2026-10-18 decision (task 487) covered the three most different registries; Azure adds registry facts, not new protocol paths
 - AWS, stage: n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations
 - AWS, not-found: n/a: AWS documents a refusal as 403 (AccessDeniedException, NotAuthorized), not as a hidden repository (the page, Rejection)
-- AWS, provider: task 517: the 2026-10-18 decision (task 487) covered the three most different registries; AWS adds registry facts, not new protocol paths
 - Verdaccio, not-found: n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)
-- Verdaccio, provider: task 518: the 2026-10-18 decision (task 487) covered the three most different registries; Verdaccio adds registry facts, not new protocol paths

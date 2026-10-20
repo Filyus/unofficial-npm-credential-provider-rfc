@@ -1,0 +1,22 @@
+{
+  "hosts": [
+    "https://acme.jfrog.io"
+  ],
+  "now": 1792230000,
+  "config": {
+    "url": "https://acme.jfrog.io"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "login": {
+      "confirmed": false
+    }
+  },
+  "expect": {
+    "store": {
+      "https://acme.jfrog.io": null
+    }
+  }
+}

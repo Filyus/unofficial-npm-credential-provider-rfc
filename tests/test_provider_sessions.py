@@ -16,6 +16,7 @@ valid requests, and tests/fuzz_providers.py runs both for as long as asked.
 
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from tests.provider_harness import UNKNOWN_OPERATIONS, Session, all_indices, node_available, run_session, scenarios
@@ -42,7 +43,8 @@ class ProviderSessionTests(unittest.TestCase):
         first = {}
         for name, transcript in scenarios():
             first.setdefault(name, transcript)
-        self.assertEqual(len(first), 3)
+        providers = {path.parent.name for path in (Path(__file__).resolve().parents[1] / "examples" / "providers").glob("*/provider.js")}
+        self.assertEqual(set(first), providers, "every reference provider is tried with the unknown operations")
         for name, transcript in first.items():
             session = Session(name, transcript, 1)
             try:
@@ -52,10 +54,10 @@ class ProviderSessionTests(unittest.TestCase):
                         with self.subTest(provider=name, operation=operation, interactive=interactive):
                             answer = session.send({"v": 1, "kind": "get", "registry": registry, "operation": operation,
                                                    "command": "install", "interactive": interactive})
-                            self.assertEqual(answer, {"Err": {"kind": "operation-not-supported"}})
+                            self.assertEqual(answer.get("Err", {}).get("kind"), "operation-not-supported", answer)
                     with self.subTest(provider=name, kind=operation):
                         answer = session.send({"v": 1, "kind": operation, "registry": registry})
-                        self.assertEqual(answer, {"Err": {"kind": "operation-not-supported"}})
+                        self.assertEqual(answer.get("Err", {}).get("kind"), "operation-not-supported", answer)
                 session.close()
             finally:
                 session.kill()

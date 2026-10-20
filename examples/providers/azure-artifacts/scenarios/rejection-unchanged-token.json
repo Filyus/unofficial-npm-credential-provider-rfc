@@ -1,0 +1,58 @@
+{
+  "hosts": [
+    "https://pkgs.dev.azure.com",
+    "https://contoso.pkgs.visualstudio.com",
+    "https://vssps.dev.azure.com",
+    "https://login.microsoftonline.com",
+    "https://az.example.test"
+  ],
+  "now": 1792209600,
+  "config": {
+    "org": "contoso"
+  },
+  "env": {
+    "AZURE_ARTIFACTS_ENTRA_SOURCE": "az"
+  },
+  "presence": [],
+  "store": {},
+  "clock": [
+    1792209600,
+    1792209660,
+    1792209660
+  ],
+  "state": {
+    "feed": {
+      "tenant": "00000000-0000-0000-0000-000000000000"
+    },
+    "entra": {
+      "interval": 0,
+      "userCode": "ABCD1234",
+      "verificationUri": "https://login.microsoft.com/device",
+      "refreshTokens": {}
+    },
+    "az": {
+      "accessToken": "example-entra-token-1",
+      "expires_on": 1792213200
+    },
+    "sessions": {
+      "tokens": {
+        "vso.packaging_write": [],
+        "vso.packaging_manage": []
+      }
+    }
+  },
+  "expect": {
+    "state": {
+      "az": {
+        "calls": 2
+      },
+      "entra": {
+        "refreshes": 0,
+        "devices": 0
+      },
+      "sessions": {
+        "minted": []
+      }
+    }
+  }
+}

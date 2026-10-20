@@ -1,0 +1,88 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/",
+    "scriptedLogin": {
+      "username": "example-user",
+      "password": "example-password"
+    }
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ],
+    "mint": {
+      "read": [
+        {
+          "token": "example-read-token",
+          "key": "example-key-read"
+        }
+      ],
+      "full": [
+        {
+          "token": "example-full-token",
+          "key": "example-key-full"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "store": {
+      "https://npm.example.test/verdaccio/": {
+        "account": "example-user",
+        "tokens": {
+          "read": {
+            "token": "example-read-token",
+            "key": "example-key-read"
+          },
+          "full": {
+            "token": "example-full-token",
+            "key": "example-key-full"
+          }
+        }
+      }
+    },
+    "state": {
+      "logins": 1,
+      "minted": [
+        {
+          "user": "example-user",
+          "readonly": true
+        },
+        {
+          "user": "example-user",
+          "readonly": false
+        }
+      ]
+    }
+  }
+}

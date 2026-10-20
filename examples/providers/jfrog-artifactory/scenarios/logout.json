@@ -1,0 +1,35 @@
+{
+  "hosts": [
+    "https://acme.jfrog.io"
+  ],
+  "now": 1792230000,
+  "config": {
+    "url": "https://acme.jfrog.io"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://acme.jfrog.io": {
+      "login": {
+        "type": "identity",
+        "token": "example-identity-token"
+      }
+    }
+  },
+  "state": {
+    "identityTokens": [
+      "example-identity-token"
+    ],
+    "revocable": true
+  },
+  "expect": {
+    "store": {
+      "https://acme.jfrog.io": null
+    },
+    "state": {
+      "revoked": [
+        "example-identity-token"
+      ]
+    }
+  }
+}

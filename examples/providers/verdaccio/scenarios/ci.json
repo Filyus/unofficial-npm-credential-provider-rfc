@@ -1,0 +1,51 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://npm.example.test/verdaccio/": {
+      "account": "example-ci",
+      "tokens": {
+        "read": {
+          "token": "example-ci-read-token",
+          "key": "example-key-ci-read"
+        }
+      }
+    }
+  },
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ]
+  },
+  "expect": {}
+}

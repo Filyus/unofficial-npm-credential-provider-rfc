@@ -11,30 +11,24 @@
     "not-found": "n/a: the gateway answers `other`, never `not-found`, so that a refusal does not reveal that a package exists (the page)"
   },
   "github-packages": {
-    "stage": "n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)",
-    "provider": "task 513: the 2026-10-18 decision (task 487) covered the three most different registries; GitHub adds registry facts, not new protocol paths"
+    "stage": "n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)"
   },
   "google-artifact-registry": {
     "stage": "n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)",
-    "not-found": "n/a: the docs read do not say the registry hides a repository from an identity that cannot see it; the provider's not-found means nothing stored, and hello registries stops npm asking for unconfigured ones (the page, Rejection)",
-    "provider": "task 514: the 2026-10-18 decision (task 487) covered the three most different registries; Google adds registry facts, not new protocol paths"
+    "not-found": "n/a: the docs read do not say the registry hides a repository from an identity that cannot see it; the provider's not-found means nothing stored, and hello registries stops npm asking for unconfigured ones (the page, Rejection)"
   },
   "jfrog-artifactory": {
-    "stage": "n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer",
-    "provider": "task 515: the 2026-10-18 decision (task 487) covered the three most different registries; JFrog adds registry facts, not new protocol paths"
+    "stage": "n/a: Artifactory has no staged publishing for npm; stage-unsupported.jsonl shows the answer"
   },
   "azure-artifacts": {
     "stage": "n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)",
-    "not-found": "n/a: the provider holds an organization-wide credential and feed visibility is decided by feed roles at request time; no page says an unreadable feed is hidden, a refusal reaches the provider as a 401 or 403 retry (the page, Rejection)",
-    "provider": "task 516: the 2026-10-18 decision (task 487) covered the three most different registries; Azure adds registry facts, not new protocol paths"
+    "not-found": "n/a: the provider holds an organization-wide credential and feed visibility is decided by feed roles at request time; no page says an unreadable feed is hidden, a refusal reaches the provider as a 401 or 403 retry (the page, Rejection)"
   },
   "aws-codeartifact": {
     "stage": "n/a: CodeArtifact has no staging; the page lists stage, stage-read and stage-reject among the unsupported operations",
-    "not-found": "n/a: AWS documents a refusal as 403 (AccessDeniedException, NotAuthorized), not as a hidden repository (the page, Rejection)",
-    "provider": "task 517: the 2026-10-18 decision (task 487) covered the three most different registries; AWS adds registry facts, not new protocol paths"
+    "not-found": "n/a: AWS documents a refusal as 403 (AccessDeniedException, NotAuthorized), not as a hidden repository (the page, Rejection)"
   },
   "verdaccio": {
-    "not-found": "n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)",
-    "provider": "task 518: the 2026-10-18 decision (task 487) covered the three most different registries; Verdaccio adds registry facts, not new protocol paths"
+    "not-found": "n/a: the default access check returns 403 for a named user and 401 for an anonymous one; nothing in the docs read says 404 (the page, pitfalls)"
   }
 }

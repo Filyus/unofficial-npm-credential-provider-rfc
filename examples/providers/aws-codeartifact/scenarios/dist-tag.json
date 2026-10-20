@@ -1,0 +1,108 @@
+{
+  "hosts": [
+    "https://codeartifact.us-west-2.amazonaws.com",
+    "https://sts.us-west-2.amazonaws.com",
+    "https://oidc.us-east-1.amazonaws.com",
+    "https://portal.sso.us-east-1.amazonaws.com"
+  ],
+  "now": 1760000060,
+  "config": {
+    "profile": "dev",
+    "allowOwner": "111122223333",
+    "registries": [
+      "https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/my-repo/",
+      "https://my-domain-111122223333.d.codeartifact.us-west-2.amazonaws.com/npm/tools/"
+    ],
+    "ssoStartUrl": "https://example-org.awsapps.example.test/start",
+    "ssoRegion": "us-east-1",
+    "ssoAccountId": "111122223333",
+    "ssoRoleName": "Everyday",
+    "publishRoleArn": "arn:aws:iam::111122223333:role/npm-publisher",
+    "mfaSerial": "arn:aws:iam::111122223333:mfa/example-user"
+  },
+  "env": {},
+  "presence": [
+    true
+  ],
+  "store": {
+    "awsSsoCache": {
+      "dev": {
+        "accessToken": "sso-access-1",
+        "expiresAt": 1760028800
+      }
+    }
+  },
+  "state": {
+    "domains": {
+      "my-domain": "111122223333"
+    },
+    "principals": {
+      "example-dev-key-id": {
+        "account": "111122223333",
+        "tokens": []
+      }
+    },
+    "roles": {
+      "arn:aws:iam::111122223333:role/npm-publisher": {
+        "mfaSerial": "arn:aws:iam::111122223333:mfa/example-user",
+        "tokens": [
+          "example-tag-token"
+        ]
+      }
+    },
+    "sso": {
+      "sessions": {
+        "sso-access-1": {
+          "expiresAt": 1760028800,
+          "credentials": "example-dev-key-id"
+        }
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "awsSsoCache": {
+        "dev": {
+          "accessToken": "sso-access-1"
+        }
+      }
+    },
+    "state": {
+      "assumed": [
+        {
+          "role": "arn:aws:iam::111122223333:role/npm-publisher",
+          "duration": 900,
+          "serial": "arn:aws:iam::111122223333:mfa/example-user",
+          "policy": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": "codeartifact:PutPackageMetadata",
+                "Resource": "arn:aws:codeartifact:us-west-2:111122223333:package/my-domain/my-repo/npm/acme/ui"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "codeartifact:GetAuthorizationToken",
+                "Resource": "arn:aws:codeartifact:us-west-2:111122223333:domain/my-domain"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "sts:GetServiceBearerToken",
+                "Resource": "*"
+              }
+            ]
+          }
+        }
+      ],
+      "minted": [
+        {
+          "caller": "assumed-key-1",
+          "duration": 0,
+          "domain": "my-domain",
+          "owner": "111122223333"
+        }
+      ]
+    }
+  }
+}

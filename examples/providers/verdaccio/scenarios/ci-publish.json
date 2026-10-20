@@ -1,0 +1,69 @@
+{
+  "hosts": [
+    "https://npm.example.test"
+  ],
+  "now": 1792196100,
+  "config": {
+    "registry": "https://npm.example.test/verdaccio/",
+    "ciAccount": "example-ci"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://npm.example.test/verdaccio/": {
+      "account": "example-ci",
+      "tokens": {
+        "full": {
+          "token": "example-ci-full-token",
+          "key": "example-key-ci-full"
+        }
+      }
+    }
+  },
+  "state": {
+    "users": {
+      "example-user": {
+        "password": "example-password",
+        "groups": [
+          "publishers"
+        ]
+      },
+      "example-ci": {
+        "password": "example-ci-password",
+        "groups": [
+          "publishers"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "pattern": "@acme/*",
+        "access": [
+          "$all"
+        ],
+        "publish": [
+          "publishers"
+        ],
+        "unpublish": [
+          "publishers"
+        ],
+        "stage": [
+          "stagers",
+          "publishers"
+        ]
+      }
+    ],
+    "tokens": {
+      "example-ci-full-token": {
+        "user": "example-ci",
+        "readonly": false,
+        "key": "example-key-ci-full"
+      }
+    }
+  },
+  "expect": {
+    "state": {
+      "whoami": 1
+    }
+  }
+}

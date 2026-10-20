@@ -1,0 +1,56 @@
+{
+  "hosts": [
+    "https://pkgs.dev.azure.com",
+    "https://contoso.pkgs.visualstudio.com",
+    "https://vssps.dev.azure.com",
+    "https://login.microsoftonline.com",
+    "https://az.example.test"
+  ],
+  "now": 1792198800,
+  "config": {
+    "org": "contoso"
+  },
+  "env": {
+    "AZURE_CLIENT_ID": "example-ci-client",
+    "AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+    "AZURE_FEDERATED_TOKEN_FILE": "identity/federated-token"
+  },
+  "presence": [],
+  "store": {},
+  "state": {
+    "feed": {
+      "tenant": "00000000-0000-0000-0000-000000000000"
+    },
+    "entra": {
+      "interval": 0,
+      "userCode": "ABCD1234",
+      "verificationUri": "https://login.microsoft.com/device",
+      "refreshTokens": {},
+      "clients": {
+        "example-ci-client": {
+          "federatedToken": "example-federated-assertion",
+          "accessToken": "example-entra-token-1",
+          "expiresIn": 3600
+        }
+      }
+    },
+    "sessions": {
+      "tokens": {
+        "vso.packaging_write": [],
+        "vso.packaging_manage": []
+      }
+    }
+  },
+  "expect": {
+    "state": {
+      "entra": {
+        "clientGrants": 1,
+        "refreshes": 0,
+        "devices": 0
+      },
+      "sessions": {
+        "minted": []
+      }
+    }
+  }
+}

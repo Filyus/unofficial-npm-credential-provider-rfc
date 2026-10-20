@@ -1,0 +1,99 @@
+{
+  "hosts": [
+    "https://oauth2.googleapis.com",
+    "https://iamcredentials.googleapis.com",
+    "https://sts.googleapis.com"
+  ],
+  "now": 1792231800,
+  "config": {
+    "repositories": {
+      "https://us-central1-npm.pkg.dev/acme-prod/npm-all/": {
+        "read": {
+          "serviceAccount": "acme-reader@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1800
+        }
+      },
+      "https://us-central1-npm.pkg.dev/acme-prod/npm-private/": {
+        "read": {
+          "serviceAccount": "acme-reader@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1800
+        },
+        "write": {
+          "serviceAccount": "acme-writer@acme-prod.iam.gserviceaccount.com",
+          "lifetime": 1200
+        }
+      }
+    },
+    "adc": "fixtures/ci-adc.json"
+  },
+  "presence": [
+    true
+  ],
+  "store": {
+    "gcloud": {
+      "credentials": {
+        "refreshToken": "refresh-gcloud-1"
+      },
+      "adc": {
+        "refreshToken": "refresh-adc-1"
+      }
+    }
+  },
+  "state": {
+    "oauth": {
+      "interval": 5,
+      "userCode": "WDJB-MJHT",
+      "verificationUrl": "https://www.google.com/device",
+      "account": "dev@example.test",
+      "sessions": {
+        "refresh-adc-1": {
+          "account": "dev@example.test"
+        }
+      }
+    },
+    "iam": {
+      "serviceAccounts": {
+        "acme-reader@acme-prod.iam.gserviceaccount.com": {
+          "roles": [
+            "roles/artifactregistry.reader"
+          ],
+          "tokenCreators": [
+            "dev@example.test"
+          ],
+          "tokens": [
+            "example-reader-token"
+          ]
+        },
+        "acme-writer@acme-prod.iam.gserviceaccount.com": {
+          "roles": [
+            "roles/artifactregistry.writer"
+          ],
+          "tokenCreators": [
+            "dev@example.test"
+          ],
+          "tokens": [
+            "example-writer-token"
+          ]
+        }
+      }
+    }
+  },
+  "expect": {
+    "state": {
+      "oauth": {
+        "refreshes": 1
+      },
+      "iam": {
+        "issued": [
+          {
+            "principal": "acme-writer@acme-prod.iam.gserviceaccount.com",
+            "roles": [
+              "roles/artifactregistry.writer"
+            ],
+            "lifetime": 1200
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "hosts": [
+    "https://acme.jfrog.io",
+    "https://token.actions.example.test"
+  ],
+  "now": 1792230000,
+  "config": {
+    "url": "https://acme.jfrog.io",
+    "oidcProvider": "acme-publish"
+  },
+  "env": {
+    "ACTIONS_ID_TOKEN_REQUEST_URL": "https://token.actions.example.test/example-run/_apis/distributedtask/hubs/Actions/idtoken?api-version=2.0",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "example-ci-request-token"
+  },
+  "presence": [],
+  "store": {},
+  "state": {
+    "oidc": {
+      "requestToken": "example-ci-request-token",
+      "idToken": "example-ci-id-token",
+      "mappings": {
+        "acme-publish": {
+          "token": "example-oidc-publish-token",
+          "expiresIn": 1800
+        }
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "https://acme.jfrog.io": null
+    },
+    "state": {
+      "oidc": {
+        "exchanged": [
+          "acme-publish"
+        ]
+      },
+      "minted": []
+    }
+  }
+}
