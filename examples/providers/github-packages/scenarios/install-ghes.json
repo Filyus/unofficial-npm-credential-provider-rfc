@@ -1,0 +1,53 @@
+{
+  "hosts": [
+    "https://ghes.example.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "clientId": "example-oauth-app",
+    "owners": {
+      "@acme": "work",
+      "@octocat": "personal"
+    },
+    "defaultAccount": "work",
+    "host": "ghes.example.com"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://npm.ghes.example.com/": {
+      "accounts": {
+        "work": {
+          "readToken": "example-work-read-token"
+        }
+      }
+    }
+  },
+  "state": {
+    "tokens": {
+      "example-work-read-token": {
+        "user": "example-user",
+        "scopes": [
+          "read:packages"
+        ]
+      },
+      "example-pasted-token": {
+        "user": "example-user",
+        "scopes": [
+          "read:packages"
+        ]
+      }
+    },
+    "apiPrefix": "/api/v3"
+  },
+  "expect": {
+    "store": {
+      "https://npm.ghes.example.com/": null
+    },
+    "state": {
+      "revoked": [
+        "example-pasted-token"
+      ]
+    }
+  }
+}

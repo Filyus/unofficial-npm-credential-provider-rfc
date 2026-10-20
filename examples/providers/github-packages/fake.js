@@ -5,6 +5,9 @@
 //   tokens        the live classic tokens, each { user, scopes }: GET /user answers 200 with
 //                 the scopes in X-OAuth-Scopes for these, 401 for any other
 //   revoked       tokens revoked so far by POST /credentials/revoke
+//   apiPrefix     where the REST API is served: unset for github.com, whose API host has no
+//                 prefix, `/api/v3` for a GitHub Enterprise Server host, where /user and
+//                 /credentials/revoke answer under it and nowhere else
 //   login         the device flow: { token, scope } is what an approved code is exchanged
 //                 for (the token is entered in `tokens`), `pending` polls answered
 //                 authorization_pending, `denied` for access_denied, `flowDisabled`,
@@ -77,7 +80,16 @@ const createFake = (state) => {
     return route({ method, path, token, body, clock })
   }
 
-  function route({ method, path, token, body, clock }) {
+  function route({ method, path: requested, token, body, clock }) {
+    // the REST API only under its prefix; the OAuth paths (/login/...) are on the web host
+    let path = requested
+    if (!requested.startsWith('/login/')) {
+      const prefix = state.apiPrefix || ''
+      if (!requested.startsWith(`${prefix}/`)) {
+        return null
+      }
+      path = requested.slice(prefix.length)
+    }
     if (method === 'POST' && path === '/login/device/code') {
       return body && body.client_id && body.scope ? deviceCode() : json(200, { error: 'incorrect_client_credentials' })
     }

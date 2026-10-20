@@ -1,0 +1,14 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.ghes.example.com/"],"capabilities":["login","logout","erase","retry-context"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.ghes.example.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"erase","registry":"https://npm.ghes.example.com/","scope":"@acme","package":"widgets","operation":"read","granularity":"scope"}}
+{"from":"provider","message":{"Ok":{"kind":"erase"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.ghes.example.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"GitHub says the work account's token is still valid, so the 401 did not come from the token but from the registry or the URL. The provider holds no other credential it would release for this request, and no token is handed out again. Check the registry URL and the package's access settings."}}}
+{"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.ghes.example.com/","interactive":true,"token":"example-pasted-token"}}
+{"from":"provider","message":{"Ok":{"kind":"login"}}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.ghes.example.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-pasted-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
+{"from":"client","message":{"v":1,"kind":"logout","registry":"https://npm.ghes.example.com/"}}
+{"from":"provider","message":{"Ok":{"kind":"logout"}}}
+{"from":"client","event":"close"}

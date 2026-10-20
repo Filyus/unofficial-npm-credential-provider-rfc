@@ -157,6 +157,13 @@ The provider probes the feed URL without credentials and reads `X-VSS-ResourceTe
 
 [login-no-terminal.jsonl](azure-artifacts/login-no-terminal.jsonl) shows the same login with no controlling terminal to show the device code on: the provider cannot show the step, so it answers `other` at once, naming `npm login` from a terminal, without polling Entra until the deadline.
 
+**The authority check refuses.** Three answers of the probe, each a login that answers `other` before any sign-in is started, with nothing stored and Entra never asked for a device code: the challenge names an authority on a host outside the allowlist ([login-authority-not-allowed.jsonl](azure-artifacts/login-authority-not-allowed.jsonl)); the tenant in `X-VSS-ResourceTenant` is not the tenant in the authority's path, so the feed names two ([login-tenant-mismatch.jsonl](azure-artifacts/login-tenant-mismatch.jsonl)); and the authority is `http:` and not `https:` ([login-authority-http.jsonl](azure-artifacts/login-authority-http.jsonl)), which the provider treats as off the allowlist, with the same answer as the first:
+
+```json
+{"v":1,"kind":"login","registry":"https://pkgs.dev.azure.com/contoso/","interactive":true}
+{"Err":{"kind":"other","message":"Azure Artifacts named two different Microsoft Entra tenants for the contoso organization, so no sign-in was started."}}
+```
+
 Nothing is stored, so there is nothing to clear, and the answer is not `not-found`: that would let a listed `npm:token` run `npm login` and write a plaintext PAT the user never asked for ([login](../phase-2-credential-provider.md#login-authenticate-with-a-registry)). The 90 seconds sit inside the 5-minute interactive budget; the credprovider falling back to a username and password prompt is documented for NuGet clients and is of no use to a provider, which must read the terminal itself.
 
 **A feed the identity cannot see has no transcript.** `not-found` is the answer to a provider that holds nothing for the registry or scope. This provider holds an organization-wide credential, so it answers `Ok` for any feed under the organization prefix and cannot tell which feeds the identity may read: that is decided by the feed's roles when the request is made ([feed permissions](https://learn.microsoft.com/en-us/azure/devops/artifacts/feeds/feed-permissions?view=azure-devops)). Microsoft's documents do not say whether an unreadable feed answers 401, 403 or 404, and none say the service hides it, so no refusal of that kind is shown; it would reach the provider as a 401 or 403 retry, covered above. A feed in another organization is `url-not-supported`, since it is not in the hello `registries`. Not verified: the status an unreadable feed gets.

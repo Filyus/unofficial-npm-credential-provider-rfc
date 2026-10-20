@@ -1,0 +1,46 @@
+{
+  "hosts": [
+    "https://pkgs.dev.azure.com",
+    "https://contoso.pkgs.visualstudio.com",
+    "https://vssps.dev.azure.com",
+    "https://login.microsoftonline.com",
+    "https://az.example.test"
+  ],
+  "now": 1792198800,
+  "config": {
+    "org": "contoso"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "feed": {
+      "tenant": "00000000-0000-0000-0000-000000000000",
+      "authorizationUri": "https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111"
+    },
+    "entra": {
+      "interval": 0,
+      "userCode": "ABCD1234",
+      "verificationUri": "https://login.microsoft.com/device",
+      "refreshTokens": {},
+      "pending": 1
+    },
+    "sessions": {
+      "tokens": {
+        "vso.packaging_write": [],
+        "vso.packaging_manage": []
+      }
+    }
+  },
+  "expect": {
+    "store": {
+      "contoso": null
+    },
+    "state": {
+      "entra": {
+        "devices": 0,
+        "refreshes": 0
+      }
+    }
+  }
+}

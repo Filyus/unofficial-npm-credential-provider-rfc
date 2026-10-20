@@ -78,6 +78,8 @@ GitHub's GHES page prints the token key with a double slash, `//npm.HOSTNAME//:_
 - `retry-context`: the provider reads `retry` and `httpStatus`.
 - No `auth-challenges`: GitHub sends no `WWW-Authenticate` header on a 401 (probed anonymously on 2026-10-17: an existing package without a token gave a 401 with a JSON body and no such header), so there is nothing to read.
 
+On GHES the provider's other calls follow the host too: the device flow at `https://HOSTNAME/login/...`, the REST calls (`GET /user`, `POST /credentials/revoke`) under `https://HOSTNAME/api/v3`. [install-ghes.jsonl](github-packages/install-ghes.jsonl) (subdomain isolation on, `npm.ghes.example.com`) and [install-ghes-no-isolation.jsonl](github-packages/install-ghes-no-isolation.jsonl) (off, `ghes.example.com/_registry/npm/`) each run one session on an instance: the hello names that form only, an install is served, a 401 retry checks the token at `/api/v3/user`, a pasted-token login is checked there too, and logout revokes at `/api/v3/credentials/revoke`. The conformance fake serves the REST API only under that prefix for these runs, so a call to the github.com path fails them.
+
 ## Install
 
 [install.jsonl](github-packages/install.jsonl)
