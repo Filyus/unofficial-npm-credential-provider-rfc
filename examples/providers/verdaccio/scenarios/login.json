@@ -4,11 +4,7 @@
   ],
   "now": 1792196100,
   "config": {
-    "registry": "https://npm.example.test/verdaccio/",
-    "scriptedLogin": {
-      "username": "example-user",
-      "password": "example-password"
-    }
+    "registry": "https://npm.example.test/verdaccio/"
   },
   "env": {},
   "presence": [],
@@ -84,5 +80,12 @@
         }
       ]
     }
-  }
+  },
+  "typed": [
+    "example-user",
+    {
+      "line": "example-password",
+      "secret": true
+    }
+  ]
 }

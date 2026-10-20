@@ -9,7 +9,13 @@
 // 403 that does not say why. Response bodies are minimal; the provider reads
 // statuses, and `token` and `key` of the token routes.
 //
-//   users      { name: { password, groups } }
+//   users      { name: { password, groups, tfa } }; `tfa: { mode, otp }` enrols the user in
+//              2FA (flag `tfa`, off by default, experimental): `mode` is `auth-only` or
+//              `auth-and-writes`, `otp` the one code the fake accepts. Login (after the
+//              password is checked, as user.ts does) and token creation (before it, as the
+//              route's middleware does) then need the code in `npm-otp`; without it, or with
+//              a wrong one, the answer is 401 with `WWW-Authenticate: otp`, `npm-notice`
+//              and the body of require-otp.ts. Writes are not modelled
 //   rules      [ { pattern: "@acme/*", access, publish, stage } ], group names or
 //              $all / $authenticated; the first match wins, no match refuses
 //   tokens     { token: { user, readonly, key, dead, login } }, the table of live tokens;
@@ -19,12 +25,19 @@
 //   mint       { read: [{ token, key }], full: [...] }: what the next generated
 //              tokens are, per tier, in order
 //   stages     { id: { package, version, stagedBy } }
-// The fake adds: whoami (count), logins (count), minted ([{ user, readonly }]),
+// The fake adds: whoami (count), logins (count), otpChallenged and otpAccepted (counts), minted ([{ user, readonly }]),
 // revoked (keys), published and staged ([{ package, version, user }]), rejected (ids).
 
 const json = (status, body, headers) => ({ status, json: body, headers })
 const UNAUTHORIZED = () => json(401, { error: 'authorization required' }, { 'www-authenticate': 'Bearer' })
 const FORBIDDEN = () => json(403, { error: 'forbidden' })
+
+// require-otp.ts: the header npm sets and the challenge it looks for
+const OTP_REQUIRED = () =>
+  json(401, { error: 'You must provide a one-time pass. Upgrade your client to npm@latest in order to use 2FA.' }, {
+    'www-authenticate': 'otp',
+    'npm-notice': 'Provide a one-time password from your authenticator app.',
+  })
 
 // the claims of a JWT, read without verifying, or null for any other token
 const jwtClaims = (token) => {
@@ -48,6 +61,8 @@ const createFake = (state) => {
   state.stages ??= {}
   state.whoami = 0
   state.logins = 0
+  state.otpChallenged = 0
+  state.otpAccepted = 0
   state.minted = []
   state.revoked = []
   state.published = []
@@ -87,9 +102,28 @@ const createFake = (state) => {
     return user ? FORBIDDEN() : UNAUTHORIZED()
   }
 
+  // null where the user needs no code or sent the right one, else the challenge
+  const otpGate = (request, name) => {
+    const tfa = state.users[name] && state.users[name].tfa
+    if (!tfa) {
+      return null
+    }
+    const sent = request.headers && request.headers['npm-otp']
+    if (sent && sent === tfa.otp) {
+      state.otpAccepted += 1
+      return null
+    }
+    state.otpChallenged += 1
+    return OTP_REQUIRED()
+  }
+
   const tokenRoutes = (request, user) => {
     const { method, path, body } = request
     if (method === 'POST' && path === '/-/npm/v1/tokens') {
+      const challenge = otpGate(request, user)
+      if (challenge) {
+        return challenge
+      }
       if (!body || state.users[user].password !== body.password) {
         return UNAUTHORIZED()
       }
@@ -128,6 +162,10 @@ const createFake = (state) => {
       const user = state.users[name]
       if (!user || !body || user.password !== body.password) {
         return UNAUTHORIZED()
+      }
+      const challenge = otpGate(request, name)
+      if (challenge) {
+        return challenge
       }
       state.logins += 1
       loginTokens += 1

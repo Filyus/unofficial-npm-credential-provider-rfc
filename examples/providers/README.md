@@ -18,6 +18,8 @@ node examples/providers/run.js gitlab     # one provider
 | `now`, `clock` | the time, fixed, or one time per client request, since a retry comes when a token has lapsed; within a request time passes only when the provider sleeps, at once, so a poll interval or a deadline of minutes costs nothing |
 | `env` | the environment beyond `PATH`; CI variables, for instance |
 | `presence` | the person's answers to presence prompts, in order, `true`, `false` or `"silent"` for one never given; each one must be asked for |
+| `typed` | the lines the person types (a username, a password, a one-time password), in order: a string, `"silent"` for one never typed, or `{ "line": ..., "secret": true }` for one that must never reach stderr |
+| `terminal` | `false` for a run with no controlling terminal, where a sign-in step cannot be shown |
 | `config` | further keys of the provider's own configuration |
 | `expect.store`, `expect.state` | what must hold afterwards, as a subset; `null` means absent |
 
@@ -44,7 +46,6 @@ Each of these is a limit of the example, not a gap in the protocol: the pages de
 | Simplification | Why | Widened when |
 |---|---|---|
 | A sign-in that a vendor's CLI would run (`gcloud auth login`, `aws sso login`, the Entra device flow, JFrog web login) is the vendor's device flow spoken in-process against the fake | a run cannot depend on a CLI being installed or on a browser | never for the CLIs; the device flows themselves are what the fakes model |
-| Prompts are yes or no; a password comes from `scriptedLogin` in the settings (Verdaccio) and no one-time password or MFA code is sent (`npm-otp`, AWS `TokenCode`) | `lib/context.js` has no text prompt and `request` takes no headers | `lib/context.js` gets a text prompt and `request` gets headers |
 | Azure's `az account get-access-token` is an HTTP address of the fake; AWS's SSO cache is the provider's own store; Google's sign-in is not a `gcloud` configuration directory | the same: no CLI in a run | never |
 | A pasted JFrog identity token is not validated; GitHub's `dist-tag` is served on the page's unverified word; Verdaccio sends a password over `http:` | no documented call to check it with; the operator's own configuration | a documented validation call; the vendor documents the endpoint; an opt-in setting |
 | Some branches have no transcript and are reached only by random sessions or by hand | each needs a scenario of its own | a scenario and a transcript per branch; the list of branches is the one the random sessions reach and no transcript does |

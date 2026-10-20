@@ -16,11 +16,12 @@
 //
 // The registry is `--registry`, as the page configures it; the conformance
 // run passes only `--config`, so the configuration's `registry` stands in.
-// Where the person types a username and password, a real build asks on the
-// terminal; context.js has no text prompt, so this provider reads them from
-// the configuration's `scriptedLogin`. It sends no one-time password either,
-// since the context's `request` has no header for `npm-otp`: a registry that
-// asks for one is answered `other`. The operator's CI provisioning is
+// Where the person types a username and password, the provider asks on the
+// terminal with `ctx.askWithin`, inside the login's budget (the RFC gives a
+// login five minutes; the provider takes 4:30, `loginSeconds` in a run). A
+// registry with 2FA answers 401 with `WWW-Authenticate: otp`; the provider asks
+// for the one-time password once and repeats that call with `npm-otp`, and a
+// code that is not typed, or not accepted, is answered `other`. The operator's CI provisioning is
 // `ciAccount`, the name of the account whose full token the machine holds.
 
 const { serve, ok, err, log } = require('../lib/protocol.js')
@@ -220,11 +221,14 @@ const start = (args) => {
     }
   }
 
-  const mintToken = async (loginToken, password, readonly) => {
-    const { status, json } = await ctx.request('POST', url('-/npm/v1/tokens'), {
+  const mintToken = async (send, loginToken, password, readonly) => {
+    const { status, json, unanswered } = await send('POST', '-/npm/v1/tokens', {
       token: loginToken,
       body: { password, readonly, ...(ctx.config.cidrWhitelist ? { cidr_whitelist: ctx.config.cidrWhitelist } : {}) },
     })
+    if (unanswered) {
+      throw new Error(`No one-time password was typed for ${registry}. Nothing was stored. Run npm login again.`)
+    }
     if (status !== 200 || !json || !json.token) {
       throw new Error(`Verdaccio did not generate a ${readonly ? 'read-only' : 'full'} token at ${registry} (HTTP ${status}). Nothing was stored.`)
     }
@@ -250,14 +254,51 @@ const start = (args) => {
       }
       return ok('login')
     }
-    const typed = ctx.config.scriptedLogin
-    if (!typed) {
-      throw new Error('this reference provider has no terminal prompt for a password; the configuration gives it as scriptedLogin')
+    // The person types on the controlling terminal, inside the login's budget
+    // (npm gives a login five minutes; 4:30 leaves it room to answer). A line
+    // never typed in time, or an empty one, is a question unanswered.
+    const until = ctx.clockMs() + (ctx.config.loginSeconds ?? 270) * 1000
+    const typedLine = async (question) => {
+      const line = await ctx.askWithin(question, Math.max(0, until - ctx.clockMs()))
+      return typeof line === 'string' && line !== '' ? line : null
     }
-    const { username, password } = typed
-    const put = await ctx.request('PUT', url(`-/user/org.couchdb.user:${encodeURIComponent(username)}`), { body: { name: username, password } })
-    if (put.status === 401 && /otp/i.test(put.headers['www-authenticate'] || '')) {
-      return err('other', `Verdaccio asks for a one-time password at ${registry}; this provider cannot send one. Nothing was stored.`)
+    const unanswered = (what) => err('other', `No ${what} was typed for ${registry}. Nothing was stored. Run npm login again.`)
+    const username = await typedLine(`Verdaccio username for ${registry}:`)
+    if (username === null) {
+      return unanswered('username')
+    }
+    const password = await typedLine(`Verdaccio password for ${registry}:`)
+    if (password === null) {
+      return unanswered('password')
+    }
+    // 2FA (experimental, off by default): a 401 whose `WWW-Authenticate` has `otp` asks for a one-time
+    // password, which goes back in `npm-otp` on that call. The registry answers a wrong or
+    // missing code the same way, so a code is asked for once and sent once on each call
+    // that wants it; a second challenge means the code was not accepted.
+    let otp = null
+    let refusedOtp = false
+    const challenged = (res) => res.status === 401 && /(^|[\s,])otp($|[\s,])/i.test(res.headers['www-authenticate'] || '')
+    const send = async (method, path, options) => {
+      const go = () => ctx.request(method, url(path), { ...options, ...(otp ? { headers: { 'npm-otp': otp } } : {}) })
+      let res = await go()
+      if (challenged(res) && otp === null) {
+        otp = await typedLine(`Verdaccio one-time password for ${registry}:`)
+        if (otp === null) {
+          return { unanswered: true }
+        }
+        res = await go()
+      }
+      if (challenged(res)) {
+        refusedOtp = true
+      }
+      return res
+    }
+    const put = await send('PUT', `-/user/org.couchdb.user:${encodeURIComponent(username)}`, { body: { name: username, password } })
+    if (put.unanswered) {
+      return unanswered('one-time password')
+    }
+    if (refusedOtp) {
+      return err('other', `Verdaccio did not accept the one-time password at ${registry}. Nothing was stored. Run npm login again.`)
     }
     if (put.status === 401) {
       return err('other', `Verdaccio refused the login at ${registry}: bad username or password. Nothing was stored. Run npm login again.`)
@@ -269,8 +310,8 @@ const start = (args) => {
     const loginToken = put.json.token
     const minted = {}
     try {
-      minted.read = await mintToken(loginToken, password, true)
-      minted.full = await mintToken(loginToken, password, false)
+      minted.read = await mintToken(send, loginToken, password, true)
+      minted.full = await mintToken(send, loginToken, password, false)
     } catch (error) {
       if (minted.read) {
         // the one generated token must not outlive the login that failed

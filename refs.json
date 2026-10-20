@@ -725,6 +725,10 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
+  "https://github.com/verdaccio/verdaccio/blob/30601b3416afa2d5384d806f1aad9df1d7116a85/packages/api/src/user.ts": {
+    "kind": "source",
+    "cited": "2026-10-20"
+  },
   "https://github.com/verdaccio/verdaccio/blob/30601b3416afa2d5384d806f1aad9df1d7116a85/packages/api/src/v1/token.ts": {
     "kind": "source",
     "cited": "2026-10-17",
