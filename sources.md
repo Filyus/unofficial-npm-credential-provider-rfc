@@ -7,7 +7,7 @@ The copies in `.refs/` were fetched on 2026-10-20, after some of those dates: a 
 ## Not verified
 
 - registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401. A name that does not exist gives 404 (requested anonymously on 2026-10-21), npm's own 404 message allows for a private one, and a user report shows it ([npm/npm#18569](https://github.com/npm/npm/issues/18569)); npm documents no such policy, and no private package was requested for this document.
-- Whether registries other than registry.npmjs.org send `Vary: Authorization`: no documentation or header dump showing it was found for GitHub Packages, GitLab, Artifactory, Azure Artifacts, CodeArtifact, Artifact Registry or Verdaccio, and no survey with credentials was made.
+- Whether registries other than registry.npmjs.org send `Vary: Authorization`. Verdaccio's code sets no `Vary` itself ([`packages/` at 6388e44](https://github.com/verdaccio/verdaccio/tree/6388e4466b99a4c6815e9f853bd9d5bb210d9a85/packages), and 6.10.6), and GitLab's npm endpoints set none ([npm_project_packages.rb at 449ed28](https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/npm_project_packages.rb#L101-L108)), though middleware outside them could. For GitHub Packages, Artifactory, Azure Artifacts, CodeArtifact and Artifact Registry no documentation or header dump showing it was found, and no survey with credentials was made.
 
 ## External facts
 

@@ -544,6 +544,18 @@
     "sha256": "ea1a5aa3e8d04889b7fa5336d8b58d1f57e653f1c82a55cf2dfb353bb25a2be6",
     "file": ".refs/github.com/github_roadmap_issues_558.txt"
   },
+  "https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/api.rb": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/deploy_tokens.rb": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/npm_project_packages.rb": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/google-github-actions/auth": {
     "kind": "page",
     "cited": "2026-10-17",
@@ -829,6 +841,14 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
+  "https://github.com/verdaccio/verdaccio/blob/6388e4466b99a4c6815e9f853bd9d5bb210d9a85/packages/api/src/publish.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/verdaccio/verdaccio/blob/64cecaeb720bb7719a9df0d89271498d6a5b856b/src/api/endpoint/api/publish.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/verdaccio/verdaccio/blob/7054084a57f727430e9318e1525a76fdf2f800f5/packages/api/src/stage.ts": {
     "kind": "source",
     "cited": "2026-10-17",
@@ -863,6 +883,13 @@
     "kind": "source",
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
+  },
+  "https://github.com/verdaccio/verdaccio/tree/6388e4466b99a4c6815e9f853bd9d5bb210d9a85/packages": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "412c2b7d48e1685005619e6e3e53e997d82244c5563626ab08a6c69ea430df03",
+    "file": ".refs/github.com/verdaccio_verdaccio_tree_6388e4466b99a4c6815e9f853bd9d5bb210d9a85_packages.txt"
   },
   "https://github.community/t/packages-do-npm-tags-work/17657": {
     "kind": "page",

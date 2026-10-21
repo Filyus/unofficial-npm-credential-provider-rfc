@@ -41,7 +41,7 @@ The same API page lists the device authorization grant (its history section puts
 
 GitLab documents no way to exchange an OAuth token for a short-lived package registry token. The registry page lists a deploy token among the values for `_authToken`, which npm sends as a bearer token.
 
-Unverified here: whether an OAuth token with the `api` scope may call the deploy-token endpoint. This example assumes it may.
+In GitLab's code an `api`-scoped token reaches every API route ([api.rb at 449ed28](https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/api.rb#L58)), and creating a deploy token asks only for the Maintainer or Owner role ([deploy_tokens.rb](https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/deploy_tokens.rb#L110-L112)), so a Maintainer's OAuth token with `api` may call it. That an OAuth bearer is accepted there was read in the code, not tried against a live instance.
 
 The provider therefore never sends its OAuth token to the registry. It uses the OAuth token only to mint a deploy token for the project, scoped to `read_package_registry` or `write_package_registry`, and sends that.
 

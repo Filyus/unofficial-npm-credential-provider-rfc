@@ -36,7 +36,13 @@ Staging, 2FA and web login are flags that are off by default; staging and 2FA ar
 | `account` | the read-only token first, the full token when a write is refused | Token list and profile get accept the read-only token; token create, token revoke and profile set need the full one ([Operations](../phase-2-credential-provider.md#4-operations)) |
 | `access`, `trust` | `operation-not-supported` | Verdaccio has no access, team, org or trust endpoints, so such requests fall through to the package routes or 404 ([api/index.ts](https://github.com/verdaccio/verdaccio/blob/30601b3416afa2d5384d806f1aad9df1d7116a85/packages/api/src/index.ts)). See [What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc) |
 
-`owner add` and `owner rm` are gated by the `unpublish` rule, not `publish`, and `deprecate` by `publish`; both mappings rest on the request npm sends, which was recalled and not verified.
+Which rule guards an owner change depends on the Verdaccio line:
+
+- npm's `owner add` and `owner rm` send `PUT /<pkg>/-rev/<rev>` with the new `maintainers`, and `deprecate` sends `PUT /<pkg>` with the whole packument (npm/cli `lib/commands/owner.js` and `deprecate.js`).
+- In the 7.x line (`@verdaccio/api` 9.x) the first is guarded by the `unpublish` rule and the second by `publish` ([publish.ts at 6388e44](https://github.com/verdaccio/verdaccio/blob/6388e4466b99a4c6815e9f853bd9d5bb210d9a85/packages/api/src/publish.ts#L111-L127)).
+- In 6.10.6, the current stable release, one route `PUT /:package/:_rev?/:revision?` takes both and is guarded by `publish`, and removing a tarball needs both rules ([publish.ts at 64cecae](https://github.com/verdaccio/verdaccio/blob/64cecaeb720bb7719a9df0d89271498d6a5b856b/src/api/endpoint/api/publish.ts#L93-L116)).
+
+The provider releases the full token for both either way, so the mapping in the table holds on both lines.
 
 ## Configuration
 
