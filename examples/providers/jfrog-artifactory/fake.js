@@ -3,6 +3,8 @@
 // from a state the scenario sets and changing it as the platform would:
 //
 //   identityTokens, refreshTokens    long-lived logins the platform accepts
+//   accessTokens                     web-login access tokens it accepts as a bearer
+//   admins                           tokens of admin users: only those may revoke by value
 //   tokens                           secrets the next tokens it creates get
 //   rotate                           refresh tokens a refresh hands out in turn: each
 //                                    refresh then invalidates the one presented and
@@ -12,7 +14,8 @@
 //   minted                           tokens created so far, with what was asked
 //   user                             the name /users/me gives
 //   revocable, revoked               whether revocation works (above the
-//                                    revocable threshold), and what was revoked
+//                                    revocable threshold), and what was revoked, by
+//                                    either call; a revoked token is no longer accepted
 //   login.pending                    web-login polls answered 400 first
 //   login.confirmed                  false: the person never confirms
 //   login.result                     the token response once they do
@@ -27,6 +30,8 @@ const json = (status, body) => ({ status, json: body })
 const createFake = (state) => {
   state.identityTokens = state.identityTokens || []
   state.refreshTokens = state.refreshTokens || []
+  state.accessTokens = state.accessTokens || []
+  state.admins = state.admins || []
   state.tokens = state.tokens || []
   state.minted = state.minted || []
   state.revoked = state.revoked || []
@@ -73,15 +78,40 @@ const createFake = (state) => {
       }
       return json(200, answer)
     }
+    // Revoke Token by ID: `me` is the token making the call, which its user may revoke;
+    // another id would need the token's own user or an admin, and the provider sends none
+    if (method === 'DELETE' && path === '/access/api/v1/tokens/me') {
+      const own = [...state.identityTokens, ...state.accessTokens]
+      if (!own.includes(token)) {
+        return json(401, { error: 'bad credentials' })
+      }
+      if (!state.revocable) {
+        return json(400, { error: 'the token is below the revocable threshold' })
+      }
+      state.revoked.push(token)
+      state.identityTokens = state.identityTokens.filter((held) => held !== token)
+      state.accessTokens = state.accessTokens.filter((held) => held !== token)
+      return json(200, {})
+    }
+    // Revoke Token by Value: admin privileges required, which a plain user's token lacks
     if (method === 'DELETE' && path === '/access/api/v1/tokens/revoke') {
+      const own = [...state.identityTokens, ...state.accessTokens]
+      if (!own.includes(token)) {
+        return json(401, { error: 'bad credentials' })
+      }
+      if (!state.admins.includes(token)) {
+        return json(403, { error: 'admin privileges are required' })
+      }
       if (!state.revocable) {
         return json(400, { error: 'the token is below the revocable threshold' })
       }
       state.revoked.push(body.token)
+      state.identityTokens = state.identityTokens.filter((held) => held !== body.token)
+      state.accessTokens = state.accessTokens.filter((held) => held !== body.token)
       return json(200, {})
     }
     if (method === 'GET' && path === '/access/api/v1/users/me') {
-      const known = [...state.identityTokens, ...state.minted.map((m) => m.token)]
+      const known = [...state.identityTokens, ...state.accessTokens, ...state.minted.map((m) => m.token)]
       return known.includes(token) && state.user ? json(200, { username: state.user }) : json(401, { error: 'unauthorized' })
     }
 

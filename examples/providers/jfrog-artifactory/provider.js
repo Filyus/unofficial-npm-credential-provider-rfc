@@ -10,10 +10,15 @@
 // Endpoints, as the page cites them: POST /access/api/v1/tokens (create and
 // refresh), POST /access/api/v1/oidc/token, and the CLI web login at
 // /access/api/v2/authentication/jfrog_client_login/request and .../token/<id>
-// (login.go, weblogin.go). Read in the REST reference: `DELETE /access/api/v1/tokens/revoke`
-// with the token in a JSON body field `token` and a Bearer header, which
-// the page says needs admin privileges (a plain user gets 403 and the logout
-// warns), and the OIDC page's example of the token exchange, whose grant and token type
+// (login.go, weblogin.go). Read in the REST reference: `DELETE /access/api/v1/tokens/{id}`
+// ("Revoke Token by ID"), where `me` revokes the token that makes the call and which "requires
+// a valid token": users can revoke only their own tokens, admins any. Logout uses it, with
+// the stored access or identity token as the bearer. `DELETE /access/api/v1/tokens/revoke`
+// (by value, the token in a JSON body field `token`) is not used: the page says it needs admin
+// privileges, so a plain user's logout would get 403. A web login's refresh token is not
+// revoked: the pages read say nothing of presenting one as a bearer or of revoking an access
+// token ending its refresh, so it is left to expire and logout says so on stderr. Also read:
+// the OIDC page's example of the token exchange, whose grant and token type
 // names the provider sends. Recalled, not read, and so unverified here: the request and response
 // fields of the other calls, GitHub's `audience` query parameter, and `GET /access/api/v1/users/me`,
 // which only names the user in the message of a 403. Invented for the
@@ -292,20 +297,20 @@ const start = async (args) => {
     }
     // The login goes first, as the RFC has it, so that an Artifactory that is slow or down
     // cannot keep it; the revocation that follows is a best effort, and what cannot be
-    // revoked is warned about.
-    const tokens = stored.type === 'refresh' ? [stored.accessToken, stored.refreshToken] : [stored.token]
+    // revoked is warned about. The token revokes itself (`me`), which a plain user may do.
     const bearer = stored.type === 'refresh' ? stored.accessToken : stored.token
     writeLogin(null)
     held = null
-    for (const token of tokens) {
-      try {
-        const res = await ctx.request('DELETE', `${root}/access/api/v1/tokens/revoke`, { token: bearer, body: { token } })
-        if (res.status !== 200) {
-          log(`logout: Artifactory answered ${res.status} to revoking the stored login; it stays valid until it expires`)
-        }
-      } catch {
-        log('logout: the stored login could not be revoked')
+    try {
+      const res = await ctx.request('DELETE', `${root}/access/api/v1/tokens/me`, { token: bearer })
+      if (res.status !== 200) {
+        log(`logout: Artifactory answered ${res.status} to revoking the stored login; it stays valid until it expires`)
       }
+    } catch {
+      log('logout: the stored login could not be revoked')
+    }
+    if (stored.type === 'refresh') {
+      log('logout: the refresh token is not revoked, since no documented call revokes it; it stays valid until its refresh period ends')
     }
     return ok('logout')
   }

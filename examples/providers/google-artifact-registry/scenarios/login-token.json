@@ -1,5 +1,6 @@
 {
   "hosts": [
+    "https://accounts.google.com",
     "https://oauth2.googleapis.com",
     "https://iamcredentials.googleapis.com",
     "https://sts.googleapis.com"
@@ -24,21 +25,19 @@
         }
       }
     },
-    "adc": "fixtures/ci-adc.json"
+    "adc": "fixtures/ci-adc.json",
+    "clientSecret": "example-desktop-client-secret"
   },
   "store": {},
   "state": {
     "oauth": {
-      "interval": 5,
-      "userCode": "WDJB-MJHT",
-      "verificationUrl": "https://www.google.com/device",
       "account": "dev@example.test",
       "sessions": {
         "refresh-adc-1": {
           "account": "dev@example.test"
         }
       },
-      "pending": 1
+      "clientSecret": "example-desktop-client-secret"
     },
     "iam": {
       "serviceAccounts": {
@@ -73,7 +72,8 @@
     },
     "state": {
       "oauth": {
-        "devices": 0
+        "exchanges": 0,
+        "authRequests": []
       }
     }
   }

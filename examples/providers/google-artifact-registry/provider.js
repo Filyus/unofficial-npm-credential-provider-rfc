@@ -16,30 +16,38 @@
 // SIMPLIFIED, so that it can run without gcloud (the page says so, under
 // Configuration): the page has the provider run `gcloud auth login` and
 // `gcloud auth application-default login` against its own configuration; here
-// one sign-in, the one a token is made from (the second's), is Google's device
-// authorization flow against the configured endpoints, and a token is made through a refresh grant of the stored sign-in (the
-// library call the page names) and the IAM Credentials API. In CI only the
-// federated identity of a credentials file the configuration names is used,
-// not the metadata server's, and a 403 retry is answered `other` for every
-// operation: there is no `repoAdmin` identity to move up to. The revoke
-// endpoint of `logout` and the device flow's endpoints and field names
-// (`verification_url`, not RFC 8628's `verification_uri`) are read in Google's
-// documents, which also limit the device flow to a short list of scopes without
-// `cloud-platform` and have the polling request carry a `client_secret`; the
-// other paths and fields are recalled, not read (see fake.js); the client id is
-// invented.
+// one sign-in, the one a token is made from (the second's), is Google's
+// OAuth 2.0 flow for desktop apps against the configured endpoints: the
+// authorization URL is shown on the controlling terminal, the redirect comes
+// to a listener on 127.0.0.1 on a random port, PKCE (S256) protects the code,
+// and the code is exchanged at the token endpoint. A token is made through a
+// refresh grant of the stored sign-in (the library call the page names) and
+// the IAM Credentials API. In CI only the federated identity of a credentials
+// file the configuration names is used, not the metadata server's, and a 403
+// retry is answered `other` for every operation: there is no `repoAdmin`
+// identity to move up to. Read in Google's "OAuth 2.0 for Desktop Apps" page:
+// the authorization endpoint and its parameters, the loopback redirect, the
+// token request's fields and the revoke endpoint (`client_secret` is optional
+// there, and the provider sends the one its configuration holds, if any).
+// Not confirmed: that Google puts `state` in the query of a loopback redirect
+// (the page's `state` entry says fragment, which no listener receives) and
+// the exact `error` Google gives for a code that is spent or expired; the
+// other paths and fields are recalled, not read (see fake.js); the client id
+// is invented.
 
+const crypto = require('node:crypto')
 const fs = require('node:fs')
+const http = require('node:http')
 const path = require('node:path')
 const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext, plain } = require('../lib/context.js')
 
 const CAPABILITIES = ['erase', 'login', 'logout', 'retry-context']
 const CLIENT_ID = 'example-gar-provider-client'
-const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 const EXCHANGE_GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange'
 const CLOUD_PLATFORM = 'https://www.googleapis.com/auth/cloud-platform'
 const OAUTH = 'https://oauth2.googleapis.com'
+const AUTHORIZE = 'https://accounts.google.com/o/oauth2/v2/auth'
 const IAM = 'https://iamcredentials.googleapis.com'
 const STS = 'https://sts.googleapis.com'
 const ACCESS_MARGIN_SECONDS = 60
@@ -75,50 +83,88 @@ const start = (args) => {
 
   // --- the person's sign-in ----------------------------------------------------
 
-  // Google's device flow, for the sign-in `npm login` needs, inside the deadline
-  // of the login request. What comes back is its refresh token.
-  const deviceFlow = async (deadline) => {
+  // The client the provider signs in as. A desktop client's secret is not one: Google's page calls
+  // desktop apps public clients that cannot keep a secret, and marks `client_secret` optional, so
+  // it is sent when the configuration holds one.
+  const client = () => ({ client_id: CLIENT_ID, ...(ctx.config.clientSecret ? { client_secret: ctx.config.clientSecret } : {}) })
+
+  // Google's flow for desktop apps, for the sign-in `npm login` needs, inside the deadline of the
+  // login request: a listener on the loopback address, the authorization URL shown on the
+  // controlling terminal, then the code the redirect brings exchanged for tokens. What comes back
+  // is the refresh token.
+  const loopbackFlow = async (deadline) => {
     const failed = (reason) => new Failed(`The sign-in did not finish: ${reason}. Nothing was stored. Run npm login again.`)
-    const started = await ctx.request('POST', `${OAUTH}/device/code`, {
-      form: { client_id: CLIENT_ID, scope: CLOUD_PLATFORM },
+    const verifier = crypto.randomBytes(48).toString('base64url')
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url')
+    const state = crypto.randomBytes(16).toString('base64url')
+    let arrive
+    const arrived = new Promise((resolve) => {
+      arrive = resolve
     })
-    if (started.status !== 200 || !started.json) {
-      throw failed(`Google did not start a sign-in (HTTP ${started.status})`)
-    }
-    const { device_code: deviceCode, user_code: userCode, verification_url: url } = started.json
-    let interval = started.json.interval ?? 5
-    if (!ctx.showToPerson(`Open ${plain(url)} and enter the code ${plain(userCode)}`)) {
-      // nothing the person could finish: the code is left to expire at Google
-      throw new Failed('There is no terminal to show the sign-in on, so no sign-in was started. Nothing was stored. Run npm login from a terminal.')
-    }
-    for (;;) {
-      await ctx.sleep(Math.min(interval * 1000, Math.max(0, deadline - ctx.clockMs())))
-      const polled = await ctx.request('POST', `${OAUTH}/token`, {
-        form: { grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: CLIENT_ID },
+    // Only the answer to this request counts: whatever else reaches the port (a stray request, a
+    // page that guessed it) is refused, since the redirect address can be guessed and `state` is
+    // what ties an answer to the request
+    const server = http.createServer((req, res) => {
+      const query = new URL(req.url, 'http://127.0.0.1').searchParams
+      if (req.method !== 'GET' || query.get('state') !== state || !(query.has('code') || query.has('error'))) {
+        res.writeHead(400, { 'content-type': 'text/plain' })
+        res.end('This is not the answer to the sign-in npm started.\n')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('You can close this window and return to the terminal.\n')
+      arrive({ code: query.get('code'), error: query.get('error') })
+    })
+    try {
+      await new Promise((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', resolve)
       })
-      if (polled.status === 200 && polled.json) {
-        if (!polled.json.refresh_token) {
-          // an access token alone would be lost within the hour: there is nothing to store
-          throw failed('Google approved the sign-in but gave no refresh token')
-        }
-        return polled.json.refresh_token
-      }
-      const code = polled.json && polled.json.error
-      if (code === 'access_denied') {
-        throw failed('the sign-in was denied')
-      }
-      if (code === 'expired_token') {
-        throw failed('the sign-in code expired before it was approved')
-      }
-      if (code === 'slow_down') {
-        interval += 5
-      } else if (code !== 'authorization_pending') {
-        throw failed(`Google refused the sign-in (HTTP ${polled.status})`)
-      }
-      if (ctx.clockMs() >= deadline) {
-        throw failed('no sign-in was completed in 4 minutes 30 seconds')
-      }
+    } catch (error) {
+      throw new Failed(`The sign-in could not listen on the loopback address (${plain(error.code || error.message)}). Nothing was stored.`)
     }
+    const redirectUri = `http://127.0.0.1:${server.address().port}`
+    let outcome
+    try {
+      const url = `${AUTHORIZE}?${new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: CLOUD_PLATFORM,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        state,
+      })}`
+      if (!ctx.showToPerson(`Open ${plain(url)} to sign in`, { browse: url })) {
+        // nothing the person could finish: no request has been made, and nothing is waiting at Google
+        throw new Failed('There is no terminal to show the sign-in on, so no sign-in was started. Nothing was stored. Run npm login from a terminal.')
+      }
+      outcome = await ctx.withDeadline(() => arrived, Math.max(0, deadline - ctx.clockMs()))
+    } finally {
+      server.closeAllConnections()
+      server.close()
+    }
+    if (outcome === null) {
+      throw failed('no sign-in was completed in 4 minutes 30 seconds')
+    }
+    if (outcome.error === 'access_denied') {
+      throw failed('the sign-in was denied')
+    }
+    if (outcome.error || !outcome.code) {
+      throw failed(`Google refused the sign-in (${plain(outcome.error || 'no code')})`)
+    }
+    const exchanged = await ctx.request('POST', `${OAUTH}/token`, {
+      form: { ...client(), code: outcome.code, code_verifier: verifier, redirect_uri: redirectUri, grant_type: 'authorization_code' },
+    })
+    if (exchanged.status !== 200 || !exchanged.json) {
+      const code = exchanged.json && exchanged.json.error
+      throw failed(`Google refused the authorization code (${code ? plain(code) : `HTTP ${exchanged.status}`})`)
+    }
+    if (!exchanged.json.refresh_token) {
+      // an access token alone would be lost within the hour: there is nothing to store
+      throw failed('Google approved the sign-in but gave no refresh token')
+    }
+    return exchanged.json.refresh_token
   }
 
   // The access token of the stored sign-in: the held one while it has time
@@ -134,7 +180,7 @@ const start = (args) => {
       return userAccess.token
     }
     const refreshed = await ctx.request('POST', `${OAUTH}/token`, {
-      form: { grant_type: 'refresh_token', refresh_token: adc.refreshToken, client_id: CLIENT_ID },
+      form: { grant_type: 'refresh_token', refresh_token: adc.refreshToken, ...client() },
     })
     // Google refuses a refresh grant that has ended with 400 (invalid_grant) or 401; any
     // other answer, a 5xx or a 429, is no refusal and says nothing about the sign-in
@@ -356,7 +402,7 @@ const start = (args) => {
     const deadline = ctx.clockMs() + WAIT_MS
     let refreshToken
     try {
-      refreshToken = await deviceFlow(deadline)
+      refreshToken = await loopbackFlow(deadline)
     } catch (error) {
       if (error instanceof Failed) {
         return err('other', error.message)

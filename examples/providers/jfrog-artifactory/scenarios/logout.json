@@ -29,7 +29,8 @@
     "state": {
       "revoked": [
         "example-identity-token"
-      ]
+      ],
+      "identityTokens": []
     }
   }
 }

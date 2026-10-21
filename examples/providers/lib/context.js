@@ -97,6 +97,10 @@ const loadContext = (configPath) => {
   // `sleep(ms)` is a promise with a `cancel()`. A real timer is cleared; a
   // synthetic one gives back the time it had taken if it had not fired, so a
   // deadline that was not the one to pass moves nothing.
+  // While the scripted person's browser is on its way (see `showToPerson`), a synthetic sleep does
+  // not end: the redirect it follows takes real time, and a deadline that passed first would end a
+  // wait the person was about to answer.
+  let browsing = null
   const sleep = (ms) => {
     let cancel
     let promise
@@ -110,13 +114,26 @@ const loadContext = (configPath) => {
       const taken = Math.max(0, ms)
       elapsedMs += taken
       promise = new Promise((resolve) => {
-        const immediate = setImmediate(() => {
-          cancel = () => {}
-          resolve()
-        })
+        let immediate
+        let dead = false
+        const fire = () => {
+          if (dead) {
+            return
+          }
+          immediate = setImmediate(() => {
+            cancel = () => {}
+            resolve()
+          })
+        }
         cancel = () => {
+          dead = true
           clearImmediate(immediate)
           elapsedMs -= taken
+        }
+        if (browsing) {
+          browsing.then(fire)
+        } else {
+          fire()
         }
       })
     }
@@ -260,13 +277,28 @@ const loadContext = (configPath) => {
   // The text is shown line by line with `plain` applied to each, and a scripted
   // run records what it was given, sanitised, in `person.shownLog` (the
   // scenario's `expect.shown` checks it).
-  const showToPerson = (given) => {
+  //
+  // `browse` is the address the text asks the person to open. A scripted person opens it: the
+  // request goes to the fake that stands for that host, and a redirect is followed, to a loopback
+  // address (the provider's own listener) as it is, to another host through the configured
+  // endpoints. What the fake answers decides what the person did (consent, denial, a page they
+  // never complete). A real run only shows the text.
+  const showToPerson = (given, { browse } = {}) => {
     const text = String(given).split('\n').map(plain).join('\n')
     if (scripted) {
       if (config.person.shownLog) {
         fs.appendFileSync(path.resolve(path.dirname(configPath), config.person.shownLog), `${JSON.stringify(text)}\n`)
       }
-      return config.person.terminal !== false
+      const shown = config.person.terminal !== false
+      if (shown && browse) {
+        const done = scriptedBrowser(browse, endpoint).catch(() => {}).then(() => {
+          if (browsing === done) {
+            browsing = null
+          }
+        })
+        browsing = done
+      }
+      return shown
     }
     try {
       writeTerminal(`${text}\n`)
@@ -282,6 +314,23 @@ const loadContext = (configPath) => {
   const confirmWithin = (question, ms) => withDeadline((signal) => confirm(question, signal), ms)
 
   return { config, readStore, writeStore, now, clockMs, sleep, withDeadline, request, confirm, confirmWithin, ask, askWithin, showToPerson }
+}
+
+// The scripted person's browser: GET the address, follow up to five redirects, the loopback ones
+// as they are. A response that is not a redirect ends the visit: the person saw a page and did
+// nothing more.
+const scriptedBrowser = async (address, endpoint) => {
+  let url = address
+  for (let hops = 0; hops < 5; hops += 1) {
+    const loopback = ['127.0.0.1', '[::1]'].includes(new URL(url).hostname)
+    const response = await fetch(loopback ? url : endpoint(url), { redirect: 'manual' })
+    await response.text()
+    const location = response.headers.get('location')
+    if (response.status < 300 || response.status >= 400 || !location) {
+      return
+    }
+    url = new URL(location, url).href
+  }
 }
 
 // On Windows the device names, not `CONIN$` and `CONOUT$`: Node resolves a

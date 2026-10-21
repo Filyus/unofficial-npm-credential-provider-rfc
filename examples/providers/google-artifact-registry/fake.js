@@ -1,22 +1,28 @@
 'use strict'
 // A fake Google for google-artifact-registry, answering from the state a
-// scenario sets: the OAuth 2.0 endpoint, the Security Token Service and the
-// IAM Credentials API, on one address. The paths and fields follow Google's
-// published shapes as recalled (`serviceAccounts:generateAccessToken` with
-// `lifetime` and `expireTime`, the STS token exchange); the revoke and device
-// authorization endpoints and the device flow's field names were read in
-// Google's documents, whose polling statuses (403, 428) the fake does not
-// follow; none was read against a live service. The registry itself is not here: the provider never calls it.
+// scenario sets: the OAuth 2.0 endpoints (authorization and token), the
+// Security Token Service and the IAM Credentials API, on one address. The
+// paths and fields follow Google's published shapes as recalled
+// (`serviceAccounts:generateAccessToken` with `lifetime` and `expireTime`, the
+// STS token exchange); the authorization endpoint, the loopback redirect, the
+// authorization-code exchange with PKCE and the revoke endpoint were read in
+// Google's documents ("OAuth 2.0 for Desktop Apps"), none against a live
+// service. Not read: which `error` Google gives for a spent or expired code,
+// and whether `state` comes back in the query of the redirect (the page says
+// fragment); the fake answers `invalid_grant` and puts it in the query. The
+// registry itself is not here: the provider never calls it.
 //
-// state.oauth: interval, userCode, verificationUrl, pending (polls answered
-//              authorization_pending, across both device flows), denied
-//              (access_denied), expired (expired_token), slowDown (a first poll
-//              answered slow_down; a poll less than 10 s after it is slow_down again, a
-//              second expired_token), account,
-//              sessions { refreshToken: { account, lapsed, lapseAfter } }
+// state.oauth: account, sessions { refreshToken: { account, lapsed, lapseAfter } }
 //              (`lapseAfter: n` ends the session after n refreshes, as when
 //              an administrator's session length runs out between two requests),
-//              noRefreshToken (an approved sign-in answered with no refresh token),
+//              clientSecret (the secret the client's requests must carry, as a
+//              refresh and the code exchange both then do),
+//              denied (the person refuses consent: the redirect carries
+//              `error=access_denied`), noConsent (the consent page is shown and
+//              nobody completes it: no redirect comes), codeRejected (the
+//              exchange refuses every code with invalid_grant, as for a code
+//              that has expired or been used), noRefreshToken (an approved
+//              sign-in answered with no refresh token),
 //              refreshStatus (a status every refresh grant is answered with, 503:
 //              Google is down), revokeStatus (a status POST /revoke answers with
 //              instead of revoking), revoked (the refresh tokens revoked so far)
@@ -24,9 +30,14 @@
 // state.iam:   serviceAccounts { email: { roles, tokenCreators, tokens } }, a
 //              queue of tokens per account that each impersonation takes from
 // state.sts:   audience, subjectToken, principal, roles, expiresIn, tokens
-// The fake adds oauth.devices, oauth.polls (device-code polls), oauth.refreshes, iam.issued and sts.issued:
-// the principal and IAM roles each token was minted for, which is what the
-// registry would judge it by.
+// The fake adds oauth.authRequests (what each authorization request carried:
+// client id, scope, response type, challenge method, the redirect's host),
+// oauth.codes (codes issued, each with its challenge and redirect address),
+// oauth.exchanges (code exchanges that succeeded), oauth.refreshes, iam.issued and
+// sts.issued: the principal and IAM roles each token was minted for, which is
+// what the registry would judge it by.
+
+const crypto = require('node:crypto')
 
 const json = (status, body) => ({ status, json: body })
 
@@ -36,8 +47,9 @@ const createFake = (state) => {
   const sts = (state.sts ??= {})
   oauth.sessions ??= {}
   oauth.revoked = []
-  oauth.devices = 0
-  oauth.polls = 0
+  oauth.authRequests = []
+  oauth.codes = {}
+  oauth.exchanges = 0
   oauth.refreshes = 0
   iam.serviceAccounts ??= {}
   iam.issued = []
@@ -52,7 +64,10 @@ const createFake = (state) => {
     return token
   }
 
-  const tokenEndpoint = ({ body, clock }) => {
+  const tokenEndpoint = ({ body }) => {
+    if (oauth.clientSecret !== undefined && body.client_secret !== oauth.clientSecret) {
+      return json(401, { error: 'invalid_client' })
+    }
     if (body.grant_type === 'refresh_token') {
       if (oauth.refreshStatus) {
         return json(oauth.refreshStatus, { error: 'the fake is told to fail' })
@@ -65,40 +80,33 @@ const createFake = (state) => {
       session.refreshes = (session.refreshes ?? 0) + 1
       return json(200, { access_token: issueAccess(session.account), expires_in: 3600, token_type: 'Bearer' })
     }
-    if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
-      oauth.polls += 1
-      if (!/^device-code-\d+$/.test(body.device_code || '') || Number(body.device_code.slice(12)) > oauth.devices) {
-        return json(400, { error: 'invalid_grant' })
-      }
-      if (oauth.slowDown) {
-        // the first poll is told to slow down; a poll sooner than that by the interval
-        // given (5 s more) is told again, a second one that the code has expired
-        if (oauth.notBefore === undefined) {
-          oauth.notBefore = clock + 10000
-          oauth.tooSoon = 0
-          return json(400, { error: 'slow_down' })
-        }
-        if (clock < oauth.notBefore) {
-          oauth.tooSoon += 1
-          return json(400, { error: oauth.tooSoon >= 2 ? 'expired_token' : 'slow_down' })
+    if (body.grant_type === 'authorization_code') {
+      // every field the page lists for the exchange must be there
+      for (const field of ['client_id', 'code', 'code_verifier', 'redirect_uri']) {
+        if (!body[field]) {
+          return json(400, { error: 'invalid_request', error_description: `Missing required parameter: ${field}` })
         }
       }
-      if (oauth.denied) {
-        return json(400, { error: 'access_denied' })
+      const issued = Object.hasOwn(oauth.codes, body.code) ? oauth.codes[body.code] : null
+      if (!issued || issued.used || oauth.codeRejected) {
+        return json(400, { error: 'invalid_grant', error_description: 'Bad Request' })
       }
-      if (oauth.expired) {
-        return json(400, { error: 'expired_token' })
+      if (body.redirect_uri !== issued.redirectUri) {
+        return json(400, { error: 'invalid_grant', error_description: 'Bad Request' })
       }
-      if (oauth.pending > 0) {
-        oauth.pending -= 1
-        return json(428, { error: 'authorization_pending' })
+      // PKCE: S256 of the verifier is the challenge the authorization request carried
+      if (crypto.createHash('sha256').update(body.code_verifier).digest('base64url') !== issued.challenge) {
+        return json(400, { error: 'invalid_grant', error_description: 'Invalid code verifier.' })
       }
+      issued.used = true
+      oauth.exchanges += 1
+      const scope = issued.scope
       if (oauth.noRefreshToken) {
-        return json(200, { access_token: issueAccess(oauth.account), expires_in: 3600, token_type: 'Bearer' })
+        return json(200, { access_token: issueAccess(oauth.account), expires_in: 3600, token_type: 'Bearer', scope })
       }
-      const refresh = `refresh-device-${body.device_code.slice(12)}`
+      const refresh = `refresh-code-${oauth.exchanges}`
       oauth.sessions[refresh] = { account: oauth.account }
-      return json(200, { access_token: issueAccess(oauth.account), refresh_token: refresh, expires_in: 3600, token_type: 'Bearer' })
+      return json(200, { access_token: issueAccess(oauth.account), refresh_token: refresh, expires_in: 3600, token_type: 'Bearer', scope })
     }
     return json(400, { error: 'unsupported_grant_type' })
   }
@@ -147,17 +155,45 @@ const createFake = (state) => {
     return json(200, { access_token: issued, expires_in: sts.expiresIn, token_type: 'Bearer' })
   }
 
+  // https://accounts.google.com/o/oauth2/v2/auth: what the person's browser asks for. A request
+  // Google would refuse is a 400 page; a consenting person is sent back to the redirect address
+  // with a code and the `state` they were given, a refusing one with `error=access_denied`.
+  const authorize = ({ query }) => {
+    const redirect = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(query.redirect_uri || '')
+    oauth.authRequests.push({
+      client_id: query.client_id,
+      scope: query.scope,
+      response_type: query.response_type,
+      code_challenge_method: query.code_challenge_method,
+      redirect_host: redirect ? '127.0.0.1' : null,
+    })
+    if (!query.client_id || query.response_type !== 'code' || !query.scope || !redirect) {
+      return json(400, { error: 'invalid_request' })
+    }
+    // the provider always sends a challenge, and S256: `plain` is the default Google applies without one
+    if (!query.code_challenge || query.code_challenge_method !== 'S256' || !query.state) {
+      return json(400, { error: 'invalid_request' })
+    }
+    if (oauth.noConsent) {
+      return { status: 200, json: {} }
+    }
+    const back = new URL(`${query.redirect_uri}/`)
+    if (oauth.denied) {
+      back.searchParams.set('error', 'access_denied')
+    } else {
+      const code = `code-${Object.keys(oauth.codes).length + 1}`
+      oauth.codes[code] = { challenge: query.code_challenge, redirectUri: query.redirect_uri, scope: query.scope, used: false }
+      back.searchParams.set('code', code)
+      back.searchParams.set('scope', query.scope)
+    }
+    back.searchParams.set('state', query.state)
+    return { status: 302, headers: { location: back.href } }
+  }
+
   return (request) => {
     const { method, path } = request
-    if (method === 'POST' && path === '/device/code') {
-      oauth.devices += 1
-      return json(200, {
-        device_code: `device-code-${oauth.devices}`,
-        user_code: oauth.userCode,
-        verification_url: oauth.verificationUrl,
-        expires_in: 600,
-        interval: oauth.interval,
-      })
+    if (method === 'GET' && path === '/o/oauth2/v2/auth') {
+      return authorize(request)
     }
     if (method === 'POST' && path === '/token') {
       return tokenEndpoint(request)

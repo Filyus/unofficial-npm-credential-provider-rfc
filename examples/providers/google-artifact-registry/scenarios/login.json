@@ -1,5 +1,6 @@
 {
   "hosts": [
+    "https://accounts.google.com",
     "https://oauth2.googleapis.com",
     "https://iamcredentials.googleapis.com",
     "https://sts.googleapis.com"
@@ -24,21 +25,19 @@
         }
       }
     },
-    "adc": "fixtures/ci-adc.json"
+    "adc": "fixtures/ci-adc.json",
+    "clientSecret": "example-desktop-client-secret"
   },
   "store": {},
   "state": {
     "oauth": {
-      "interval": 5,
-      "userCode": "WDJB-MJHT",
-      "verificationUrl": "https://www.google.com/device",
       "account": "dev@example.test",
       "sessions": {
         "refresh-adc-1": {
           "account": "dev@example.test"
         }
       },
-      "pending": 1
+      "clientSecret": "example-desktop-client-secret"
     },
     "iam": {
       "serviceAccounts": {
@@ -71,14 +70,22 @@
     "store": {
       "gcloud": {
         "adc": {
-          "refreshToken": "refresh-device-1"
+          "refreshToken": "refresh-code-1"
         }
       }
     },
     "state": {
       "oauth": {
-        "devices": 1,
-        "pending": 0
+        "exchanges": 1,
+        "authRequests": [
+          {
+            "client_id": "example-gar-provider-client",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "response_type": "code",
+            "code_challenge_method": "S256",
+            "redirect_host": "127.0.0.1"
+          }
+        ]
       }
     }
   }

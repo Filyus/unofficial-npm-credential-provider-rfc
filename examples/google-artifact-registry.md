@@ -63,7 +63,7 @@ The environment does decide one thing, whether it is in a job: `CI` set and the 
 
 **What the reference provider simplifies.** It runs without gcloud ([provider.js](providers/google-artifact-registry/provider.js)). Where this page has the provider run `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG`, it does this instead:
 
-- It runs Google's device authorization flow once against the configured endpoints. This is the second sign-in of the two, the one a token is made from: the `gcloud auth login` one would be stored and never read here, so it is not taken.
+- It runs Google's OAuth 2.0 flow for desktop apps once against the configured endpoints: a loopback redirect, PKCE and an authorization-code exchange (below, under Login). This is the second sign-in of the two, the one a token is made from: the `gcloud auth login` one would be stored and never read here, so it is not taken.
 - It makes a token by a refresh grant of the stored sign-in and the IAM Credentials API.
 - Its messages name `npm login`, never gcloud.
 
@@ -73,7 +73,7 @@ Other differences:
 - In CI it uses the federated credentials file `adc` names and no metadata server.
 - It has no `repoAdmin` identity, so a 403 retry is `other` for every operation.
 
-Of the endpoint paths and fields it uses, the revoke call and the device flow's are read in Google's documents (below and under Login); the rest are recalled, not read, as the comment in the file says.
+Of the endpoint paths and fields it uses, the revoke call and the desktop flow's are read in Google's documents (below and under Login); the rest are recalled, not read, as the comment in the file says.
 
 ## Hello
 
@@ -200,7 +200,7 @@ A retry with nothing stored at all is `other` naming `npm login`, not `not-found
 
 ## Login and logout
 
-[login.jsonl](google-artifact-registry/login.jsonl) and [logout.jsonl](google-artifact-registry/logout.jsonl). `npm login --registry https://us-central1-npm.pkg.dev/acme-prod/npm-all/` sends `{"v":1,"kind":"login","registry":"...","interactive":true}`. The provider runs `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG` directory (the reference provider runs one device flow, see [Configuration](#configuration)), with gcloud attached to the controlling terminal (`/dev/tty`, or `CONIN$`/`CONOUT$` on Windows), never to npm's pipe, since `--no-launch-browser` reads the code from stdin. It answers `{"Ok":{"kind":"login"}}`. When the sign-in is not completed ([login-refused.jsonl](google-artifact-registry/login-refused.jsonl)) it answers `other`:
+[login.jsonl](google-artifact-registry/login.jsonl) and [logout.jsonl](google-artifact-registry/logout.jsonl). `npm login --registry https://us-central1-npm.pkg.dev/acme-prod/npm-all/` sends `{"v":1,"kind":"login","registry":"...","interactive":true}`. The provider runs `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG` directory (the reference provider runs one desktop-app sign-in, see [Configuration](#configuration)), with gcloud attached to the controlling terminal (`/dev/tty`, or `CONIN$`/`CONOUT$` on Windows), never to npm's pipe, since `--no-launch-browser` reads the code from stdin. It answers `{"Ok":{"kind":"login"}}`. When the sign-in is not completed ([login-refused.jsonl](google-artifact-registry/login-refused.jsonl)) it answers `other`:
 
 ```json
 {"v":1,"kind":"login","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","interactive":true}
@@ -209,24 +209,31 @@ A retry with nothing stored at all is `other` naming `npm login`, not `not-found
 
 What gcloud does when the user denies access or never returns is not documented ([gcloud auth login](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login) says nothing on denial or timeouts). So the provider ends the flow itself, at 4.5 minutes because npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)). A gcloud that exits non-zero earlier gets the same answer with its own reason (the reference provider's message says "The sign-in", since it runs no gcloud).
 
-Google's device flow, as its page for limited-input devices has it ([OAuth 2.0 for TV and Limited-Input Device Applications](https://developers.google.com/identity/protocols/oauth2/limited-input-device), read on 2026-10-21): `POST https://oauth2.googleapis.com/device/code` with `client_id` and `scope`; the answer has `device_code`, `user_code`, `verification_url`, `expires_in` and `interval`. The field is `verification_url`, not `verification_uri` as in RFC 8628, and the reference provider reads `verification_url`.
+Google's flow for installed applications, as its page for desktop apps has it ([OAuth 2.0 for Desktop Apps](https://developers.google.com/identity/protocols/oauth2/native-app), read on 2026-10-21). The device flow cannot serve here: Google's page for [limited-input devices](https://developers.google.com/identity/protocols/oauth2/limited-input-device) lists only a few scopes for it (`openid`, `email`, `profile`, `drive.appdata`, `drive.file`, `youtube`, `youtube.readonly`), and `cloud-platform` is not among them, which is why the provider uses this flow and not that one. The reference provider takes these steps:
 
-The polling `POST https://oauth2.googleapis.com/token` takes `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `device_code`, `client_id` and a `client_secret`, which the reference provider does not send.
+1. It generates a `code_verifier` of random characters, the `code_challenge` that is the Base64URL (no padding) of its SHA-256 (`S256`), and a random `state`, and starts an HTTP listener on `127.0.0.1` on a port the system picks. The page lists `http://127.0.0.1:port` and `http://[::1]:port` as the loopback redirect addresses, and says to start the listener on a random available port. It says the manual copy-and-paste (out-of-band) method is no longer supported.
+2. It shows the person, on the controlling terminal and never through npm's pipe, an address to open: `https://accounts.google.com/o/oauth2/v2/auth` with `client_id`, `redirect_uri` (the listener's), `response_type=code`, `scope` (`https://www.googleapis.com/auth/cloud-platform`), `code_challenge`, `code_challenge_method=S256` and `state`. The reference provider only shows it; a provider that opens the browser itself does so only for an `interactive` request, like this one ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)).
+3. Google sends the person's browser back to the listener with `code`, or with `error` (`error=access_denied` when the person declines). The provider answers only a request that carries the `state` it sent and a `code` or an `error`, and refuses any other request to the port, since the page says the redirect address can be guessed and that `state` is what ties an answer to the request.
+4. It stops listening and posts to `https://oauth2.googleapis.com/token` with `client_id`, `client_secret`, `code`, `code_verifier`, `redirect_uri` and `grant_type=authorization_code`. The answer has `access_token`, `expires_in`, `refresh_token`, `scope` and `token_type`; the provider keeps the refresh token. The page says refresh tokens are always returned for installed applications, and the provider still answers `other` for an answer without one, since an access token alone would lapse within the hour.
 
-The page names `access_denied` (403), `authorization_pending` (428) and `slow_down` (403) as the polling answers' `error`, and `invalid_grant` (400) for a code that is invalid or already claimed; it names no `expired_token`, which the reference provider takes from RFC 8628, so how Google answers an expired code is unverified. The page also limits the device flow to the scopes `openid`, `email`, `profile`, `drive.appdata`, `drive.file`, `youtube` and `youtube.readonly`; `cloud-platform`, which the reference provider asks for, is not among them, so its flow is a stand-in that Google's own flow would not accept, and the page's provider runs gcloud instead.
+What the page leaves open or does not say:
 
-The reference provider runs the device flow itself and has an answer for each way the flow can end early:
+- The `client_secret` is marked optional, and desktop apps are called public clients that cannot keep a secret. The provider sends the one its configuration holds, if any, in this request and in every refresh grant. The wording that Google does not treat an installed app's secret as a secret was not found on the page, so it is not claimed here.
+- The entry for `state` says Google returns it in the URL fragment of the redirect address, which a listener never receives. The provider reads `code`, `error` and `state` from the query, where an OAuth 2.0 authorization response puts them. That Google does so for a loopback redirect was not confirmed against the live service.
+- The error Google gives for a code that is spent or has expired is not on the page. It names `invalid_grant` for other failures of the token endpoint, and that is what the fake answers.
 
-- the person denies the sign-in ([login-denied.jsonl](google-artifact-registry/login-denied.jsonl));
-- the code expires ([login-expired.jsonl](google-artifact-registry/login-expired.jsonl));
-- `slow_down` adds 5 seconds to the polling interval and still ends in a login ([login-slow-down.jsonl](google-artifact-registry/login-slow-down.jsonl));
+The reference provider runs this flow itself and has an answer for each way it can end early:
+
+- the person denies consent, and the redirect carries `access_denied` ([login-denied.jsonl](google-artifact-registry/login-denied.jsonl));
+- no redirect comes within 4 minutes 30 seconds, because the person never completes the sign-in in the browser, and the provider stops listening ([login-refused.jsonl](google-artifact-registry/login-refused.jsonl), above);
+- Google refuses the code at the token endpoint with `invalid_grant`, which is how a code that expired or was already used would end ([login-code-rejected.jsonl](google-artifact-registry/login-code-rejected.jsonl));
 - Google approves the sign-in without a refresh token, which leaves nothing to store, since an access token lapses within the hour, and is the same `other` ([login-no-refresh-token.jsonl](google-artifact-registry/login-no-refresh-token.jsonl)).
 
-Each ends the request with `other` and nothing stored, except `slow_down`.
+Each ends the request with `other` and nothing stored. There is no polling, so there is no interval to slow down: the device flow's `slow_down` and `expired_token` have no counterpart here, and neither does RFC 8628's `verification_uri` against Google's `verification_url`, since nothing here reads either.
 
 A supplied `token` is a one-hour access token and not worth storing, so a provider given one answers `other` with a message saying so ([login-token.jsonl](google-artifact-registry/login-token.jsonl)).
 
-A sign-in the person cannot be shown is not waited for. With no controlling terminal the provider cannot show the code, so it stops at the first sign-in without polling and answers `other`, naming `npm login` to run from a terminal; Google is left with a device code nobody will use, which expires on its own, and nothing is stored ([login-no-terminal.jsonl](google-artifact-registry/login-no-terminal.jsonl)).
+A sign-in the person cannot be shown is not waited for. With no controlling terminal the provider cannot show the address, so it stops before any request to Google, closes its listener and answers `other`, naming `npm login` to run from a terminal; nothing is started at Google and nothing is stored ([login-no-terminal.jsonl](google-artifact-registry/login-no-terminal.jsonl)).
 
 `npm login` over a stored sign-in replaces it and revokes the replaced one, once the new one is stored: a refresh token that is no longer kept is one nobody could revoke later ([login-replaces-signin.jsonl](google-artifact-registry/login-replaces-signin.jsonl)).
 

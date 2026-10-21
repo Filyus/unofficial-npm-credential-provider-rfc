@@ -41,6 +41,13 @@
     "sha256": "44da93fbaad9af427e75690d24e5d038cf65143c1d7de820e53e9fdde3e232df",
     "file": ".refs/developers.google.com/identity_protocols_oauth2_limited-input-device.txt"
   },
+  "https://developers.google.com/identity/protocols/oauth2/native-app": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "5919f11348b0569edf5a8cf0431a7cfd1d8cef6dd3c55af31030a3be46f49968",
+    "file": ".refs/developers.google.com/identity_protocols_oauth2_native-app.txt"
+  },
   "https://developers.google.com/identity/protocols/oauth2/web-server": {
     "kind": "page",
     "cited": "2026-10-21",
