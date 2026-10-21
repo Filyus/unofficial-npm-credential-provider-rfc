@@ -17,3 +17,5 @@ Which situations each example shows, and which it does not yet, is in [COVERAGE.
 | [npmjs.com](npmjs.md) | Session tokens and granular tokens; staged publishing with a read-only `stage-read` token, as the [live test](../stage-tiers-test.md) showed; trusted publishing taking over |
 | [Verdaccio](verdaccio.md) | Self-hosted, two token tiers minted once at login; a 403 that does not say why; staged publishing and rejection by the stager |
 | [Corporate SSO gateway](corporate-sso.md) | An OIDC device-code login on the controlling terminal; tokens minted per request scope; CI with a service identity; `other` rather than `not-found` when presence is needed |
+
+A registry is here because it shows a situation the others do not, not because it is widely used. Sonatype Nexus and Cloudsmith were weighed and left out: a provider for Nexus stores a password or a token from `npm login` and hands it out, which the Azure PAT and a listed `npm:token` already show, and Cloudsmith's CI OIDC is the exchange the JFrog and npmjs pages show. A registry is added when it brings a case the [coverage table](COVERAGE.md) lacks.
