@@ -12,7 +12,7 @@
 
 ## Reading this document
 
-The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [Unresolved Questions](#unresolved-questions).
+The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [Open decisions for the npm maintainers](#open-decisions-for-the-npm-maintainers).
 
 Terms used before they are defined:
 
@@ -764,9 +764,9 @@ In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentia
 | 2: `credentialProvider` | a later minor | The protocol (`get`, `erase`, `login`, `logout`, cache control, chaining, one retry after a rejection), `npm login` and `npm logout` delegated along the chain, OIDC trusted publishing taking precedence over it, the schema and conformance vectors published | A provider written against the vectors alone works with npm |
 | 3: Ecosystem | separate changes | Vendor providers, with their `login` wrappers no longer writing tokens into `.npmrc`; an evaluation of a built-in web-login source ([Future possibilities](#future-possibilities)) | — |
 
-## Unresolved Questions
+## Open decisions for the npm maintainers
 
-For the npm maintainers: decisions this document makes that the npm team may want to take differently, each of which shrinks or changes version 1.
+Decisions this document makes that the npm team may want to take differently, each of which shrinks or changes version 1.
 
 1. Ship the global chain in version 1, or per-registry lists only ([Session lifecycle](#session-lifecycle)).
 2. Twelve operations, or `read` and `publish` with open names for the rest ([Operations](#4-operations)).
@@ -774,7 +774,7 @@ For the npm maintainers: decisions this document makes that the npm team may wan
 4. One table of what is matched, sent, cached and declined by scheme, instead of rules in four places ([Registry matching](#registry-matching)).
 5. One mechanism for a stored token behind providers, instead of the implicit `npm:token`, the warning and `credential-provider-legacy-fallback` ([Legacy fallback](#legacy-fallback)).
 
-Phase 1 lists its own under [Unresolved Questions in Phase 1](phase-1-token-helper.md#unresolved-questions).
+Phase 1 has two of its own: [Phase 1's open decisions](phase-1-token-helper.md#open-decisions-for-the-npm-maintainers).
 
 ## Future possibilities
 
