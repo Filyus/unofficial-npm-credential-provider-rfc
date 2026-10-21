@@ -69,7 +69,7 @@ class HandshakeTests(unittest.TestCase):
         with self.assertRaises(ProtocolViolation):
             validate_transcript(str(TRANSCRIPTS / "version-mismatch.jsonl"))
 
-    def test_version_mismatch_can_fall_back_when_no_provider_was_configured(self) -> None:
+    def test_version_mismatch_fails_the_provider_when_none_was_configured(self) -> None:
         client = validate_transcript(
             str(TRANSCRIPTS / "version-mismatch.jsonl"),
             config=ProviderConfig(configured=False),

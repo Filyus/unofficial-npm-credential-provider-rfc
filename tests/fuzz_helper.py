@@ -21,8 +21,8 @@ two things are checked against the Python model and against what Phase 1 says:
   path with whitespace in it is there depends on how Win32, Python and libuv
   each normalize a name; Linux and macOS compare them all.
 
-What it does not look for is in "What these documents do not claim" in
-claims.md: a credential that is encoded on purpose.
+What it does not look for is in "Limits" in
+phase-1-implementation.md: a credential that is encoded on purpose.
 
 Needs `node`. Exit status 1 if anything was found.
 """

@@ -11,7 +11,9 @@ on:
       - 'poc/**'
       - 'tests/**'
       - 'spec/**'
-      - 'claims.md'
+      - 'sources.md'
+      - 'phase-1-implementation.md'
+      - 'phase-2-conformance.md'
       - '.github/workflows/prototype.yml'
   workflow_dispatch:
 

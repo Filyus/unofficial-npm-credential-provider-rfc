@@ -1,6 +1,7 @@
 'use strict'
 
-// Confirms that every piece of evidence claims.md cites still exists: each
+// Confirms that every piece of evidence phase-1-implementation.md,
+// phase-2-conformance.md and sources.md cite still exists: each
 // `kind: text` reference must be found in the files of that kind, so a test
 // that is renamed or deleted cannot leave an RFC claim without evidence.
 // Kinds: fetch, config, cli (npm's tests), e2e, probe (this repository's
@@ -78,7 +79,8 @@ const found = (kind, text) => {
   return loaded[kind].includes(text)
 }
 
-const refs = [...read(path.join(rfc, 'claims.md')).matchAll(/`(fetch|config|cli|e2e|probe|spec|py|js|rs): ([^`]+)`/g)]
+const documents = ['phase-1-implementation.md', 'phase-2-conformance.md', 'sources.md']
+const refs = documents.flatMap(name => [...read(path.join(rfc, name)).matchAll(/`(fetch|config|cli|e2e|probe|spec|py|js|rs): ([^`]+)`/g)])
 const missing = refs.filter(([, kind, text]) => !found(kind, text))
 for (const [ref] of missing) {
   console.log(`missing ${ref}`)

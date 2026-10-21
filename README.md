@@ -18,20 +18,15 @@ Phase 1 changes nothing for anyone who has not configured a helper, Phase 2 noth
 
 | Document | What it holds |
 |---|---|
-| [prototype.md](prototype.md) | The Phase 1 prototype in npm/cli and npm-registry-fetch, how it is checked, and what each review round found |
-| [claims.md](claims.md) | Every checkable statement in the two documents and what backs it: a source, a test, a measurement |
+| [sources.md](sources.md) | Is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are |
+| [phase-1-implementation.md](phase-1-implementation.md) | Does the npm patch do what Phase 1 says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
+| [phase-2-conformance.md](phase-2-conformance.md) | What does the conformance material check, rule by rule, and what can only an npm client show? The artifacts, each Phase 2 rule with its test, the fuzzing history |
 | [stage-tiers-test.md](stage-tiers-test.md) | The live test of which npmjs.com tokens read `/-/stage`, and its result |
 | [poc/patches](poc/patches) | The prototype as patches against upstream npm/cli and npm-registry-fetch |
 
-## Conformance material for Phase 2
+## Running the checks
 
-| Artifact | What it is |
-|---|---|
-| [spec/protocol-v1.schema.json](spec/protocol-v1.schema.json) | JSON Schema of every message |
-| [spec/policy-v1.json](spec/policy-v1.json), [summary](spec/generated-policy-summary.md) | The rules as data: timeouts, cache, fallback, chain, rejection |
-| [tests/generated_protocol_vectors.json](tests/generated_protocol_vectors.json) | Valid and invalid messages generated from the policy |
-| [tests/](tests) | An executable Python model of the client, with transcripts; [conformance matrix](tests/conformance_matrix.md) |
-| [poc/rust](poc/rust) | A Rust client and mock provider pair |
+The Phase 2 conformance artifacts (schema, policy, vectors, Python model, Rust pair) are listed in [phase-2-conformance.md](phase-2-conformance.md).
 
 Prerequisites, as the CI workflows have them:
 
@@ -46,7 +41,7 @@ A missing tool makes these tests **skip, not fail**:
 | `jsonschema` | `test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement` |
 | `cargo` or `node` | `test_differential` |
 | `node` | `test_provider_harness`, `test_provider_hostile`, `test_provider_sessions` |
-| `NPM_REGISTRY_FETCH` naming a checkout with the Phase 1 prototype ([prototype.md](prototype.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
+| `NPM_REGISTRY_FETCH` naming a checkout with the Phase 1 prototype ([phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
 
 With `REQUIRE_TOOLS=1` ([tests/tools_required.py](tests/tools_required.py)) a missing tool fails the run instead. The `conformance` and `fuzz` workflows set it; a plain run does not. The one exception is `PrototypeTests` in `test_helper_differential`, which skips without `NPM_REGISTRY_FETCH` either way; the `prototype` workflow runs that comparison through `tests.fuzz_helper`. `python -m unittest discover -v` shows every skip and its reason: a run with skips has not run those checks.
 
@@ -72,7 +67,7 @@ cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz
 cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
 ```
 
-End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [prototype.md](prototype.md#reproducing-the-checks):
+End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks):
 
 ```sh
 node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
@@ -85,7 +80,3 @@ node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 - [Git credential helpers](https://git-scm.com/docs/gitcredentials) and [Docker credential helpers](https://docs.docker.com/reference/cli/docker/login/#credential-stores): a decade of external credential programs.
 - [NuGet cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins) and [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin): the closest prior art to Phase 2.
 - [pip keyring support](https://pip.pypa.io/en/stable/topics/authentication/), [AWS SDK credential providers](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/migrate-credential-providers.html), [Azure Identity `DefaultAzureCredential`](https://learn.microsoft.com/en-us/javascript/api/%40azure/identity/defaultazurecredential): credential chains in other ecosystems.
-
-## Sources
-
-Every address the documents cite is in [refs.json](refs.json), with its kind, the day it was first cited and, for a page, the sha256 of the text saved from it. Links to source code name a commit. The saved texts stay on the machine that made them, in `.refs/` (not tracked); `python tools/refs.py fetch N` saves the pages not saved yet, and fetching a page yourself and comparing the hash checks a claim against the page as it was.
