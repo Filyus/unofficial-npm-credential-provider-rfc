@@ -33,7 +33,22 @@ Phase 1 changes nothing for anyone who has not configured a helper, Phase 2 noth
 | [tests/](tests) | An executable Python model of the client, with transcripts; [conformance matrix](tests/conformance_matrix.md) |
 | [poc/rust](poc/rust) | A Rust client and mock provider pair |
 
-Prerequisites, as the CI workflows have them: Python 3.12 (the runner's `python3`) with `jsonschema` installed (`pip install jsonschema`); Node 24 (the Phase 1 checks also run on 22.22.2 and 26.x); a Rust toolchain that takes edition 2024 (1.85 or newer) with `rustfmt` and `clippy` for `cargo test` (a nightly with `cargo-fuzz` only for the coverage fuzzing below). Several tests **skip, not fail**, when something is missing: the schema checks without `jsonschema` (`test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement`), `test_differential` without `cargo` and `node`, the provider tests (`test_provider_harness`, `test_provider_hostile`, `test_provider_sessions`) without `node`, and the helper comparison of `test_helper_differential` unless `NPM_REGISTRY_FETCH` names a checkout carrying the Phase 1 prototype (see [prototype.md](prototype.md#reproducing-the-checks)). With `REQUIRE_TOOLS=1` in the environment ([tests/tools_required.py](tests/tools_required.py); the `conformance` and `fuzz` workflows set it, a plain run does not) a missing tool is a failure instead of a skip, for every test above except one: the prototype half of `test_helper_differential` (`PrototypeTests`) still skips when `NPM_REGISTRY_FETCH` is unset, whatever `REQUIRE_TOOLS` says, and the `prototype` workflow runs that comparison itself through `tests.fuzz_helper`. `python -m unittest discover -v` shows each skip with its reason; a run with skips has not run those checks.
+Prerequisites, as the CI workflows have them:
+
+- Python 3.12 (the runner's `python3`) with `jsonschema` (`pip install jsonschema`).
+- Node 24; the Phase 1 checks also run on 22.22.2 and 26.x.
+- A Rust toolchain for edition 2024 (1.85 or newer) with `rustfmt` and `clippy`; a nightly with `cargo-fuzz` only for the coverage fuzzing below.
+
+A missing tool makes these tests **skip, not fail**:
+
+| Missing | Skipped |
+|---|---|
+| `jsonschema` | `test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement` |
+| `cargo` or `node` | `test_differential` |
+| `node` | `test_provider_harness`, `test_provider_hostile`, `test_provider_sessions` |
+| `NPM_REGISTRY_FETCH` naming a checkout with the Phase 1 prototype ([prototype.md](prototype.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
+
+With `REQUIRE_TOOLS=1` ([tests/tools_required.py](tests/tools_required.py)) a missing tool fails the run instead. The `conformance` and `fuzz` workflows set it; a plain run does not. The one exception is `PrototypeTests` in `test_helper_differential`, which skips without `NPM_REGISTRY_FETCH` either way; the `prototype` workflow runs that comparison through `tests.fuzz_helper`. `python -m unittest discover -v` shows every skip and its reason: a run with skips has not run those checks.
 
 ```sh
 python tools/generate_from_policy.py --check

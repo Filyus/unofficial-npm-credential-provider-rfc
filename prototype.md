@@ -9,7 +9,13 @@ How the `tokenHelper` prototype described in [Phase 1](phase-1-token-helper.md) 
 | npm-registry-fetch | 641 lines added in `lib/` (`git diff --numstat 6b4159a de1d74f -- lib`, counted on 2026-10-21 at the branch commit de1d74f; the patch in `poc/patches` has the same 641) and a README section | a `tokenHelper` module (own deadline and kill, one cached result per registry and process, stderr forwarded with credentials masked), a branch in `getAuth()`, and a step in `regFetch()` that waits for the helper while watching the request body and abort signal, skipped for `--offline` and for a request that may not carry the credential (http: but a loopback address), with the redirects of a credentialed request followed there a hop at a time and the transport taken from `opts.tokenHelperTransport` |
 | npm/cli | about 420 lines of code (423 added in `lib/` and `workspaces/config/lib/`) and 14 of docs | config trust (who selected a file, where it lies, what a parent npm passed on) and `tokenHelperTransport` (the proxy, certificate, strict-ssl and local-address settings of the layers a project cannot write), `publishConfig` filtering, `publish`, `whoami`, `login`, `logout`, `profile`, `config set`/`ls` and OIDC handling, docs |
 
-Both are published as [patches](poc/patches) against upstream commits, and each comes with tests. Lines are counted as added lines of the diff in each patch outside `test/` (`git diff --numstat` over the patch gives the same); tap's coverage check, which fails `npm test` below 100%, runs in CI wherever `npm test` runs: for npm-registry-fetch and for `@npmcli/config`. For the rest of npm/cli it runs only inside the `full-suites` job, which runs each suite's `npm test` with and without the prototype and counts a suite that fails with no failing test file as a regression, but only where the base passes, so a coverage shortfall in a suite that already fails on the base is not caught. The workflow's targeted step for the npm/cli commands runs with `--no-coverage` and checks no coverage.
+Both are published as [patches](poc/patches) against upstream commits, and each comes with tests. Lines are counted as added lines of the diff in each patch outside `test/` (`git diff --numstat` over the patch gives the same).
+
+Coverage: tap's check fails `npm test` below 100%, and CI runs it wherever `npm test` runs.
+
+- npm-registry-fetch and `@npmcli/config`: on every run.
+- The rest of npm/cli: only inside the `full-suites` job, which runs each suite's `npm test` with and without the prototype and counts a suite that fails with no failing test file as a regression, but only where the base passes. A coverage shortfall in a suite that already fails on the base is not caught.
+- The workflow's targeted step for the npm/cli commands runs with `--no-coverage` and checks no coverage.
 
 ## How it is checked
 
@@ -27,7 +33,14 @@ Both are published as [patches](poc/patches) against upstream commits, and each 
 
 The [CI workflow](.github/workflows/prototype.yml) runs all of it on macOS, Linux and Windows, with Node 22.22.2, 24.15.0 and 26.x, except the comparison of every npm/cli suite with and without the prototype, which runs on Ubuntu and Windows with Node 24; on 26.x the prototype's own code runs with deprecations as errors.
 
-What the macOS runs showed about the platform: the temp volume is case-insensitive and realpath returns the stored case; an NFD spelling reaches an NFC directory and realpath returns the stored form; the temp directory is reached through `/var` → `/private/var`, and device and inode agree through the link; a helper script without a `#!` line fails with ENOEXEC there, while Linux runs it through `/bin/sh`. Until 2026-10-21 the probes only printed these (`info` lines), and they were read from the CI log of run 39489980343 (all three macOS jobs and the Linux ones); since then the probes assert them on macOS (and the last one on Linux too), which CI has not run yet. The probes do not name the file system, so APFS is not claimed.
+What the macOS runs showed about the platform:
+
+- the temp volume is case-insensitive, and realpath returns the stored case;
+- an NFD spelling reaches an NFC directory, and realpath returns the stored form;
+- the temp directory is reached through `/var` → `/private/var`, and device and inode agree through the link;
+- a helper script without a `#!` line fails with ENOEXEC there, while Linux runs it through `/bin/sh`.
+
+Until 2026-10-21 the probes only printed these (`info` lines), read from the CI log of run 39489980343 (all three macOS jobs and the Linux ones); since then they assert them on macOS (and the last one on Linux too), which CI has not run yet. The probes do not name the file system, so APFS is not claimed.
 
 ## Reproducing the checks
 
@@ -70,7 +83,10 @@ node rfc/poc/claims/check.js npm-cli npm-registry-fetch
 
 The workflow also runs the npm/cli command tests the prototype changes with `node node_modules/tap/bin/run.js --no-coverage` (the step "Test the npm-cli commands the prototype changes"), and its `full-suites` job builds a base tree and a patched tree and compares every suite (`node rfc/poc/full-suites/compare.js base next`; the job allows 150 minutes, and its tree setup is in the workflow). With `NPM_REGISTRY_FETCH=<npm-registry-fetch checkout>` set, `python -m unittest discover` also runs the helper comparison of [`tests/test_helper_differential.py`](tests/test_helper_differential.py).
 
-Two scripts are run by hand rather than by CI. [`poc/npm-config-fuzz/fuzz.js`](poc/npm-config-fuzz/fuzz.js) takes the npm/cli checkout from `NPM_CLI` (default: a directory named `npm-cli` next to the directory of this repository) and a scratch directory from `FUZZ_DIR`; its 8.3 short-name cases need `cmd.exe` and are skipped, with a line saying so, on Linux and macOS. [`poc/full-suites/compare.js`](poc/full-suites/compare.js) counts a test file as a regression only when it fails all three reruns with the prototype and passes all three without it. A file that fails one or two of the three reruns with the prototype is listed under "failed once, not every time" and the run still passes, so a regression that shows up only intermittently is not caught by the gate: the list has to be read.
+Two scripts are run by hand rather than by CI:
+
+- [`poc/npm-config-fuzz/fuzz.js`](poc/npm-config-fuzz/fuzz.js) takes the npm/cli checkout from `NPM_CLI` (default: a directory named `npm-cli` next to the directory of this repository) and a scratch directory from `FUZZ_DIR`. Its 8.3 short-name cases need `cmd.exe` and are skipped, with a line saying so, on Linux and macOS.
+- [`poc/full-suites/compare.js`](poc/full-suites/compare.js) counts a test file as a regression only when it fails all three reruns with the prototype and passes all three without it. A file that fails one or two of the three is listed under "failed once, not every time" and the run still passes: a regression that shows up only intermittently is not caught by the gate, so the list has to be read.
 
 ## Audit history
 
@@ -87,5 +103,11 @@ Rounds of automated review, then targeted test work. The code findings below wer
 | 7 | fuzzing | a project `.npmrc` with `location=global` switched the inside-project test off; a nested project hid the outer one; `\\?\`, 8.3 and `..ci.npmrc` spellings slipped through; a home directory that is a project cost users their own helper; a helper in a directory deeper than Windows can start a program in crashed npm; a token was lost when a helper left a background process holding stdout; the output limit counted decoded bytes; `EDITOR` and `NODE_ENV` reached the helper |
 | 8 | fuzzing on Linux | on POSIX a directory named `..\evil` read as a way out of the checkout, and on a case-insensitive mount another letter case did the same; both closed by comparing directories by device and inode |
 | CI | macOS | a path that does not exist yet under the `/var` → `/private/var` link was resolved inconsistently |
-| Fuzz | the output of a helper against the Python model, and what is logged of its stderr against its token ([`tests/fuzz_helper.py`](tests/fuzz_helper.py)); helpers named awkwardly, run for real ([`poc/helper-fuzz/names.js`](poc/helper-fuzz/names.js)) | a helper that echoed its credential as JSON, inside a shell's quotes (`set -x`) or percent-encoded had it logged: the helper's own token was hidden only as it is, so a token with a quote, a backslash or a character a URL escapes got through; now each of those forms is hidden. The header the prototype makes and the model makes agreed on 242 000 outputs in a run of 60 s, with nothing leaked (measured once, recorded on 2026-10-18, not re-run by CI, which runs the fuzzer for 20 s with a seed of its own); of the 384 helper paths of `names.js` on Windows (6 directories, 32 names, `.cmd` and `.bat`), `&`, `^`, `(`, `)` and `!` and a second command among the names, the 290 with no `%` in them ran as themselves and nothing else ran, and the 94 with a `%` in them were refused (CI runs `names.js` on each OS) |
+| Fuzz | the output of a helper against the Python model, and what is logged of its stderr against its token ([`tests/fuzz_helper.py`](tests/fuzz_helper.py)); helpers named awkwardly, run for real ([`poc/helper-fuzz/names.js`](poc/helper-fuzz/names.js)) | a credential the helper echoed as JSON, in a shell's quotes or percent-encoded was logged; now each of those forms is hidden ([notes](#fuzz-notes)) |
 | Final | review of the whole proposal | npm-registry-fetch ran a helper named by any `//<registry>/:tokenHelper` key in its options, and other tools (npm-check-updates) pass a project's `.npmrc` keys there; helpers now arrive only in `opts.tokenHelpers`, which @npmcli/config fills from trusted files |
+
+#### Fuzz notes
+
+- The helper's own token was hidden only as it is, so a token with a quote, a backslash or a character a URL escapes got through when the helper echoed it as JSON, inside a shell's quotes (`set -x`) or percent-encoded.
+- The header the prototype makes and the model makes agreed on 242 000 outputs in a run of 60 s, with nothing leaked (measured once, recorded on 2026-10-18, not re-run by CI, which runs the fuzzer for 20 s with a seed of its own).
+- `names.js` on Windows tried 384 helper paths (6 directories, 32 names, `.cmd` and `.bat`) with `&`, `^`, `(`, `)`, `!` and a second command among the names: the 290 with no `%` ran as themselves and nothing else ran, and the 94 with a `%` were refused. CI runs `names.js` on each OS.

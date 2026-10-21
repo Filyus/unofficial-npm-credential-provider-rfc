@@ -1,6 +1,16 @@
 # Corporate SSO gateway
 
-A company runs a private npm registry behind an SSO gateway. Developers sign in to the company identity provider (IdP) with an OIDC device-code login, and the gateway accepts only short-lived tokens that a provider mints for each request scope. This page describes a hypothetical `corp-npm-credential-provider` for it. The gateway, the IdP, their endpoints and every number below (token lifetimes, windows, role names) are invented for the example: they are one company's policy, not facts about a product. Only the device flow is taken from a standard, [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628). The page shows a global provider chain whose hello lists the company's registries, prompts on the controlling terminal, a publish credential gated on user presence, a refusal (`other`, not `not-found`) where presence would be needed but `interactive` is `false`, and CI with a non-interactive service identity.
+A company runs a private npm registry behind an SSO gateway. Developers sign in to the company identity provider (IdP) with an OIDC device-code login, and the gateway accepts only short-lived tokens that a provider mints for each request scope. This page describes a hypothetical `corp-npm-credential-provider` for it.
+
+The gateway, the IdP, their endpoints and every number below (token lifetimes, windows, role names) are invented for the example: they are one company's policy, not facts about a product. Only the device flow is taken from a standard, [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628).
+
+The page shows:
+
+- a global provider chain whose hello lists the company's registries;
+- prompts on the controlling terminal;
+- a publish credential gated on user presence;
+- a refusal (`other`, not `not-found`) where presence would be needed but `interactive` is `false`;
+- CI with a non-interactive service identity.
 
 Every exchange below is a transcript in [corporate-sso/](corporate-sso/) that the repository's model accepts (`python -m unittest tests.test_examples`). The `other` answers are transcripts too: the model fails that request and goes on ([What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc)).
 
@@ -22,7 +32,16 @@ The gateway also proxies the public registry for unscoped packages, so the defau
 | Registry publish token | npm, in memory | 5 minutes, minted per package and version | Gateway policy; needs an IdP session whose last interactive sign-in is at most 5 minutes old (step-up) |
 | CI service identity | A file in the runner image, readable only by the runner account | The IdP issues access tokens for it on request | Client credentials grant, [RFC 6749, section 4.4](https://www.rfc-editor.org/rfc/rfc6749#section-4.4) |
 
-**Scopes.** A read token covers one npm scope, or the unscoped packages. A publish token covers one package at one version: the gateway mints it for the `version` in the request. npm's cache key for `granularity` `package` holds the registry, the scope, the package and the operation, not the version, so a second publish of the same package at another version in one npm process would find the first token; no npm command does that (a publish names one version of each package, once), and were it to, the gateway's refusal would come back as a 401 and a retry that mints a token for that version. The gateway answers a missing or expired token with 401 and `WWW-Authenticate: Bearer ..., error="invalid_token"`, and a token whose claims do not entitle the caller to the package with 403 (`error="insufficient_scope"`). It never asks for an npm one-time password; the IdP step-up replaces it.
+**Scopes.** A read token covers one npm scope, or the unscoped packages. A publish token covers one package at one version: the gateway mints it for the `version` in the request.
+
+npm's cache key for `granularity` `package` holds the registry, the scope, the package and the operation, not the version. A second publish of the same package at another version in one npm process would therefore find the first token. No npm command does that (a publish names one version of each package, once), and were it to, the gateway's refusal would come back as a 401 and a retry that mints a token for that version.
+
+**What the gateway answers.**
+
+- A missing or expired token: 401 and `WWW-Authenticate: Bearer ..., error="invalid_token"`.
+- A token whose claims do not entitle the caller to the package: 403 (`error="insufficient_scope"`).
+
+The gateway never asks for an npm one-time password; the IdP step-up replaces it.
 
 **Device flow in short**, from RFC 8628: the provider posts its client id to the IdP's device authorization endpoint and gets a `device_code`, a `user_code`, a `verification_uri`, an `expires_in` and an `interval` (section 3.2). It shows the URI and the user code to the user, who opens them on any device (section 3.3). It then polls the token endpoint with the `urn:ietf:params:oauth:grant-type:device_code` grant at the given interval, 5 seconds if none was given, and handles `authorization_pending` (poll again), `slow_down` (add 5 seconds to the interval), `access_denied` and `expired_token` (stop) (sections 3.4 and 3.5).
 
@@ -96,7 +115,10 @@ A machine where nobody ever logged in and no service identity exists has nothing
 The provider's policy for `publish`:
 
 1. The IdP session must have been interactively confirmed in the last 5 minutes. If it has not, the provider starts a device flow on the controlling terminal and waits.
-2. It then asks on the controlling terminal: `Publish @corp/ui-kit@2.4.1 to npm.corp.example.com? [y/N]`. The prompt names the package and the version, which only a `publish` request carries. A prompt left unanswered for 4 minutes 30 seconds, the provider's own deadline inside npm's 5-minute interactive budget, is `other` ([publish-unanswered.jsonl](corporate-sso/publish-unanswered.jsonl)). The device flow of step 1 and this prompt are one request and share that deadline: a sign-in approved on the last poll leaves no time to ask, and the answer is the same `other`, with no prompt ([publish-signin-spent-budget.jsonl](corporate-sso/publish-signin-spent-budget.jsonl)). If the step-up has to be shown and there is no controlling terminal to show it on, the provider does not poll to the deadline: it answers `other` naming `npm login` at once, keeps the session as it was and mints nothing ([publish-step-up-no-terminal.jsonl](corporate-sso/publish-step-up-no-terminal.jsonl)).
+2. It then asks on the controlling terminal: `Publish @corp/ui-kit@2.4.1 to npm.corp.example.com? [y/N]`. The prompt names the package and the version, which only a `publish` request carries. Three cases end in `other`:
+   - A prompt left unanswered for 4 minutes 30 seconds, the provider's own deadline inside npm's 5-minute interactive budget ([publish-unanswered.jsonl](corporate-sso/publish-unanswered.jsonl)).
+   - A sign-in that spent the budget. The device flow of step 1 and this prompt are one request and share that deadline, so a sign-in approved on the last poll leaves no time to ask, and the answer is the same `other`, with no prompt ([publish-signin-spent-budget.jsonl](corporate-sso/publish-signin-spent-budget.jsonl)).
+   - A step-up with no controlling terminal to show it on. The provider does not poll to the deadline: it answers `other` naming `npm login` at once, keeps the session as it was and mints nothing ([publish-step-up-no-terminal.jsonl](corporate-sso/publish-step-up-no-terminal.jsonl)).
 3. It mints a token for that package and version, valid for 5 minutes, and answers with `granularity: "package"`.
 
 The second request, for `@corp/ui-icons@3.0.0`, finds a fresh confirmation, so it shows only the `[y/N]` prompt. npm caches publish answers per operation and package, so each package in a workspace publish asks again; the provider asks the user once per package and the device flow once per five minutes. With `interactive: false` and no service identity, a publish gets ([publish-no-terminal.jsonl](corporate-sso/publish-no-terminal.jsonl)):
@@ -125,7 +147,11 @@ npm has already dropped the gateway token from its cache, and the provider keeps
 
 The gateway's 401 on an access token that looked alive is a rejection of its own, and it can come after the person has already confirmed a publish. The provider renews the access token once with the refresh token and asks again. If the IdP answers that renewal with `invalid_grant`, the answer is `other` with the expired-session message and no device flow is started, even where `interactive` is `true`: a sign-in shown after a prompt the person has just answered would be a second wait that the request's one 4 minutes 30 seconds does not cover, and it began from a 401 ([publish-gateway-revoked-session.jsonl](corporate-sso/publish-gateway-revoked-session.jsonl)).
 
-**A session that is gone ([rejection-session-gone.jsonl](corporate-sso/rejection-session-gone.jsonl)).** The same 401 and erase, but the IdP ended the session between the two requests (the user was disabled), and `interactive` is `false`. The retry has nothing to replace the token with: the erase dropped the cached access token, the refresh gets `invalid_grant`, and the provider answers `other` with the expired-session message, not the token just refused and not `not-found`. The refresh token stays in the keychain, since only `logout` removes it, and the next `npm login` replaces it. With `interactive` `true` the same check would start a device flow instead, if the code can be shown on a terminal; with none the answer is `other` before any poll, and the stored session is untouched ([install-session-expired-no-terminal.jsonl](corporate-sso/install-session-expired-no-terminal.jsonl)).
+**A session that is gone ([rejection-session-gone.jsonl](corporate-sso/rejection-session-gone.jsonl)).** The same 401 and erase, but the IdP ended the session between the two requests (the user was disabled), and `interactive` is `false`. The retry has nothing to replace the token with: the erase dropped the cached access token, and the refresh gets `invalid_grant`. The provider answers `other` with the expired-session message, not the token just refused and not `not-found`.
+
+The refresh token stays in the keychain, since only `logout` removes it, and the next `npm login` replaces it.
+
+With `interactive` `true` the same check would start a device flow instead, if the code can be shown on a terminal. With no terminal the answer is `other` before any poll, and the stored session is untouched ([install-session-expired-no-terminal.jsonl](corporate-sso/install-session-expired-no-terminal.jsonl)).
 
 **A 403, `insufficient_scope`.** The token for `@corp-secure` was minted before the user joined the group that entitles them to it. npm sends no erase, only the retry with `httpStatus: 403`:
 
@@ -150,7 +176,19 @@ Open https://idp.corp.example.com/device and enter the code WDJB-MJHT
 Waiting for approval (4:30 left) ...
 ```
 
-The URI and the code come from the IdP and are shown with any control character or bidirectional override replaced by `?`. It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `access_denied`, `expired_token` or its own deadline of 4 minutes 30 seconds, which is inside npm's 5-minute `login` budget. On approval it keeps the refresh token in the OS keychain, writes nothing into any `.npmrc`, and answers `{"Ok":{"kind":"login"}}`. A cancelled or expired flow is `other` with the reason, and so is one nobody approved before the deadline ([login-unapproved.jsonl](corporate-sso/login-unapproved.jsonl)), and one the IdP approves with less than a session (no refresh token, no access token, an expiry that is not a positive number), which stores nothing ([login-incomplete-session.jsonl](corporate-sso/login-incomplete-session.jsonl)). A `token` in the request, which `npm login` sends when the person pastes one, is not stored: the gateway takes tokens it mints from an IdP session, and a pasted token is not one, so the provider answers `other` and says so instead of starting a device flow that ignores it ([login-token-refused.jsonl](corporate-sso/login-token-refused.jsonl)). A request that says `interactive` but has no controlling terminal to write the prompt to (a run under a service, a detached shell) is not a person who can approve anything: the provider finds that out when it tries to show the code, answers `other` naming `npm login` and a terminal before the first poll, stores nothing, and leaves the unused device code to lapse at the IdP ([login-no-terminal.jsonl](corporate-sso/login-no-terminal.jsonl)).
+The URI and the code come from the IdP and are shown with any control character or bidirectional override replaced by `?`.
+
+It polls at the interval the IdP gave, slows down on `slow_down`, and stops at `access_denied`, `expired_token` or its own deadline of 4 minutes 30 seconds, which is inside npm's 5-minute `login` budget.
+
+On approval it keeps the refresh token in the OS keychain, writes nothing into any `.npmrc`, and answers `{"Ok":{"kind":"login"}}`.
+
+Each of these is `other`, with the reason:
+
+- A cancelled or expired flow.
+- A flow nobody approved before the deadline ([login-unapproved.jsonl](corporate-sso/login-unapproved.jsonl)).
+- A flow the IdP approves with less than a session: no refresh token, no access token, or an expiry that is not a positive number, which stores nothing ([login-incomplete-session.jsonl](corporate-sso/login-incomplete-session.jsonl)).
+- A request with a `token`, which `npm login` sends when the person pastes one. The gateway takes tokens it mints from an IdP session, and a pasted token is not one, so the provider says so instead of starting a device flow that ignores it ([login-token-refused.jsonl](corporate-sso/login-token-refused.jsonl)).
+- A request that says `interactive` but has no controlling terminal to write the prompt to (a run under a service, a detached shell). That is not a person who can approve anything: the provider finds out when it tries to show the code, answers `other` naming `npm login` and a terminal before the first poll, stores nothing, and leaves the unused device code to lapse at the IdP ([login-no-terminal.jsonl](corporate-sso/login-no-terminal.jsonl)).
 
 [logout.jsonl](corporate-sso/logout.jsonl):
 
@@ -196,7 +234,12 @@ On a runner whose identity lacks the role, the same request gets `other` naming 
 
 Nothing breaks the text. Three points are ambiguous or strained, and one concerns the repository's tests rather than the RFC:
 
-1. **`operationIndependent` defaulted to `true`** ([Success response](../phase-2-credential-provider.md#success-response-provider--client)). A token that reads only is not independent of the operation, and a provider that left the field out said it is. For `read` that is not harmless: npm binds only the answers for other operations to their operation, and a `read` answer kept as operation-independent at registry level is the entry a later `publish` lookup finds first ([Caching](../phase-2-credential-provider.md#5-caching); the repository's model returned it for a `publish` lookup). A provider that omitted the field on a read-only token would have seen its token sent with a publish. The default described almost no real provider. **In the RFC:** the field defaults to `false`, so a `read` answer that leaves it out never serves a later write's lookup; a provider whose one token serves every operation says `true`.
+1. **`operationIndependent` defaulted to `true`** ([Success response](../phase-2-credential-provider.md#success-response-provider--client)). A token that reads only is not independent of the operation, and a provider that left the field out said it is.
+   - For `read` that is not harmless: npm binds only the answers for other operations to their operation, and a `read` answer kept as operation-independent at registry level is the entry a later `publish` lookup finds first ([Caching](../phase-2-credential-provider.md#5-caching); the repository's model returned it for a `publish` lookup).
+   - A provider that omitted the field on a read-only token would have seen its token sent with a publish.
+   - The default described almost no real provider.
+
+   **In the RFC:** the field defaults to `false`, so a `read` answer that leaves it out never serves a later write's lookup; a provider whose one token serves every operation says `true`.
 2. **"A check of its own against the registry"** ([`erase`](../phase-2-credential-provider.md#erase-a-credential-was-rejected)). Before a provider starts a login after a 401, the RFC asks for a check against the registry. Here the login lives at the IdP, which answers a refresh with `invalid_grant`; the gateway is not asked at all. The rule's purpose, that a lockfile URL cannot start a login, is met by a check against whoever holds the login, and the text could say so. **In the RFC:** the text says a check against the registry or the service that holds the login.
 
 The points below look like gaps and are answered by the RFC as it stands:

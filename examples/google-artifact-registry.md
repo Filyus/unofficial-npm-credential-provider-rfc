@@ -1,10 +1,32 @@
 # Google Artifact Registry
 
-Google Artifact Registry serves npm packages from standard, remote and virtual repositories under `https://LOCATION-npm.pkg.dev/PROJECT_ID/REPOSITORY_ID/`. It has no tokens of its own: a request carries a Google OAuth 2.0 access token, and what the token may do comes from the IAM roles of the principal behind it. The `npm-credential-provider-gar` below is hypothetical, and so are the registry names, project and tokens in the transcripts; the registry's behaviour is what Google documents, and where it is not documented the page says so. The example shows a provider that has to build narrow credentials out of IAM identities, because the registry offers none; that it must refuse the operations Artifact Registry has no equivalent for; and that a provider on a cloud platform gives little protection against a script on the same machine, which the RFC says too ([Publishing while a script runs](../phase-2-credential-provider.md#publishing-while-a-script-runs)).
+Google Artifact Registry serves npm packages from standard, remote and virtual repositories under `https://LOCATION-npm.pkg.dev/PROJECT_ID/REPOSITORY_ID/`. It has no tokens of its own: a request carries a Google OAuth 2.0 access token, and what the token may do comes from the IAM roles of the principal behind it.
+
+The `npm-credential-provider-gar` below is hypothetical, and so are the registry names, project and tokens in the transcripts. The registry's behaviour is what Google documents, and where it is not documented the page says so.
+
+The example shows three things:
+
+- a provider that has to build narrow credentials out of IAM identities, because the registry offers none;
+- that it must refuse the operations Artifact Registry has no equivalent for;
+- that a provider on a cloud platform gives little protection against a script on the same machine, which the RFC says too ([Publishing while a script runs](../phase-2-credential-provider.md#publishing-while-a-script-runs)).
 
 ## Registry and credentials
 
-**URLs.** One host per location, with the project and repository in the path: `https://us-central1-npm.pkg.dev/acme-prod/npm-private/`. `LOCATION` is a regional or multi-regional location ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)); the examples `us-central1`, `europe-west10` and the multi-regions `us`, `europe` and `asia` are recalled, not fetched, except that the host pattern of Google's helper, `[a-zA-Z0-9-]+` before `-npm.pkg.dev`, accepts `europe-west10` ([`src/config.js`](https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/config.js) at a commit). A scope is routed with `@acme:registry=<that URL>`; without a scope the configuration Google prints makes the registry the default one, which Google says can cause problems for a project that also installs from the public npm registry ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)). Publishing works on standard repositories only; a virtual repository serves installs and a remote one proxies an upstream, so the install and publish URLs for one scope often differ ([manage packages](https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages), [virtual repositories](https://docs.cloud.google.com/artifact-registry/docs/repositories/virtual-repo)). The provider must match `https:` and a host of the form `<location>-npm.pkg.dev` only.
+**URLs.** One host per location, with the project and repository in the path: `https://us-central1-npm.pkg.dev/acme-prod/npm-private/`.
+
+`LOCATION` is a regional or multi-regional location ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)). The examples `us-central1`, `europe-west10` and the multi-regions `us`, `europe` and `asia` are recalled, not fetched, except that the host pattern of Google's helper, `[a-zA-Z0-9-]+` before `-npm.pkg.dev`, accepts `europe-west10` ([`src/config.js`](https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/config.js) at a commit).
+
+Routing:
+
+- A scope is routed with `@acme:registry=<that URL>`.
+- Without a scope, the configuration Google prints makes the registry the default one, which Google says can cause problems for a project that also installs from the public npm registry ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)).
+
+Repository kinds:
+
+- Publishing works on standard repositories only.
+- A virtual repository serves installs and a remote one proxies an upstream, so the install and publish URLs for one scope often differ ([manage packages](https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages), [virtual repositories](https://docs.cloud.google.com/artifact-registry/docs/repositories/virtual-repo)).
+
+The provider must match `https:` and a host of the form `<location>-npm.pkg.dev` only.
 
 **Credentials.** All are Google access tokens. That they go out as `Authorization: Bearer` is recalled: the [authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication) page shows only the string `oauth2accesstoken:<token>` for username and password authentication, without naming the `Basic` scheme or any header.
 
@@ -29,9 +51,29 @@ The Artifact Registry pages read for this example document no npm user, token, t
 //us-central1-npm.pkg.dev/acme-prod/npm-private/:credentialProvider[]=npm-credential-provider-gar --config C:\Users\dev\gar.json
 ```
 
-Per-registry, for three reasons. The token is a whole-cloud credential valid on every `*-npm.pkg.dev` host and on Google's APIs, so the provider should never start for a registry the user did not name; a provider in the global chain is asked about every registry a command touches, including npmjs.com ([Session lifecycle](../phase-2-credential-provider.md#session-lifecycle)). Installs go to the virtual repository and publishes to the standard one, so there are two keys. And a per-registry list takes the registry out of the global chain and ignores a stored token for that host, which removes the leftovers of Google's own tool, described [below](#where-it-is-easy-to-go-wrong). The repositories (`repositories`), the identities to use for reading and for writing, and their lifetimes live in `gar.json`, a file only the user can write, together with the path of the CI credentials file (`adc`); the provider reads no identity from the environment. The environment does decide one thing, whether it is in a job: `CI` set and the file named by `adc` present together make it a machine identity, and only for a request that is not interactive (see [CI](#ci)); the file should still exist only where a job runs.
+Per-registry, for three reasons:
 
-**What the reference provider simplifies.** It runs without gcloud ([provider.js](providers/google-artifact-registry/provider.js)): where this page has the provider run `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG`, it runs Google's device authorization flow once against the configured endpoints (the second sign-in of the two, the one a token is made from: the `gcloud auth login` one would be stored and never read here, so it is not taken), makes a token by a refresh grant of the stored sign-in and the IAM Credentials API, and so its messages name `npm login`, never gcloud. `logout` revokes that sign-in at Google's revoke endpoint, recalled and not read. In CI it uses the federated credentials file `adc` names and no metadata server. It has no `repoAdmin` identity, so a 403 retry is `other` for every operation. The endpoint paths and fields it uses are recalled, not read, as the comment in the file says.
+- The token is a whole-cloud credential valid on every `*-npm.pkg.dev` host and on Google's APIs, so the provider should never start for a registry the user did not name. A provider in the global chain is asked about every registry a command touches, including npmjs.com ([Session lifecycle](../phase-2-credential-provider.md#session-lifecycle)).
+- Installs go to the virtual repository and publishes to the standard one, so there are two keys.
+- A per-registry list takes the registry out of the global chain and ignores a stored token for that host, which removes the leftovers of Google's own tool, described [below](#where-it-is-easy-to-go-wrong).
+
+The repositories (`repositories`), the identities to use for reading and for writing, and their lifetimes live in `gar.json`, a file only the user can write, together with the path of the CI credentials file (`adc`). The provider reads no identity from the environment.
+
+The environment does decide one thing, whether it is in a job: `CI` set and the file named by `adc` present together make it a machine identity, and only for a request that is not interactive (see [CI](#ci)). The file should still exist only where a job runs.
+
+**What the reference provider simplifies.** It runs without gcloud ([provider.js](providers/google-artifact-registry/provider.js)). Where this page has the provider run `gcloud auth login` and `gcloud auth application-default login` against its own `CLOUDSDK_CONFIG`, it does this instead:
+
+- It runs Google's device authorization flow once against the configured endpoints. This is the second sign-in of the two, the one a token is made from: the `gcloud auth login` one would be stored and never read here, so it is not taken.
+- It makes a token by a refresh grant of the stored sign-in and the IAM Credentials API.
+- Its messages name `npm login`, never gcloud.
+
+Other differences:
+
+- `logout` revokes that sign-in at Google's revoke endpoint, recalled and not read.
+- In CI it uses the federated credentials file `adc` names and no metadata server.
+- It has no `repoAdmin` identity, so a 403 retry is `other` for every operation.
+
+The endpoint paths and fields it uses are recalled, not read, as the comment in the file says.
 
 ## Hello
 
@@ -54,7 +96,11 @@ Per-registry, for three reasons. The token is a whole-cloud credential valid on 
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-reader-token"},"cache":"expires","expiresAt":1792233600,"granularity":"registry","operationIndependent":false}}
 ```
 
-`granularity` is `registry` because IAM has nothing finer: a provider cannot mint a token for `@acme` and not for `@other` inside one repository. Answering `scope` or `package` would only make npm ask more often. `cache` is `expires`, never `session`, because an install can outlast the hour; npm stops using the token 60 seconds before `expiresAt` ([Caching](../phase-2-credential-provider.md#5-caching)). Every later package of the install is a cache hit. The answer carries `operationIndependent: false`, the default, written out: a reader token cannot publish, and with `true` the later `publish` lookup on the same repository would find a cached independent read token and send it on the `PUT`, to a 403, without the provider's write policy ever being asked ([Caching](../phase-2-credential-provider.md#5-caching)). Every `read` answer here says so, the CI ones included.
+`granularity` is `registry` because IAM has nothing finer: a provider cannot mint a token for `@acme` and not for `@other` inside one repository. Answering `scope` or `package` would only make npm ask more often.
+
+`cache` is `expires`, never `session`, because an install can outlast the hour. npm stops using the token 60 seconds before `expiresAt` ([Caching](../phase-2-credential-provider.md#5-caching)). Every later package of the install is a cache hit.
+
+The answer carries `operationIndependent: false`, the default, written out. A reader token cannot publish, and with `true` the later `publish` lookup on the same repository would find a cached independent read token and send it on the `PUT`, to a 403, without the provider's write policy ever being asked ([Caching](../phase-2-credential-provider.md#5-caching)). Every `read` answer here says so, the CI ones included.
 
 ## Publish
 
@@ -105,7 +151,11 @@ An honest limit: on a workstation, a script run during `npm publish` can call `g
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-reader-token-2"},"cache":"expires","expiresAt":1792234600,"granularity":"registry","operationIndependent":false}}
 ```
 
-`erase` drops the provider's cached token and answers `Ok`. It does not call Google's revoke endpoint: revoking an access token that has a refresh token behind it also revokes the refresh grant (recalled from Google's OAuth documentation, not fetched), which would sign the user out of gcloud, kubectl and Terraform. The retry must mint a new token, and the provider forces one even when no `erase` came first (an `erase` answered `other` does not stop the retry), so a token it still holds is not sent twice ([rejection-no-erase.jsonl](google-artifact-registry/rejection-no-erase.jsonl): the held token has 800 seconds left and is still not reused). gcloud can return the same cached token again, and `print-access-token` has no documented way to force a refresh, so the provider uses a library call that refreshes, or mints through the IAM Credentials API.
+`erase` drops the provider's cached token and answers `Ok`. It does not call Google's revoke endpoint: revoking an access token that has a refresh token behind it also revokes the refresh grant (recalled from Google's OAuth documentation, not fetched), which would sign the user out of gcloud, kubectl and Terraform.
+
+The retry must mint a new token, and the provider forces one even when no `erase` came first (an `erase` answered `other` does not stop the retry), so a token it still holds is not sent twice ([rejection-no-erase.jsonl](google-artifact-registry/rejection-no-erase.jsonl): the held token has 800 seconds left and is still not reused).
+
+gcloud can return the same cached token again, and `print-access-token` has no documented way to force a refresh, so the provider uses a library call that refreshes, or mints through the IAM Credentials API.
 
 A 403 follows no erase. The retry is `{"v":1,"kind":"get",...,"retry":true,"httpStatus":403}`, and for `read` the provider can do nothing useful with it: it may not move to a writer account, and the usual causes (a missing role, an IAM grant not yet applied, a VPC Service Controls perimeter, a deny policy, a VM with narrow access scopes) are not fixed by another token. It answers `other` and names the principal it used, never the token:
 
@@ -115,7 +165,23 @@ A 403 follows no erase. The retry is `{"v":1,"kind":"get",...,"retry":true,"http
 
 npm then fails the request, naming the provider ([rejection-403.jsonl](google-artifact-registry/rejection-403.jsonl)). The status codes are recalled, not verified against live responses.
 
-**A 401 that no new token can fix.** [rejection-login-lapsed.jsonl](google-artifact-registry/rejection-login-lapsed.jsonl). The retry above assumes the provider can mint again. It cannot when the sign-in behind it has lapsed: Google lets an organization set a session length of 0 s or 1 to 24 hours for the Google Cloud SDK, and when it ends gcloud asks the user to run `gcloud auth login` ([session controls](https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication), [Workspace admin help](https://knowledge.workspace.google.com/admin/security/set-session-length-for-google-cloud-services)); a service account has no such session. What gcloud prints and which exit code it gives is not documented on the pages read, so the provider treats the refusal of its own refresh grant (a 400 or a 401 from the token endpoint), and a 401 from the IAM Credentials API ([rejection-iam-401.jsonl](google-artifact-registry/rejection-iam-401.jsonl)), as a lapsed login. A refresh answered with a 5xx or a 429 is no refusal: the provider says that it could not tell and names the status ([rejection-refresh-unavailable.jsonl](google-artifact-registry/rejection-refresh-unavailable.jsonl)), and a 200 with no usable body is a token Google would not issue ([rejection-empty-answer.jsonl](google-artifact-registry/rejection-empty-answer.jsonl)), both `other` with `npm login` named only where a refusal was seen. Any other refusal to mint (a 403 from IAM, for instance, which says the sign-in is alive but may not impersonate the account) is not a lapsed login: it is `other`, naming the service account and not `npm login`. The 401 does not prove a lapse, so the provider tries the mint first; when it fails, the provider starts no sign-in (the request is not a `login`, and `interactive` is `false` here) and answers `other`, naming `npm login`. The stored login is left alone, as `erase` must:
+**A 401 that no new token can fix.** [rejection-login-lapsed.jsonl](google-artifact-registry/rejection-login-lapsed.jsonl). The retry above assumes the provider can mint again. It cannot when the sign-in behind it has lapsed.
+
+Google lets an organization set a session length of 0 s or 1 to 24 hours for the Google Cloud SDK, and when it ends gcloud asks the user to run `gcloud auth login` ([session controls](https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication), [Workspace admin help](https://knowledge.workspace.google.com/admin/security/set-session-length-for-google-cloud-services)). A service account has no such session.
+
+What gcloud prints and which exit code it gives is not documented on the pages read, so the provider treats these as a lapsed login:
+
+- the refusal of its own refresh grant (a 400 or a 401 from the token endpoint);
+- a 401 from the IAM Credentials API ([rejection-iam-401.jsonl](google-artifact-registry/rejection-iam-401.jsonl)).
+
+Other outcomes of a mint are not a lapse:
+
+- A refresh answered with a 5xx or a 429 is no refusal: the provider says that it could not tell and names the status ([rejection-refresh-unavailable.jsonl](google-artifact-registry/rejection-refresh-unavailable.jsonl)).
+- A 200 with no usable body is a token Google would not issue ([rejection-empty-answer.jsonl](google-artifact-registry/rejection-empty-answer.jsonl)).
+- Both are `other`, with `npm login` named only where a refusal was seen.
+- Any other refusal to mint (a 403 from IAM, for instance, which says the sign-in is alive but may not impersonate the account) is `other`, naming the service account and not `npm login`.
+
+The 401 does not prove a lapse, so the provider tries the mint first. When it fails, the provider starts no sign-in (the request is not a `login`, and `interactive` is `false` here) and answers `other`, naming `npm login`. The stored login is left alone, as `erase` must:
 
 ```json
 {"v":1,"kind":"erase","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","granularity":"registry"}
@@ -126,7 +192,11 @@ npm then fails the request, naming the provider ([rejection-403.jsonl](google-ar
 
 The request fails and the session goes on. `not-found` would be wrong here, since the provider holds a lapsed login and `not-found` would let a listed `npm:token` answer in its place.
 
-**No `not-found` for an invisible repository.** The pages read say nothing about Artifact Registry hiding a repository from a principal who may not see it: the [troubleshooting](https://docs.cloud.google.com/artifact-registry/docs/nodejs/troubleshoot) and [access control](https://docs.cloud.google.com/artifact-registry/docs/access-control) pages document no 401, 403 or 404 for npm (read again on 2026-10-20). Whether such a request gets a 403 or a 404 is not verified. A 404 would send no retry and no `erase`, so the provider would never hear of it, and a 403 is answered `other` as above. A retry with nothing stored at all is `other` naming `npm login`, not `not-found` ([rejection-no-signin.jsonl](google-artifact-registry/rejection-no-signin.jsonl)). The provider's own `not-found` answers "nothing stored", and the hello `registries` list means npm never asks it about a repository it was not configured for, so this page has no `not-found` transcript.
+**No `not-found` for an invisible repository.** The pages read say nothing about Artifact Registry hiding a repository from a principal who may not see it: the [troubleshooting](https://docs.cloud.google.com/artifact-registry/docs/nodejs/troubleshoot) and [access control](https://docs.cloud.google.com/artifact-registry/docs/access-control) pages document no 401, 403 or 404 for npm (read again on 2026-10-20).
+
+Whether such a request gets a 403 or a 404 is not verified. A 404 would send no retry and no `erase`, so the provider would never hear of it, and a 403 is answered `other` as above.
+
+A retry with nothing stored at all is `other` naming `npm login`, not `not-found` ([rejection-no-signin.jsonl](google-artifact-registry/rejection-no-signin.jsonl)). The provider's own `not-found` answers "nothing stored", and the hello `registries` list means npm never asks it about a repository it was not configured for, so this page has no `not-found` transcript.
 
 ## Login and logout
 
@@ -137,15 +207,38 @@ The request fails and the session goes on. `not-found` would be wrong here, sinc
 {"Err":{"kind":"other","message":"The sign-in did not finish: no sign-in was completed in 4 minutes 30 seconds. Nothing was stored. Run npm login again."}}
 ```
 
-What gcloud does when the user denies access or never returns is not documented ([gcloud auth login](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login) says nothing on denial or timeouts), so the provider ends the flow itself, at 4.5 minutes because npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)), and a gcloud that exits non-zero earlier gets the same answer with its own reason (the reference provider's message says "The sign-in", since it runs no gcloud). The reference provider, which runs the device flow itself (RFC 8628 as recalled, not read from Google), has an answer for each way the flow can end early: the person denies the sign-in ([login-denied.jsonl](google-artifact-registry/login-denied.jsonl)), the code expires ([login-expired.jsonl](google-artifact-registry/login-expired.jsonl)), and `slow_down`, which adds 5 seconds to the polling interval and still ends in a login ([login-slow-down.jsonl](google-artifact-registry/login-slow-down.jsonl)). A sign-in Google approves without a refresh token has nothing to store, since an access token lapses within the hour, and is the same `other` ([login-no-refresh-token.jsonl](google-artifact-registry/login-no-refresh-token.jsonl)). Each ends the request with `other` and nothing stored, except the last. A supplied `token` is a one-hour access token and not worth storing, so a provider given one answers `other` with a message saying so ([login-token.jsonl](google-artifact-registry/login-token.jsonl)).
+What gcloud does when the user denies access or never returns is not documented ([gcloud auth login](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login) says nothing on denial or timeouts). So the provider ends the flow itself, at 4.5 minutes because npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)). A gcloud that exits non-zero earlier gets the same answer with its own reason (the reference provider's message says "The sign-in", since it runs no gcloud).
+
+The reference provider runs the device flow itself (RFC 8628 as recalled, not read from Google) and has an answer for each way the flow can end early:
+
+- the person denies the sign-in ([login-denied.jsonl](google-artifact-registry/login-denied.jsonl));
+- the code expires ([login-expired.jsonl](google-artifact-registry/login-expired.jsonl));
+- `slow_down` adds 5 seconds to the polling interval and still ends in a login ([login-slow-down.jsonl](google-artifact-registry/login-slow-down.jsonl));
+- Google approves the sign-in without a refresh token, which leaves nothing to store, since an access token lapses within the hour, and is the same `other` ([login-no-refresh-token.jsonl](google-artifact-registry/login-no-refresh-token.jsonl)).
+
+Each ends the request with `other` and nothing stored, except `slow_down`.
+
+A supplied `token` is a one-hour access token and not worth storing, so a provider given one answers `other` with a message saying so ([login-token.jsonl](google-artifact-registry/login-token.jsonl)).
 
 A sign-in the person cannot be shown is not waited for. With no controlling terminal the provider cannot show the code, so it stops at the first sign-in without polling and answers `other`, naming `npm login` to run from a terminal; Google is left with a device code nobody will use, which expires on its own, and nothing is stored ([login-no-terminal.jsonl](google-artifact-registry/login-no-terminal.jsonl)).
 
-`npm login` over a stored sign-in replaces it and revokes the replaced one, once the new one is stored: a refresh token that is no longer kept is one nobody could revoke later ([login-replaces-signin.jsonl](google-artifact-registry/login-replaces-signin.jsonl)). `npm logout` removes only what the provider created: its own directory (in the reference provider, the `gcloud` entry of its store), removed first, and then revokes that sign-in's refresh token at Google as a best effort. The sign-in is the provider's own grant, so the revocation signs the user out of nothing else; a refused revocation is a warning on stderr and the answer is still `Ok`, the entry already gone, as the RFC asks ([logout-revocation-fails.jsonl](google-artifact-registry/logout-revocation-fails.jsonl)). It never runs `gcloud auth revoke` on the shared configuration and never deletes `application_default_credentials.json`. A provider that only borrows ambient ADC has nothing to remove and answers `not-found`, and so does the reference provider when nothing was ever signed in (the RFC: "`not-found` means there was nothing to remove"); like the `not-found` of a `get` with nothing stored, it has no transcript here (see the end of [Rejection](#rejection)).
+`npm login` over a stored sign-in replaces it and revokes the replaced one, once the new one is stored: a refresh token that is no longer kept is one nobody could revoke later ([login-replaces-signin.jsonl](google-artifact-registry/login-replaces-signin.jsonl)).
+
+`npm logout` removes only what the provider created: its own directory (in the reference provider, the `gcloud` entry of its store), removed first, and then revokes that sign-in's refresh token at Google as a best effort. The sign-in is the provider's own grant, so the revocation signs the user out of nothing else. A refused revocation is a warning on stderr and the answer is still `Ok`, the entry already gone, as the RFC asks ([logout-revocation-fails.jsonl](google-artifact-registry/logout-revocation-fails.jsonl)).
+
+It never runs `gcloud auth revoke` on the shared configuration and never deletes `application_default_credentials.json`.
+
+A provider that only borrows ambient ADC has nothing to remove and answers `not-found`, and so does the reference provider when nothing was ever signed in (the RFC: "`not-found` means there was nothing to remove"). Like the `not-found` of a `get` with nothing stored, it has no transcript here (see the end of [Rejection](#rejection)).
 
 ## CI
 
-[ci.jsonl](google-artifact-registry/ci.jsonl) is the install and [ci-publish.jsonl](google-artifact-registry/ci-publish.jsonl) the publish: two commands, so two sessions. `interactive` is `false` in both. The provider takes the identity Application Default Credentials resolves to: a federated identity from the CI job, or the metadata server's service account on Cloud Build. Both are machine identities, so it asks for no presence and answers `publish` at once, but only to a request with `interactive: false`: the variable that says it is in a job is the environment's, which a terminal can export too, and a machine identity is released with no presence, so an interactive request takes the person's sign-in and the presence prompt instead ([ci-interactive.jsonl](google-artifact-registry/ci-interactive.jsonl)). A 403 on a federated publish is `other` naming the job's identity, not a token ([ci-403.jsonl](google-artifact-registry/ci-403.jsonl)). The reference provider covers the first only: it exchanges the federated credentials file that `adc` in its configuration names, at the Security Token Service, and never calls a metadata server. In CI it does not choose a tier either: the reader and writer service accounts of the configuration are not used, and the token can do what the job's identity can do, which is why the install transcript's identity holds only the reader role and the publish one's the writer role:
+[ci.jsonl](google-artifact-registry/ci.jsonl) is the install and [ci-publish.jsonl](google-artifact-registry/ci-publish.jsonl) the publish: two commands, so two sessions. `interactive` is `false` in both.
+
+The provider takes the identity Application Default Credentials resolves to: a federated identity from the CI job, or the metadata server's service account on Cloud Build. Both are machine identities, so it asks for no presence and answers `publish` at once, but only to a request with `interactive: false`. The variable that says it is in a job is the environment's, which a terminal can export too, and a machine identity is released with no presence. So an interactive request takes the person's sign-in and the presence prompt instead ([ci-interactive.jsonl](google-artifact-registry/ci-interactive.jsonl)).
+
+A 403 on a federated publish is `other` naming the job's identity, not a token ([ci-403.jsonl](google-artifact-registry/ci-403.jsonl)).
+
+The reference provider covers the first identity only: it exchanges the federated credentials file that `adc` in its configuration names, at the Security Token Service, and never calls a metadata server. In CI it does not choose a tier either: the reader and writer service accounts of the configuration are not used. The token can do what the job's identity can do, which is why the install transcript's identity holds only the reader role and the publish one's the writer role:
 
 ```json
 {"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-private/","scope":"@acme","package":"web-ui","version":"2.4.1","operation":"publish","command":"publish","interactive":false}
