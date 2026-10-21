@@ -82,7 +82,11 @@ const fixtureSecrets = (name) => {
 // `presence` replaces the scenario's scripted answers, for sessions that are
 // not the transcript's (tests/test_provider_sessions.py). `owned` is told what
 // has been started, so that a setup that fails can give it back.
-const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {}, owned = {}) => {
+// `upstream` (live/verdaccio.js) sends the provider to a real server instead of
+// the fake: the registry origins of `hosts` go to that address, and `expect.state`,
+// which describes the fake, is not checked (the caller checks what it can read
+// from the real one).
+const setUp = async (name, transcriptFile, { presence, scenarioFile: given, upstream } = {}, owned = {}) => {
   const base = path.basename(transcriptFile, '.jsonl')
   const label = `${name}/${base}`
   const scenarioFile = given ?? path.join(providers, name, 'scenarios', `${base}.json`)
@@ -103,6 +107,9 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
   const concurrent = [...(scenario.concurrently || [])]
   const atRequest = scenario.atRequest || []
   const problems = []
+  // every request the fake answered and what it answered, for a caller that
+  // compares the fake with a real server
+  const exchanges = []
   const fake = await startFake((request) => {
     const line = `${request.method} ${request.path}`
     for (const rule of atRequest.filter((candidate) => line.startsWith(candidate.on))) {
@@ -119,7 +126,18 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
         break
       }
     }
-    return stalled.some((prefix) => line.startsWith(prefix)) ? { hang: true } : handle(request)
+    if (stalled.some((prefix) => line.startsWith(prefix))) {
+      return { hang: true }
+    }
+    let answer
+    try {
+      answer = handle(request)
+    } catch (error) {
+      exchanges.push({ request, answer: { status: 500, json: { error: error.message } } })
+      throw error
+    }
+    exchanges.push({ request, answer: answer || { status: 404, json: { error: 'no such route' } } })
+    return answer
   })
   owned.fake = fake
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), `provider-${name}-`))
@@ -133,7 +151,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
   const storeFile = path.join(scratch, 'store.json')
   storeFileOf.path = storeFile
   fs.writeFileSync(storeFile, JSON.stringify(scenario.store || {}))
-  const endpoints = Object.fromEntries((scenario.hosts || []).map((origin) => [origin, fake.url]))
+  const endpoints = Object.fromEntries((scenario.hosts || []).map((origin) => [origin, upstream || fake.url]))
   const configFile = path.join(scratch, 'config.json')
   fs.writeFileSync(
     configFile,
@@ -148,6 +166,11 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
 
   return {
     label,
+    scenario,
+    exchanges,
+    fake,
+    fakeState,
+    storeFile,
     askedFile: path.join(scratch, 'asked.log'),
     // what the scenario puts within the provider's reach, for a client
     // that checks stderr itself
@@ -208,7 +231,7 @@ const setUp = async (name, transcriptFile, { presence, scenarioFile: given } = {
       if (scenario.expect?.store) {
         assertSubset(JSON.parse(fs.readFileSync(storeFile, 'utf8')), scenario.expect.store, `${label} store`)
       }
-      if (scenario.expect?.state) {
+      if (scenario.expect?.state && !upstream) {
         assertSubset(fakeState, scenario.expect.state, `${label} state`)
       }
     },

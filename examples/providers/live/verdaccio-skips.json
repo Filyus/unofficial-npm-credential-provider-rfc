@@ -1,0 +1,13 @@
+{
+  "comment": "Scenarios of examples/providers/verdaccio/scenarios that do not run against a real Verdaccio, and why. Every scenario is either run or listed here (the run fails otherwise), and an entry for a scenario that does not exist, or that runs, fails it too. `majorBelow`: the entry holds only for a Verdaccio whose major version is below it.",
+  "skips": {
+    "login-two-factor": { "reason": "2FA is a `flags.tfa` feature of the 7.x line and needs the user enrolled with a TOTP secret, so that the scripted person could type a code valid for the current 30 s step; no enrolment or code generator is in the harness. Not in 6.10.6 at all." },
+    "login-two-factor-code-reused": { "reason": "2FA: as login-two-factor; the refusal of a TOTP step already accepted needs a real code." },
+    "login-wrong-otp": { "reason": "2FA: as login-two-factor; the scenario's wrong code needs a real enrolment to be wrong against." },
+    "login-otp-not-typed": { "reason": "2FA: as login-two-factor; the challenge exists only for an enrolled user." },
+    "login-mint-failed": { "reason": "the scenario needs the server to fail the full token's creation with HTTP 500 after the read-only one succeeded; a real Verdaccio is not made to fail on request." },
+    "logout-revocation-stalls": { "reason": "the scenario needs a server that accepts the revocations and never answers them (`stall`); a real Verdaccio answers." },
+    "ci-stage": { "majorBelow": 7, "reason": "staging is a `flags.stage` feature of the 7.x line (`/-/stage`, the `stage` rule); 6.10.6 has neither." },
+    "stage-approve": { "majorBelow": 7, "reason": "staging is a `flags.stage` feature of the 7.x line; 6.10.6 has no `/-/stage`." }
+  }
+}

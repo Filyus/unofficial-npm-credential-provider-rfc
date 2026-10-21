@@ -87,11 +87,45 @@ The same run is the [nightly `fuzz` workflow](../../.github/workflows/fuzz.yml),
 - the schema, the Python model, the Rust crate and these providers, asked about every message of [`tests/fuzz_messages.py`](../../tests/fuzz_messages.py);
 - the Rust parser, fuzzed by coverage ([`poc/rust/fuzz`](../../poc/rust/fuzz)).
 
-[`lib/`](lib) holds what the providers share: the provider side of the protocol ([`protocol.js`](lib/protocol.js)), the provider's own context ([`context.js`](lib/context.js): the store, the clock, the vendor API, presence on the controlling terminal or scripted), and the fake API server ([`fake-server.js`](lib/fake-server.js): an answer `{ hang: true }` is one never given). What a provider shows or asks the person goes through `ctx.showToPerson`, `ctx.confirm` and `ctx.ask`, which replace C0 and C1 controls and bidirectional marks and overrides with `?` before anything is written, so no provider can forget to ([`protocol.test.js`](protocol.test.js) checks that); a provider that quotes vendor text in an error message uses the same `plain` of `lib/context.js`.
+[`lib/`](lib) holds what the providers share: the provider side of the protocol ([`protocol.js`](lib/protocol.js)), one provider session against a prepared scenario ([`session.js`](lib/session.js), which `run.js` and the live run drive alike), the provider's own context ([`context.js`](lib/context.js): the store, the clock, the vendor API, presence on the controlling terminal or scripted), and the fake API server ([`fake-server.js`](lib/fake-server.js): an answer `{ hang: true }` is one never given). What a provider shows or asks the person goes through `ctx.showToPerson`, `ctx.confirm` and `ctx.ask`, which replace C0 and C1 controls and bidirectional marks and overrides with `?` before anything is written, so no provider can forget to ([`protocol.test.js`](protocol.test.js) checks that); a provider that quotes vendor text in an error message uses the same `plain` of `lib/context.js`.
 
 ## What the fakes are
 
-The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. None of this has run against a live registry: no secret is needed, and none is in the repository.
+The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. Only the Verdaccio fake has been held against a real server (below); the others have not run against a live registry, since no secret is needed and none is in the repository.
+
+## Against a real server
+
+A fake written from the docs can share a mistake with the provider written from the same docs, and then each confirms the other. The first version of the Verdaccio provider logged in with one `PUT /-/user/org.couchdb.user:<name>` and the fake answered it 201; a real Verdaccio answers 409 for a user that exists, because that call is the add-user path, and the login is the same call with the password in `Authorization: Basic`. Nothing in the repository could see that until the provider met the server.
+
+[`live/verdaccio.js`](live/verdaccio.js) runs the Verdaccio provider against a real Verdaccio:
+
+```sh
+node examples/providers/live/verdaccio.js                                  # verdaccio@6.10.6, the current stable release
+node examples/providers/live/verdaccio.js --version 7.0.0-next-7.31        # the 7.x line, a pre-release (staging, 2FA, web login flags)
+node examples/providers/live/verdaccio.js --only login,escalation          # some scenarios (`probes` is the requests no scenario reaches)
+VERDACCIO_LIVE_TRACE=1 VERDACCIO_LIVE_LOG=debug node examples/providers/live/verdaccio.js ...   # every call, and the server's own log on a failure
+```
+
+It installs the version with `npm install --prefix <dir>` (an empty `--userconfig`, so no npm configuration is read or changed; `--install-dir` keeps the install between runs), starts it as a Node process on a free 127.0.0.1 port from a generated configuration in a temporary directory (htpasswd, the default opaque tokens, the `packages` rules of the scenario, `flags.stage` on the 7.x line), polls `/-/ping` until it answers, and kills it at the end. No docker, so a run is the same on a laptop and in CI.
+
+Each scenario that can run against a real server runs twice, once on the fake as `run.js` does and once here:
+
+- **Set-up through the real API.** A server per scenario. The first start leaves registration open: the users of the scenario's `state` are registered with `PUT /-/user/org.couchdb.user:<name>`, the test package `@acme/widget@2.4.0` is published with a real tarball by a user the rules let publish, and a token is minted with `POST /-/npm/v1/tokens` for each entry of `state.tokens` (its key revoked with `DELETE /-/npm/v1/tokens/token/<key>` for a `dead` one). Then the same storage is started again with registration closed (`max_users: -1`) and the scenario's rules.
+- **JWT scenarios.** A scenario whose tokens are JWTs gets a server that signs JWTs expiring as the scenario's do, with the clock set to the real time. Where a token has to lapse, the lifetime is 4 seconds and the clock a day back.
+- **The same assertions.** The provider, started as npm starts it and talking to the server through a recording proxy, must answer each client line with the recorded answer, the scenario's fake tokens replaced by the real ones (and `expiresAt` by the real token's `exp`, clamped); leave the store `expect.store` says, a minted token being any real one that then does what its tier says (the read-only one reads and is refused a write, the full one is the user's); and make the calls `expect.state` counts (a `whoami` that reaches its route, a login the server accepted, a token minted, a key revoked). The person's answers asked for, and the secrets kept off stderr, are checked as in `run.js`.
+- **What npm would send.** After each credential the provider releases, the request npm makes with it (a packument read, a publish, a token create, a staging call) goes to the fake and to the server. Where the transcript says the next request was refused, `escalation` and `rejection-revoked-key` need the real server to refuse that very request with that status.
+- **Divergences.** The calls of the two runs are lined up. A call that differs (a method, a path, a credential, a body) is a divergence, and so is an answer that differs in status, in `WWW-Authenticate`, `npm-notice`, `Vary`, `Cache-Control`, the media type of `Content-Type`, or in the keys of its JSON body. The run prints each with the request, the fake's answer and the real one.
+- **The allowlist.** [`live/verdaccio-divergences.json`](live/verdaccio-divergences.json) lists the known ones, each with its Verdaccio major and a line of reason. A new divergence fails the run, and so does an entry that no longer matches one.
+- **Probes.** The same comparison is made for 34 requests no scenario reaches (`probes`): whoami with each kind of credential, the packument and the publish, the token list, create and revoke, the login in each form, a staging read.
+
+A scenario that cannot run against a real server is listed in [`live/verdaccio-skips.json`](live/verdaccio-skips.json) with its reason, and the run prints the list; a scenario neither run nor listed fails it, and so does a listing of a scenario that does not exist. The reasons are in [the Verdaccio page](../verdaccio.md#against-a-real-verdaccio): the 2FA scenarios need a TOTP enrolment, one scenario a server error and one a server that never answers, and two the 7.x staging flag, which 6.10.6 does not have. CI runs the job for 6.10.6 and for 7.0.0-next-7.31 ([`conformance.yml`](../../.github/workflows/conformance.yml), `verdaccio-live`).
+
+What the live run found on its first day, and fixed:
+
+- the login (above), in the provider and in the fake;
+- the fake's token create, token list, revocation of a key nobody holds (a real 200), packument, publish and 401 headers, which a real server answers otherwise;
+- the fake's staging, which was a route (`PUT /-/stage/<package>`) the 7.x line does not have: staging is `POST /-/stage/package/<package>`, answering `stageId`, and a record is read and rejected by its UUID;
+- the fake's crash, a 500, on an unauthenticated token create, where Verdaccio answers 401.
 
 ## What the reference providers simplify
 

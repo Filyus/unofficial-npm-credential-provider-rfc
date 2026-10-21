@@ -1,0 +1,152 @@
+{
+  "comment": "Differences between examples/providers/verdaccio/fake.js and a real Verdaccio that are known and kept, one entry each: the exact `id` the run prints, the Verdaccio majors it holds for, and the reason. The fake follows 6.10.6, the current stable release; what the 7.x line (7.0.0-next-7.31, a pre-release) does differently is listed here. A difference not listed fails the run; so does an entry that no longer matches anything.",
+  "allow": [
+    {
+      "id": "GET /@acme%2fwidget with unknown-token :: status fake=200 real=401",
+      "versions": [
+        "7"
+      ],
+      "reason": "7.x answers 401 to a token it cannot decrypt even for a package open to everyone; 6.10.6 takes it for an anonymous request (200)."
+    },
+    {
+      "id": "GET /@acme%2fwidget with unknown-token :: www-authenticate fake=null real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 of 7.x for an undecryptable token carries `Bearer`."
+    },
+    {
+      "id": "GET /@acme%2fwidget with unknown-token :: keys fake=\"_attachments,_id,_rev,dist-tags,name,readme,time,users,versions\" real=\"error\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 of 7.x for an undecryptable token has an error body, not a packument."
+    },
+    {
+      "id": "POST /-/npm/v1/tokens with full-token :: keys fake=\"cidr,created,key,readonly,token,user\" real=\"cidr,cidr_whitelist,created,key,readonly,token,user\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x token create answers `cidr_whitelist` as well as `cidr`."
+    },
+    {
+      "id": "GET /@acme%2fwidget with read-token :: keys fake=\"_attachments,_id,_rev,dist-tags,name,readme,time,users,versions\" real=\"_attachments,_id,_rev,dist-tags,maintainers,name,readme,time,users,versions\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x packument has `maintainers`; 6.10.6 has none."
+    },
+    {
+      "id": "PUT /-/user/org.couchdb.user:{user} :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "POST /-/npm/v1/tokens with login-token :: keys fake=\"cidr,created,key,readonly,token,user\" real=\"cidr,cidr_whitelist,created,key,readonly,token,user\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x token create answers `cidr_whitelist` as well as `cidr`."
+    },
+    {
+      "id": "GET /-/whoami with read-token :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "GET /-/whoami :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "GET /-/whoami with garbage-token :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "GET /-/whoami with basic :: status fake=200 real=401",
+      "versions": [
+        "7"
+      ],
+      "reason": "7.x refuses Basic outside the login route (401); 6.10.6 accepts it on whoami (200)."
+    },
+    {
+      "id": "GET /-/whoami with basic :: www-authenticate fake=null real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 for Basic on 7.x carries `Bearer`."
+    },
+    {
+      "id": "GET /-/whoami with basic :: keys fake=\"username\" real=\"error\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 for Basic on 7.x has an error body, not a username."
+    },
+    {
+      "id": "GET /@acme%2fwidget :: keys fake=\"_attachments,_id,_rev,dist-tags,name,readme,time,users,versions\" real=\"_attachments,_id,_rev,dist-tags,maintainers,name,readme,time,users,versions\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x packument has `maintainers`; 6.10.6 has none."
+    },
+    {
+      "id": "GET /@acme%2fwidget with garbage-token :: status fake=200 real=401",
+      "versions": [
+        "7"
+      ],
+      "reason": "7.x answers 401 to a token it cannot decrypt even for a package open to everyone; 6.10.6 takes it for an anonymous request (200)."
+    },
+    {
+      "id": "GET /@acme%2fwidget with garbage-token :: www-authenticate fake=null real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 of 7.x for an undecryptable token carries `Bearer`."
+    },
+    {
+      "id": "GET /@acme%2fwidget with garbage-token :: keys fake=\"_attachments,_id,_rev,dist-tags,name,readme,time,users,versions\" real=\"error\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "the 401 of 7.x for an undecryptable token has an error body, not a packument."
+    },
+    {
+      "id": "PUT /@acme%2fwidget :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "GET /-/npm/v1/tokens :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "POST /-/npm/v1/tokens :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    },
+    {
+      "id": "POST /-/npm/v1/tokens with full-token :: www-authenticate fake=\"Basic, Bearer\" real=\"Bearer\"",
+      "versions": [
+        "7"
+      ],
+      "reason": "a 7.x 401 carries a bare `WWW-Authenticate: Bearer` (final.ts); 6.10.6, which the fake follows, sends `Basic, Bearer`."
+    }
+  ]
+}

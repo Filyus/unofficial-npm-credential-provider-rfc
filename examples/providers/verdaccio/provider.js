@@ -11,7 +11,10 @@
 // write is refused), `operation-not-supported` for `access` and `trust`, the
 // `GET /-/whoami` probe on a retry, the answers `other` that name the cure,
 // and the operator's provisioning for CI. Verdaccio's routes are the ones the
-// page cites: PUT /-/user/org.couchdb.user:<name>, POST /-/npm/v1/tokens and
+// page cites: PUT /-/user/org.couchdb.user:<name> (twice, as npm login does:
+// the add-user path answers 409 for a user that exists, and the login is the
+// same call on the -rev route with the password in Basic; a real Verdaccio, not
+// the fake, showed that), POST /-/npm/v1/tokens and
 // DELETE /-/npm/v1/tokens/token/<key>.
 //
 // The registry is `--registry`, as the page configures it; the conformance
@@ -301,14 +304,25 @@ const start = (args) => {
         if (otp === null) {
           return { unanswered: true }
         }
-        res = await ctx.request(method, url(path), { ...options, headers: { 'npm-otp': otp } })
+        res = await ctx.request(method, url(path), { ...options, headers: { ...options.headers, 'npm-otp': otp } })
         if (challenged(res)) {
           refusedOtp = true
         }
       }
       return res
     }
-    const put = await send('PUT', `-/user/org.couchdb.user:${encodeURIComponent(username)}`, { body: { name: username, password } })
+    // `npm login` as npm-profile does it: add the user, which answers 409 for one that exists
+    // (and 401 for a wrong password); then, for that user, the same body on the revision route
+    // with the password in `Authorization: Basic`, which is how a real Verdaccio logs a user in
+    // (found by running this provider against 6.10.6 and 7.x; the page's single PUT is the add-user path)
+    const userRoute = `-/user/org.couchdb.user:${encodeURIComponent(username)}`
+    const body = { name: username, password }
+    let put = await send('PUT', userRoute, { body })
+    let basicStep = false
+    if (put.status === 409) {
+      basicStep = true
+      put = await send('PUT', `${userRoute}/-rev/undefined`, { body, headers: { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` } })
+    }
     if (put.unanswered) {
       return unanswered('one-time password')
     }
@@ -316,7 +330,9 @@ const start = (args) => {
     if (refusedOtp) {
       return otpRefused()
     }
-    if (put.status === 401) {
+    // 401 from the add-user path is a wrong password; 409 from the Basic step is the same on a registry
+    // that does not register users (the add-user path then answers 409 for every password)
+    if (put.status === 401 || (basicStep && put.status === 409)) {
       return err('other', `Verdaccio refused the login at ${registry}: bad username or password. Nothing was stored. Run npm login again.`)
     }
     if (!put.json || !put.json.token || (put.status !== 200 && put.status !== 201)) {

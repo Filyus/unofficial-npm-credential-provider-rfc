@@ -4,7 +4,8 @@
 # example transcripts included) pass, the reference providers produce
 # their examples' transcripts on synthetic time and, on each OS, on real
 # time, and the Rust client and provider pair
-# builds, lints clean and passes its tests.
+# builds, lints clean and passes its tests; and the Verdaccio provider runs against a
+# real Verdaccio, not only against its fake.
 name: conformance
 
 on:
@@ -67,3 +68,26 @@ jobs:
         with:
           node-version: 24.x
       - run: node --test examples/providers/real-time.test.js examples/providers/protocol.test.js
+
+  # The Verdaccio reference provider against a real Verdaccio server, installed from npm
+  # and run as a Node process, so that a place where the hand-written fake disagrees with
+  # the real thing (a method, a status, a header, the keys of a body) fails here and not
+  # in the field. 6.10.6 is the current stable release; 7.0.0-next-7.31 is the pre-release of
+  # the 7.x line, which has staging and 2FA behind flags. Divergences that are known are in
+  # examples/providers/live/verdaccio-divergences.json, with a reason each; the scenarios that
+  # cannot run live are in verdaccio-skips.json.
+  verdaccio-live:
+    name: verdaccio provider against a real server, ${{ matrix.verdaccio }}
+    strategy:
+      fail-fast: false
+      matrix:
+        verdaccio: ['6.10.6', '7.0.0-next-7.31']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: provider against verdaccio ${{ matrix.verdaccio }}
+        run: node examples/providers/live/verdaccio.js --version ${{ matrix.verdaccio }}
