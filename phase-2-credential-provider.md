@@ -12,7 +12,7 @@
 
 ## Reading this document
 
-The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [Unresolved Questions](#unresolved-questions).
+The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [For the npm maintainers](#for-the-npm-maintainers).
 
 Terms used before they are defined:
 
@@ -766,9 +766,13 @@ In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentia
 
 ## Unresolved Questions
 
-None in the protocol as written; facts not verified yet are in [claims.md](claims.md#not-verified).
+### Open questions of fact
 
-Decisions the npm maintainers may want to take differently, each of which shrinks or changes version 1:
+None in the protocol as written. What is not verified is listed in [claims.md](claims.md#not-verified).
+
+### For the npm maintainers
+
+Decisions this document makes that the npm team may want to take differently, each of which shrinks or changes version 1:
 
 1. Ship the global chain in version 1, or per-registry lists only ([Session lifecycle](#session-lifecycle)).
 2. Twelve operations, or `read` and `publish` with open names for the rest ([Operations](#4-operations)).
@@ -776,7 +780,7 @@ Decisions the npm maintainers may want to take differently, each of which shrink
 4. One table of what is matched, sent, cached and declined by scheme, instead of rules in four places ([Registry matching](#registry-matching)).
 5. One mechanism for a stored token behind providers, instead of the implicit `npm:token`, the warning and `credential-provider-legacy-fallback` ([Legacy fallback](#legacy-fallback)).
 
-Phase 1 lists its own questions under [Unresolved Questions in Phase 1](phase-1-token-helper.md#unresolved-questions).
+Phase 1 lists its own under [Unresolved Questions in Phase 1](phase-1-token-helper.md#unresolved-questions).
 
 ## Future possibilities
 
