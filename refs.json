@@ -637,6 +637,14 @@
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
   },
+  "https://github.com/nodejs/node/blob/60918e184ba21d33ba7f90312cf869b3cba4efe9/tools/msvs/msi/nodemsi/product.wxs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/nodejs/node/blob/60918e184ba21d33ba7f90312cf869b3cba4efe9/tools/msvs/npm/npmrc": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/npm/cli/issues/8141": {
     "kind": "discussion",
     "cited": "2026-10-04",
@@ -658,9 +666,20 @@
     "sha256": "b670ca170c650a0c1b569af5053461bae80938834e7eecdfdc0299d4b1a7dfbc",
     "file": ".refs/github.com/npm_cli_releases_tag_v9.0.0.txt"
   },
+  "https://github.com/npm/make-fetch-happen/blob/36435b4fd8e68ff77fda4ac515d3dea198da2cb9/lib/cache/entry.js": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/npm/npm-registry-fetch/blob/6b4159a2519ce5aab26cc4dd8d4596a0b47781d2/lib/auth.js": {
     "kind": "source",
     "cited": "2026-10-21"
+  },
+  "https://github.com/npm/npm/issues/18569": {
+    "kind": "discussion",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "fb3fd654743a68e5cd2291248cb3333c76055819ffa375252c4a2eea875fdc43",
+    "file": ".refs/github.com/npm_npm_issues_18569.txt"
   },
   "https://github.com/npm/rfcs/blob/f291deccbb4c0d244a8b71f321de9042626922cb/accepted/0054-make-scripts-install-opt-in.md": {
     "kind": "source",

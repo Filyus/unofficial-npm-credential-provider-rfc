@@ -677,7 +677,7 @@ The session is the client's choice, not the provider's burden: a provider that s
 Cargo, Git and NuGet ask for a credential only when one is needed: Cargo for registries whose `config.json` says `auth-required` or after a 401, Git after a 401, NuGet after a 401 or 403. npm cannot wait for that signal:
 
 - npm registries do not advertise that they need authentication.
-- registry.npmjs.org answers an anonymous request for a private package with 404, not 401, as npm's own message for a 404 assumes (it says the package "could not be found or you do not have permission to access it"); no request was made to confirm it ([sources.md](sources.md#not-verified)).
+- registry.npmjs.org answers an anonymous request for a private package with 404, not 401, as npm's own message for a 404 assumes (it says the package "could not be found or you do not have permission to access it"); a name that does not exist gets 404, and a user report shows the same for a private one, but npm documents no such policy ([sources.md](sources.md#not-verified)).
 - npm-registry-fetch attaches a credential to the first request, and every stored token works that way today.
 
 A first `get` that names only the registry, asked before the real one, was considered and rejected: it is the same message as a registry-level request such as `npm search`, so it invites a registry-wide credential where a scope-bound one was wanted, and it costs a round trip per registry. A provider that lists its registries in hello lets npm, not each provider, decide which URLs are the same registry.

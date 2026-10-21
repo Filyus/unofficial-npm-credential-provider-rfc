@@ -6,10 +6,8 @@ The copies in `.refs/` were fetched on 2026-10-20, after some of those dates: a 
 
 ## Not verified
 
-- make-fetch-happen as shipped in npm 12 recording a header named in `Vary` in the cache index: seen in a historical version's source and in an audit probe, not re-read in the current source.
-- Node's Windows installer shipping a builtin `npmrc` that sets `prefix=${APPDATA}\npm`: recalled, not checked on an installed copy.
-- registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401: npm's own 404 message allows for it and it is commonly reported, but no request was made for this document.
-- Which registries send `Vary: Authorization`: none of the mainstream ones were found to, but no header survey was made.
+- registry.npmjs.org answering an anonymous request for a private package with 404 rather than 401. A name that does not exist gives 404 (requested anonymously on 2026-10-21), npm's own 404 message allows for a private one, and a user report shows it ([npm/npm#18569](https://github.com/npm/npm/issues/18569)); npm documents no such policy, and no private package was requested for this document.
+- Whether registries other than registry.npmjs.org send `Vary: Authorization`: no documentation or header dump showing it was found for GitHub Packages, GitLab, Artifactory, Azure Artifacts, CodeArtifact, Artifact Registry or Verdaccio, and no survey with credentials was made.
 
 ## External facts
 
@@ -17,6 +15,9 @@ Checked 2026-10-15 to 2026-10-17; a row that was checked later says so.
 
 | Claim | Source | How it was checked |
 |---|---|---|
+| make-fetch-happen, as npm 12 ships it, writes to the cache index every request header a response names in `Vary`, `Authorization` included, besides five fixed ones | npm/cli `package-lock.json` at v12.2.1 (ae98c62) pins make-fetch-happen 16.0.1; [`lib/cache/entry.js` at 36435b4](https://github.com/npm/make-fetch-happen/blob/36435b4fd8e68ff77fda4ac515d3dea198da2cb9/lib/cache/entry.js#L77-L95) | read the lockfile and the source, 2026-10-21 |
+| registry.npmjs.org sends `Vary: accept-encoding, accept` and `Cache-Control: public, max-age=300` on a packument, not `Vary: Authorization` | `curl -sI https://registry.npmjs.org/react` | requested anonymously, 2026-10-21 |
+| Node's Windows MSI installs `node_modules\npm\npmrc` holding `prefix=${APPDATA}\npm` | [`product.wxs` at v24.11.0](https://github.com/nodejs/node/blob/60918e184ba21d33ba7f90312cf869b3cba4efe9/tools/msvs/msi/nodemsi/product.wxs#L247-L248), [`tools/msvs/npm/npmrc`](https://github.com/nodejs/node/blob/60918e184ba21d33ba7f90312cf869b3cba4efe9/tools/msvs/npm/npmrc); the same at v22.20.0 | read the source, 2026-10-21; other ways of installing Node (WinGet, nvm) may not ship the file |
 | Shai-Hulud (September 2025) spread by stealing maintainer tokens and publishing infected versions; RFC 0054 records it | [RFC 0054](https://github.com/npm/rfcs/blob/f291deccbb4c0d244a8b71f321de9042626922cb/accepted/0054-make-scripts-install-opt-in.md) | read: Motivation names it, dated September 2025, 500+ packages |
 | CodeArtifact tokens: 12 h default, 15 min to 12 h | [GetAuthorizationToken](https://docs.aws.amazon.com/codeartifact/latest/APIReference/API_GetAuthorizationToken.html) | read: "between 900 (15 minutes) and 43200 (12 hours)" |
 | Artifact Registry access tokens last 60 minutes | [GAR npm auth](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication) | read |
