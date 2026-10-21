@@ -660,8 +660,7 @@ pub fn run_provider_chain_with(
 
     if not_found {
         return Err(ExchangeError::Provider(
-            "not-found: no provider had a credential, and the chain does not list npm:token"
-                .into(),
+            "not-found: no provider had a credential, and the chain does not list npm:token".into(),
         ));
     }
     match kind {
