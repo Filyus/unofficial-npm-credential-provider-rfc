@@ -227,9 +227,6 @@ No change for anyone who has not configured a helper.
 
 ## Open decisions for the npm maintainers
 
-Decisions this document makes that the npm team may want to take differently.
-
-1. The trust rule decides where a `tokenHelper` came from by filesystem identity. It could be narrowed to the default user and global files and those named on the command line or in the environment, at the cost of `--userconfig` inside a checkout ([Where it may be set](#where-it-may-be-set)).
-2. The `https:`-only rule makes a helper's credential stricter than a stored token's on purpose ([Which requests get the credential](#which-requests-get-the-credential)).
+One decision here the npm team may want to take differently: the trust rule decides where a `tokenHelper` came from by filesystem identity. It could be narrowed to the default user and global files and those named on the command line or in the environment, at the cost of `--userconfig` inside a checkout ([Where it may be set](#where-it-may-be-set)).
 
 The protocol's own are in [Phase 2's open decisions](phase-2-credential-provider.md#open-decisions-for-the-npm-maintainers).

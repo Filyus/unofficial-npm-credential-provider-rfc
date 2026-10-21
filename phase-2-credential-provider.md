@@ -189,6 +189,17 @@ The client sends all the context it has. A provider that issues one token per re
 
 - **Scheme.** `registry` arrives with the request's scheme, so a provider that serves a registry over `https:` answers `url-not-supported` for its `http:` form. A lockfile URL over `http:` on that host then carries nothing from the provider, and the request fails, under a per-registry list as under the global chain: npm never sends a stored credential to a URL form that a provider declined on a host its hello lists ([Legacy fallback](#legacy-fallback)).
 
+The scheme, in one place:
+
+| Where | Scheme | Effect |
+|---|---|---|
+| A `//host/path/` key (a per-registry list, as a stored token) | not part of the key | the list applies to `http:` and `https:` alike |
+| A hello `registries` entry | compared | an `https:` entry does not cover the `http:` form |
+| `registry` in a request | the request's | a provider sees the `http:` form and may decline it |
+| npm's cache key | included | an answer for `https:` never serves `http:` |
+| A stored credential after a decline | — | never sent to a form declined on a host a hello lists |
+| A Phase 1 helper's credential | `https:` only, or `http:` to loopback | [Which requests get the credential](phase-1-token-helper.md#which-requests-get-the-credential) |
+
 Providers that match for themselves should use the same comparison.
 
 #### Success response (provider → client)
@@ -771,10 +782,9 @@ Decisions this document makes that the npm team may want to take differently, ea
 1. Ship the global chain in version 1, or per-registry lists only ([Session lifecycle](#session-lifecycle)).
 2. Twelve operations, or `read` and `publish` with open names for the rest ([Operations](#4-operations)).
 3. A "prompting" signal or request ids, so that a hung prompt does not stall the session for five minutes ([Session lifecycle](#session-lifecycle)).
-4. One table of what is matched, sent, cached and declined by scheme, instead of rules in four places ([Registry matching](#registry-matching)).
-5. One mechanism for a stored token behind providers, instead of the implicit `npm:token`, the warning and `credential-provider-legacy-fallback` ([Legacy fallback](#legacy-fallback)).
+4. One mechanism for a stored token behind providers, instead of the implicit `npm:token`, the warning and `credential-provider-legacy-fallback` ([Legacy fallback](#legacy-fallback)).
 
-Phase 1 has two of its own: [Phase 1's open decisions](phase-1-token-helper.md#open-decisions-for-the-npm-maintainers).
+Phase 1 has one of its own: [Phase 1's open decisions](phase-1-token-helper.md#open-decisions-for-the-npm-maintainers).
 
 ## Future possibilities
 
