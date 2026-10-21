@@ -709,7 +709,7 @@ Matching an answer to a request by position also leaves nothing to forge or conf
 
 What the choice costs is the hung provider. An interactive `get` has five minutes, and npm cannot tell a provider that hangs before its prompt from a person reading one; Ctrl-C ends it, and the provider goes with npm. A message saying "now prompting" would let npm keep 30 seconds until it arrives, as NuGet's progress message extends its timeout.
 
-That message can come in a later protocol version, since a provider sends it only to a client that negotiated that version. It should carry no text, since provider text shown to the user is a spoofing surface, and must not stretch the wait past an absolute cap.
+That message can come in a later protocol version without breaking a version 1 client, since a provider sends it only to a client that negotiated that version. It should carry no text, since provider text shown to the user is a spoofing surface, and only ever shorten the wait: never past the five minutes an interactive `get` has today.
 
 ### Why npm actions rather than read/write tiers?
 
