@@ -192,7 +192,8 @@ const trust = async () => {
 // the prototype reports a failure. The prototype either refuses the value or
 // runs exactly the file it names; running another file (the decoy that the
 // normalized spelling reaches) is the failure. What it does is recorded as info.
-const verbatim = p => `\\\\?\\${p}`
+// a UNC path \\host\share\x is spelled \\?\UNC\host\share\x
+const verbatim = p => p.startsWith('\\\\') ? `\\\\?\\UNC\\${p.slice(2)}` : `\\\\?\\${p}`
 const created = []
 const spellings = async (short) => {
   let n = 0
