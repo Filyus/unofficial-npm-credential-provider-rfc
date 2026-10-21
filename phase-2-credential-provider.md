@@ -12,7 +12,7 @@
 
 ## Reading this document
 
-The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [For the npm maintainers](#for-the-npm-maintainers).
+The protocol itself is sections 1 to 3, 5 and 6: configuration, the messages, the four request kinds, caching and the security model, about half the text. Section 4 keeps the table of operations and its rules; what each operation means for staged versions, access, trust and account commands, and how registries split their credentials, is in [Appendix A](#appendix-a-operations-in-detail). The rationale, the implementation sketch, the prior art and the comparison with RFC #850 follow the protocol and can be skipped on a first reading. The decisions this document leaves to the npm maintainers are listed under [Unresolved Questions](#unresolved-questions).
 
 Terms used before they are defined:
 
@@ -766,13 +766,7 @@ In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentia
 
 ## Unresolved Questions
 
-### Open questions of fact
-
-None in the protocol as written. What is not verified is listed in [claims.md](claims.md#not-verified).
-
-### For the npm maintainers
-
-Decisions this document makes that the npm team may want to take differently, each of which shrinks or changes version 1:
+For the npm maintainers: decisions this document makes that the npm team may want to take differently, each of which shrinks or changes version 1.
 
 1. Ship the global chain in version 1, or per-registry lists only ([Session lifecycle](#session-lifecycle)).
 2. Twelve operations, or `read` and `publish` with open names for the rest ([Operations](#4-operations)).

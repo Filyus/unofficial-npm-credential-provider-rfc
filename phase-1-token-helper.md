@@ -227,13 +227,7 @@ No change for anyone who has not configured a helper.
 
 ## Unresolved Questions
 
-### Open questions of fact
-
-None that this phase depends on. What is not verified is listed in [claims.md](claims.md#not-verified).
-
-### For the npm maintainers
-
-Decisions this document makes that the npm team may want to take differently:
+For the npm maintainers: decisions this document makes that the npm team may want to take differently.
 
 1. The trust rule decides where a `tokenHelper` came from by filesystem identity. It could be narrowed to the default user and global files and those named on the command line or in the environment, at the cost of `--userconfig` inside a checkout ([Where it may be set](#where-it-may-be-set)).
 2. The `https:`-only rule makes a helper's credential stricter than a stored token's on purpose ([Which requests get the credential](#which-requests-get-the-credential)).
