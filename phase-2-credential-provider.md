@@ -567,7 +567,7 @@ Install scripts are chosen by package authors and the dependency graph; helpers 
 The user pins against it, outside the protocol:
 
 - By an absolute path to an install that does not change in place: a provider installed at a fixed version into a directory of its own, with its dependencies locked, or a native binary that no package manager or self-updater replaces.
-- npm checks no hash or signature: a hash of a node provider's entry file leaves its dependencies open, and code signing pins a publisher, not the bytes; a hash can be added later as configuration, with no protocol change.
+- npm checks no hash or signature: a hash of a node provider's entry file leaves its dependencies open, and code signing pins a publisher, not the bytes.
 - Against code already running as the user, the path and the config that names it must also be files the account cannot write, which only an administrator arranges.
 
 #### Threat model
@@ -699,7 +699,7 @@ Since the provider process lives for the whole command, it can refresh on the ne
 
 ### Why no batch request?
 
-Revision 4 had `get-batch`. The same benchmark at commit `ab3ad81` measured 31 µs per lookup in one batch against 118 µs as separate `get`s in a session: 0.09 s saved per thousand lookups. No registry today issues per-package tokens, so a real install makes one lookup per registry or scope, a handful in all; and during tree building npm discovers packages one by one, so a batch could not be formed without delaying requests. If a registry ever mints per-package tokens through a batch API, a capability can add the request later without a version change.
+Revision 4 had `get-batch`. The same benchmark at commit `ab3ad81` measured 31 µs per lookup in one batch against 118 µs as separate `get`s in a session: 0.09 s saved per thousand lookups. No registry today issues per-package tokens, so a real install makes one lookup per registry or scope, a handful in all; and during tree building npm discovers packages one by one, so a batch could not be formed without delaying requests.
 
 ### Why no request id or progress message?
 
@@ -707,9 +707,7 @@ Because npm's use of a session needs neither. A session serves one provider, the
 
 Matching an answer to a request by position also leaves nothing to forge or confuse. A timeout kills the provider, so a late answer is never read as the answer to another request, and a line sent while no request is outstanding ends the session ([Session lifecycle](#session-lifecycle)). With ids, npm would keep a session alive past a timeout and discard stale answers, a new way to cache a credential under the wrong key.
 
-What the choice costs is the hung provider. An interactive `get` has five minutes, and npm cannot tell a provider that hangs before its prompt from a person reading one; Ctrl-C ends it, and the provider goes with npm. A message saying "now prompting" would let npm keep 30 seconds until it arrives, as NuGet's progress message extends its timeout.
-
-That message can come in a later protocol version without breaking a version 1 client, since a provider sends it only to a client that negotiated that version. It should carry no text, since provider text shown to the user is a spoofing surface, and only ever shorten the wait: never past the five minutes an interactive `get` has today.
+What the choice costs is the hung provider. An interactive `get` has five minutes, and npm cannot tell a provider that hangs before its prompt from a person reading one. A message saying "now prompting" would tell them apart, as NuGet's progress message extends its timeout. It is left out because the case it serves is already bounded: `interactive` is `true` only at a terminal, where a person who sees that nothing was asked presses Ctrl-C and npm kills the provider as it exits; anywhere else a `get` has 30 seconds.
 
 ### Why npm actions rather than read/write tiers?
 
