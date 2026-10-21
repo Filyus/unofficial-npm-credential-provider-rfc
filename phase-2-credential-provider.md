@@ -4,7 +4,7 @@
 > Revision: 29 (the combined draft, revision 28, split by phase)
 > Date: 2026-10-17
 
-> Phase 2 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It builds on [Phase 1](phase-1-token-helper.md), the pnpm-compatible `tokenHelper`, whose motivation, [trust rule](phase-1-token-helper.md#trust) and rules for running a program it reuses; the [README](README.md) has the overview.
+> Phase 2 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It builds on [Phase 1](phase-1-token-helper.md), the pnpm-compatible `tokenHelper`, whose motivation, [trust rule](phase-1-token-helper.md#trust) and rules for running a program it reuses.
 
 ## Summary
 
@@ -707,7 +707,7 @@ This section is informative: it describes one way to meet the requirements above
 - **Who owns the provider process.** npm/cli, not the library. It creates provider session objects from trusted config and passes them to npm-registry-fetch in a dedicated option of their own, as helpers are passed in `tokenHelpers`; npm-registry-fetch starts no provider unless handed a session, so another tool that uses it is never left with a child.
 - **Session lifetime.** A session spawns its process on first use. npm ends it at the end of the command by closing stdin in its exit handler, so an error path ends it too, and the OS closes the pipe if npm dies. A session's child and pipes keep the event loop alive only while a request is outstanding, so an open session cannot keep npm from exiting, and npm does not exit while it awaits an answer.
 - **Libraries between the commands and npm-registry-fetch.** pacote, @npmcli/arborist, libnpmaccess, libnpmpublish, libnpmteam, libnpmorg and npm-profile spread the options they receive into its calls, so the option and the operation hint pass through unchanged; a call that builds its options afresh needs them added.
-- **Conformance material.** The draft ships a JSON Schema, a machine-readable policy file, generated test vectors, an executable Python model and a Rust client/provider pair (see the repository README), so npm and third-party providers can be tested against the same cases.
+- **Conformance material.** The draft ships a [JSON Schema](spec/protocol-v1.schema.json), a machine-readable [policy file](spec/policy-v1.json), [generated test vectors](tests/generated_protocol_vectors.json), an executable [Python model](tests/protocol_model.py) and a [Rust client and provider pair](poc/rust), so npm and third-party providers can be tested against the same cases.
 
 | Setting | Where | Default | Description |
 |---|---|---|---|

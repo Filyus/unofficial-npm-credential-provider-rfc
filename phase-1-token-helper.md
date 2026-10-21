@@ -4,7 +4,7 @@
 > Revision: 29 (the combined draft, revision 28, split by phase)
 > Date: 2026-10-17
 
-> Phase 1 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. Phase 2, a credential provider protocol, is [a separate document](phase-2-credential-provider.md); the [README](README.md) has the overview.
+> Phase 1 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. Phase 2, a credential provider protocol, is [a separate document](phase-2-credential-provider.md).
 
 ## Summary
 
