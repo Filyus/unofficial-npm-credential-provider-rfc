@@ -10,10 +10,12 @@
 // Endpoints, as the page cites them: POST /access/api/v1/tokens (create and
 // refresh), POST /access/api/v1/oidc/token, and the CLI web login at
 // /access/api/v2/authentication/jfrog_client_login/request and .../token/<id>
-// (login.go, weblogin.go). Recalled, not read, and so unverified here: the
-// request and response fields of those calls, `POST /access/api/v1/tokens/revoke`
-// with the token in the body, the token exchange's grant and token type
-// names, GitHub's `audience` query parameter, and `GET /access/api/v1/users/me`,
+// (login.go, weblogin.go). Read in the REST reference: `DELETE /access/api/v1/tokens/revoke`
+// with the token in a JSON body field `token` and a Bearer header, which
+// the page says needs admin privileges (a plain user gets 403 and the logout
+// warns), and the OIDC page's example of the token exchange, whose grant and token type
+// names the provider sends. Recalled, not read, and so unverified here: the request and response
+// fields of the other calls, GitHub's `audience` query parameter, and `GET /access/api/v1/users/me`,
 // which only names the user in the message of a 403. Invented for the
 // example: that a mint refused with 403 means the user may not create tokens,
 // and the identity token is then what the registry gets, as it is.
@@ -292,11 +294,12 @@ const start = async (args) => {
     // cannot keep it; the revocation that follows is a best effort, and what cannot be
     // revoked is warned about.
     const tokens = stored.type === 'refresh' ? [stored.accessToken, stored.refreshToken] : [stored.token]
+    const bearer = stored.type === 'refresh' ? stored.accessToken : stored.token
     writeLogin(null)
     held = null
     for (const token of tokens) {
       try {
-        const res = await ctx.request('POST', `${root}/access/api/v1/tokens/revoke`, { body: { token } })
+        const res = await ctx.request('DELETE', `${root}/access/api/v1/tokens/revoke`, { token: bearer, body: { token } })
         if (res.status !== 200) {
           log(`logout: Artifactory answered ${res.status} to revoking the stored login; it stays valid until it expires`)
         }

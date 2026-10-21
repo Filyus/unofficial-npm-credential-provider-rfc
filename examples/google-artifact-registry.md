@@ -14,7 +14,7 @@ The example shows three things:
 
 **URLs.** One host per location, with the project and repository in the path: `https://us-central1-npm.pkg.dev/acme-prod/npm-private/`.
 
-`LOCATION` is a regional or multi-regional location ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)). The examples `us-central1`, `europe-west10` and the multi-regions `us`, `europe` and `asia` are recalled, not fetched, except that the host pattern of Google's helper, `[a-zA-Z0-9-]+` before `-npm.pkg.dev`, accepts `europe-west10` ([`src/config.js`](https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/config.js) at a commit).
+`LOCATION` is a regional or multi-regional location ([authentication](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)). Google's [locations page](https://docs.cloud.google.com/artifact-registry/docs/repositories/repo-locations) (read on 2026-10-21) lists `us-central1` (Iowa) and `europe-west10` (Berlin) as regions and `us`, `europe` and `asia` as multi-regions. The host pattern of Google's helper, `[a-zA-Z0-9-]+` before `-npm.pkg.dev`, accepts `europe-west10` ([`src/config.js`](https://github.com/GoogleCloudPlatform/artifact-registry-npm-tools/blob/eae37c393241cae13a7d0ff05566abe16a624c41/src/config.js) at a commit).
 
 Routing:
 
@@ -69,11 +69,11 @@ The environment does decide one thing, whether it is in a job: `CI` set and the 
 
 Other differences:
 
-- `logout` revokes that sign-in at Google's revoke endpoint, recalled and not read.
+- `logout` revokes that sign-in at Google's revoke endpoint: a `POST` to `https://oauth2.googleapis.com/revoke` with the parameter `token`, form-encoded, which takes an access token or a refresh token; success is 200 and an error is 400 with an error code ([revoking a token](https://developers.google.com/identity/protocols/oauth2/web-server), read on 2026-10-21).
 - In CI it uses the federated credentials file `adc` names and no metadata server.
 - It has no `repoAdmin` identity, so a 403 retry is `other` for every operation.
 
-The endpoint paths and fields it uses are recalled, not read, as the comment in the file says.
+Of the endpoint paths and fields it uses, the revoke call and the device flow's are read in Google's documents (below and under Login); the rest are recalled, not read, as the comment in the file says.
 
 ## Hello
 
@@ -85,7 +85,7 @@ The endpoint paths and fields it uses are recalled, not read, as the comment in 
 - `registries`: the two repositories from its config, exactly. Entries are prefixes with no wildcard for a host such as `*-npm.pkg.dev` ([Registry matching](../phase-2-credential-provider.md#registry-matching)), so a provider that serves "all of Artifact Registry" would have to list a prefix for every location it supports, and update the list when Google adds one. Under a per-registry key the field is not needed; it is a second check, so that npm sends nothing about any other registry to this provider.
 - `erase`: it drops its cached token when told a token was rejected, and, like every kind, answers `url-not-supported` for a registry that is not in its configuration (no transcript shows it: the fuzz sessions take their registries from the transcripts, and one for a registry the provider does not serve would be treated as served); the RFC has that decided from `registry` alone, before the kind or the operation.
 - `login`, `logout`: it owns a private gcloud configuration directory (`CLOUDSDK_CONFIG`) in which `npm login` signs in, so neither touches the user's machine-wide gcloud or ADC login. A provider that only borrows ambient credentials leaves both out.
-- `retry-context`: it reads `retry` and `httpStatus` on a retry. It does not list `auth-challenges`: whether Artifact Registry sends `WWW-Authenticate` on a 401 is unverified, so the provider never reads `authChallenges`.
+- `retry-context`: it reads `retry` and `httpStatus` on a retry. It does not list `auth-challenges`: a request with no credentials got `Www-Authenticate: Basic realm="https://us-central1-npm.pkg.dev"` with its 401 (probe below), a challenge that names neither `otp` nor `ipaddress`, and what an expired token gets was not probed, so the provider never reads `authChallenges`.
 
 ## Install
 
@@ -151,7 +151,7 @@ An honest limit: on a workstation, a script run during `npm publish` can call `g
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-reader-token-2"},"cache":"expires","expiresAt":1792234600,"granularity":"registry","operationIndependent":false}}
 ```
 
-`erase` drops the provider's cached token and answers `Ok`. It does not call Google's revoke endpoint: revoking an access token that has a refresh token behind it also revokes the refresh grant (recalled from Google's OAuth documentation, not fetched), which would sign the user out of gcloud, kubectl and Terraform.
+`erase` drops the provider's cached token and answers `Ok`. It does not call Google's revoke endpoint: revoking an access token that has a refresh token behind it also revokes that refresh token, as Google's OAuth documentation says ([revoking a token](https://developers.google.com/identity/protocols/oauth2/web-server), read on 2026-10-21), which would sign the user out of gcloud, kubectl and Terraform.
 
 The retry must mint a new token, and the provider forces one even when no `erase` came first (an `erase` answered `other` does not stop the retry), so a token it still holds is not sent twice ([rejection-no-erase.jsonl](google-artifact-registry/rejection-no-erase.jsonl): the held token has 800 seconds left and is still not reused).
 
@@ -163,7 +163,7 @@ A 403 follows no erase. The retry is `{"v":1,"kind":"get",...,"retry":true,"http
 {"Err":{"kind":"other","message":"The registry refused the read for acme-reader@acme-prod.iam.gserviceaccount.com. Check its roles on the repository; a grant can take a few minutes to apply."}}
 ```
 
-npm then fails the request, naming the provider ([rejection-403.jsonl](google-artifact-registry/rejection-403.jsonl)). The status codes are recalled, not verified against live responses.
+npm then fails the request, naming the provider ([rejection-403.jsonl](google-artifact-registry/rejection-403.jsonl)). Probed anonymously on 2026-10-21 with `curl -sS -i https://us-central1-npm.pkg.dev/some-project/some-repo/somepkg`, a request with no credentials, for a project and repository that need not exist, gets status 401, `Www-Authenticate: Basic realm="https://us-central1-npm.pkg.dev"`, `Content-Type: application/json; charset=utf-8` and the body `{"error":"The request does not have valid authentication credentials."}`. That an anonymous request is answered 401 does not show what a token without the role gets, so the 403 and the other status codes are recalled, not verified against live responses.
 
 **A 401 that no new token can fix.** [rejection-login-lapsed.jsonl](google-artifact-registry/rejection-login-lapsed.jsonl). The retry above assumes the provider can mint again. It cannot when the sign-in behind it has lapsed.
 
@@ -209,7 +209,13 @@ A retry with nothing stored at all is `other` naming `npm login`, not `not-found
 
 What gcloud does when the user denies access or never returns is not documented ([gcloud auth login](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login) says nothing on denial or timeouts). So the provider ends the flow itself, at 4.5 minutes because npm kills a `login` at 5 ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)). A gcloud that exits non-zero earlier gets the same answer with its own reason (the reference provider's message says "The sign-in", since it runs no gcloud).
 
-The reference provider runs the device flow itself (RFC 8628 as recalled, not read from Google) and has an answer for each way the flow can end early:
+Google's device flow, as its page for limited-input devices has it ([OAuth 2.0 for TV and Limited-Input Device Applications](https://developers.google.com/identity/protocols/oauth2/limited-input-device), read on 2026-10-21): `POST https://oauth2.googleapis.com/device/code` with `client_id` and `scope`; the answer has `device_code`, `user_code`, `verification_url`, `expires_in` and `interval`. The field is `verification_url`, not `verification_uri` as in RFC 8628, and the reference provider reads `verification_url`.
+
+The polling `POST https://oauth2.googleapis.com/token` takes `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `device_code`, `client_id` and a `client_secret`, which the reference provider does not send.
+
+The page names `access_denied` (403), `authorization_pending` (428) and `slow_down` (403) as the polling answers' `error`, and `invalid_grant` (400) for a code that is invalid or already claimed; it names no `expired_token`, which the reference provider takes from RFC 8628, so how Google answers an expired code is unverified. The page also limits the device flow to the scopes `openid`, `email`, `profile`, `drive.appdata`, `drive.file`, `youtube` and `youtube.readonly`; `cloud-platform`, which the reference provider asks for, is not among them, so its flow is a stand-in that Google's own flow would not accept, and the page's provider runs gcloud instead.
+
+The reference provider runs the device flow itself and has an answer for each way the flow can end early:
 
 - the person denies the sign-in ([login-denied.jsonl](google-artifact-registry/login-denied.jsonl));
 - the code expires ([login-expired.jsonl](google-artifact-registry/login-expired.jsonl));

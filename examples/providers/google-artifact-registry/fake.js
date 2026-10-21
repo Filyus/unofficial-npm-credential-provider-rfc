@@ -2,10 +2,11 @@
 // A fake Google for google-artifact-registry, answering from the state a
 // scenario sets: the OAuth 2.0 endpoint, the Security Token Service and the
 // IAM Credentials API, on one address. The paths and fields follow Google's
-// published shapes as recalled (the device authorization and token
-// endpoints, `serviceAccounts:generateAccessToken` with `lifetime` and
-// `expireTime`, the STS token exchange); none was read against a live
-// service. The registry itself is not here: the provider never calls it.
+// published shapes as recalled (`serviceAccounts:generateAccessToken` with
+// `lifetime` and `expireTime`, the STS token exchange); the revoke and device
+// authorization endpoints and the device flow's field names were read in
+// Google's documents, whose polling statuses (403, 428) the fake does not
+// follow; none was read against a live service. The registry itself is not here: the provider never calls it.
 //
 // state.oauth: interval, userCode, verificationUrl, pending (polls answered
 //              authorization_pending, across both device flows), denied

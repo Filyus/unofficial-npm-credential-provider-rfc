@@ -34,6 +34,20 @@
     "sha256": "2b29fec62b72265eaa9f6612d18146b76921afdc030dcd68a799eacf1eeacc03",
     "file": ".refs/cli.github.com/manual_gh_help_environment.txt"
   },
+  "https://developers.google.com/identity/protocols/oauth2/limited-input-device": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "44da93fbaad9af427e75690d24e5d038cf65143c1d7de820e53e9fdde3e232df",
+    "file": ".refs/developers.google.com/identity_protocols_oauth2_limited-input-device.txt"
+  },
+  "https://developers.google.com/identity/protocols/oauth2/web-server": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "38bf67100a3e1745baaccfd6833b4375641698a304237621a2256050ad527583",
+    "file": ".refs/developers.google.com/identity_protocols_oauth2_web-server.txt"
+  },
   "https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html": {
     "kind": "page",
     "cited": "2026-05-17",
@@ -47,6 +61,13 @@
     "fetched": "2026-10-20",
     "sha256": "eaecd3780eaea07e3251ffe92e2d1529c97f6f2abbd5bbfe2938860fb8c3c8b1",
     "file": ".refs/docs.aws.amazon.com/IAM_latest_UserGuide_id_credentials_bearer.html.txt"
+  },
+  "https://docs.aws.amazon.com/cli/latest/reference/codeartifact/get-repository-endpoint.html": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "4881336a32e47909720d30b5711c1cfddb9d813da5be841f8ef1f70049f3da0a",
+    "file": ".refs/docs.aws.amazon.com/cli_latest_reference_codeartifact_get-repository-endpoint.html.txt"
   },
   "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html": {
     "kind": "page",
@@ -146,6 +167,13 @@
     "sha256": "5ff27d4dd881c41e15a4e7572943bfa6a509c3775752f1f122e5d15664a79e43",
     "file": ".refs/docs.aws.amazon.com/sdk-for-javascript_v3_developer-guide_migrate-credential-providers.html.txt"
   },
+  "https://docs.aws.amazon.com/singlesignon/latest/PortalAPIReference/API_GetRoleCredentials.html": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "e9665711dfe66a2017de5052f9308388ebe7779ba81a9649516b8c5e3e9bcfb9",
+    "file": ".refs/docs.aws.amazon.com/singlesignon_latest_PortalAPIReference_API_GetRoleCredentials.html.txt"
+  },
   "https://docs.cloud.google.com/access-context-manager/docs/session-controls-for-reauthentication": {
     "kind": "page",
     "cited": "2026-10-20",
@@ -180,6 +208,13 @@
     "fetched": "2026-10-20",
     "sha256": "052b1ea1d85d79291d7dea8e373118334ee7fe3b022e5681bf7dfc3627e8c0ab",
     "file": ".refs/docs.cloud.google.com/artifact-registry_docs_nodejs_troubleshoot.txt"
+  },
+  "https://docs.cloud.google.com/artifact-registry/docs/repositories/repo-locations": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "e4dff1256c1c4dbc0497c3aef737b7708e30053ae874d2dcd13f99b5ecdf04f3",
+    "file": ".refs/docs.cloud.google.com/artifact-registry_docs_repositories_repo-locations.txt"
   },
   "https://docs.cloud.google.com/artifact-registry/docs/repositories/virtual-repo": {
     "kind": "page",
@@ -244,6 +279,20 @@
     "sha256": "bf8e028420471e3eb2e3780c7c2130eb7c7f33b4c7bfdf7447aafa9ce296e9dc",
     "file": ".refs/docs.github.com/en_actions_concepts_security_github_token.txt"
   },
+  "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "04ec50066fa506fa523105591fdb38fdd72d9e3eeb6f1f77a8d87ac5e59b852f",
+    "file": ".refs/docs.github.com/en_actions_reference_workflows-and-actions_workflow-syntax.txt"
+  },
+  "https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "85438538cdc21abfad016b4ab69fc384b6d00e37db5c2f36efc19b2cd5c7bec6",
+    "file": ".refs/docs.github.com/en_actions_tutorials_publish-packages_publish-nodejs-packages.txt"
+  },
   "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps": {
     "kind": "page",
     "cited": "2026-10-17",
@@ -299,6 +348,13 @@
     "fetched": "2026-10-20",
     "sha256": "a3a17d4a792896f4647ecdf47b8325bef132b0f8471874898ef2776225d68c69",
     "file": ".refs/docs.github.com/en_packages_working-with-a-github-packages-registry_working-with-the-npm-registry.txt"
+  },
+  "https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "b066e68c1121b9616771c5c1ddd7d8f4227b39f1f0d4adf2cf4e1fd4e2f49f4a",
+    "file": ".refs/docs.github.com/en_rest_authentication_authenticating-to-the-rest-api.txt"
   },
   "https://docs.github.com/en/rest/credentials/revoke": {
     "kind": "page",
@@ -377,6 +433,13 @@
     "sha256": "869f4df3b0349ccede4c6d19360dcb64fdc33bb1b4aed807c1217dddd275c0e6",
     "file": ".refs/docs.jfrog.com/administration_docs_access-tokens.txt"
   },
+  "https://docs.jfrog.com/administration/docs/openid-connect-integration": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "7e3226b322fa924d073c9631492eecc5bebcd9788be807ab8a2812fa6a25c47e",
+    "file": ".refs/docs.jfrog.com/administration_docs_openid-connect-integration.txt"
+  },
   "https://docs.jfrog.com/administration/docs/security-configuration": {
     "kind": "page",
     "cited": "2026-10-17",
@@ -397,6 +460,20 @@
     "fetched": "2026-10-20",
     "sha256": "b71a5f9b53c54acf4f6071a27bfd06fcc7bdca6ceccff7d072e93e3ec4fc7863",
     "file": ".refs/docs.jfrog.com/administration_reference_oidctokenexchange.txt"
+  },
+  "https://docs.jfrog.com/administration/reference/revoketokenbyid": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "e8f5a336d351f735c8774e074fd494610cf81d940558db79dc6b79ae71dd9f44",
+    "file": ".refs/docs.jfrog.com/administration_reference_revoketokenbyid.txt"
+  },
+  "https://docs.jfrog.com/administration/reference/revoketokenbyvalue": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "76e854863c8262544b7cd781d58673c5435816a8620e6525665eac3fd4b304c6",
+    "file": ".refs/docs.jfrog.com/administration_reference_revoketokenbyvalue.txt"
   },
   "https://docs.jfrog.com/artifactory/docs/npm-repositories": {
     "kind": "page",
@@ -468,6 +545,13 @@
     "sha256": "cd97e4ff0492809616a2dc60f064d030a435b40f38a7e48bb7f4e5e8ef4e54ba",
     "file": ".refs/git-scm.com/docs_gitcredentials.txt"
   },
+  "https://github.blog/changelog/2021-07-26-expiration-options-for-personal-access-tokens/": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "ff9ba1dc0ea3e0c5d647a1149710ae75b5b5ea7ddbc2f6f93e389e51c91f2bf4",
+    "file": ".refs/github.blog/changelog_2021-07-26-expiration-options-for-personal-access-tokens.txt"
+  },
   "https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/": {
     "kind": "page",
     "cited": "2026-10-15",
@@ -530,6 +614,26 @@
     "cited": "2026-10-21"
   },
   "https://github.com/NuGet/NuGet.Client/blob/4c4510d29a64fcbcba6360e29c3a1e8288a87f9f/src/NuGet.Core/NuGet.Protocol/HttpSource/HttpSourceAuthenticationHandler.cs": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/aws/aws-cli/blob/6bee08f6f6fea3d7eca685f1380c902c3fb75858/awscli/botocore/credentials.py": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/aws/aws-cli/blob/6bee08f6f6fea3d7eca685f1380c902c3fb75858/awscli/botocore/utils.py": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/aws/aws-cli/blob/6bee08f6f6fea3d7eca685f1380c902c3fb75858/awscli/customizations/sso/utils.py": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/aws/aws-cli/blob/6bee08f6f6fea3d7eca685f1380c902c3fb75858/awscli/customizations/timestampformat.py": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
+  "https://github.com/aws/aws-cli/blob/6bee08f6f6fea3d7eca685f1380c902c3fb75858/awscli/topics/config-vars.rst": {
     "kind": "source",
     "cited": "2026-10-21"
   },
@@ -644,10 +748,18 @@
     "kind": "source",
     "cited": "2026-10-20"
   },
+  "https://github.com/microsoft/azure-pipelines-tasks/blob/952b2f72d356677dae10cf535dacc0d752ca4cb9/Tasks/NpmAuthenticateV0/npmauth.ts": {
+    "kind": "source",
+    "cited": "2026-10-21"
+  },
   "https://github.com/microsoft/azure-pipelines-tasks/blob/952b2f72d356677dae10cf535dacc0d752ca4cb9/Tasks/NpmAuthenticateV0/npmauthutils.ts": {
     "kind": "source",
     "cited": "2026-10-17",
     "pinned": "2026-10-20"
+  },
+  "https://github.com/microsoft/azure-pipelines-tasks/blob/952b2f72d356677dae10cf535dacc0d752ca4cb9/Tasks/NpmAuthenticateV0/taskJsonOverride.json": {
+    "kind": "source",
+    "cited": "2026-10-21"
   },
   "https://github.com/nodejs/node/blob/60918e184ba21d33ba7f90312cf869b3cba4efe9/tools/msvs/msi/nodemsi/product.wxs": {
     "kind": "source",
@@ -1001,12 +1113,33 @@
     "sha256": "2fea2978dc44d3370b388d84efb19a8d0892e23be710b200df404f6ea62b11f0",
     "file": ".refs/learn.microsoft.com/en-us_azure_devops_pipelines_artifacts_npm.txt"
   },
+  "https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "5116905e044ebda8b2977f3376270c61d31f4ee4247c5bac44c391794c07cb5e",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_pipelines_build_variables.txt"
+  },
   "https://learn.microsoft.com/en-us/azure/devops/pipelines/process/access-tokens?view=azure-devops": {
     "kind": "page",
     "cited": "2026-10-20",
     "fetched": "2026-10-20",
     "sha256": "e1ebd009423c8fd8400516a6408e25af6a2253fac3c6b3317aa1bb1f59172ac5",
     "file": ".refs/learn.microsoft.com/en-us_azure_devops_pipelines_process_access-tokens.txt"
+  },
+  "https://learn.microsoft.com/en-us/cli/azure/account?view=azure-cli-latest": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "d23f4dcdfad41d8e0379a5e01614a3855103c3c5c9422836318988d1319934e3",
+    "file": ".refs/learn.microsoft.com/en-us_cli_azure_account.txt"
+  },
+  "https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli?view=azure-cli-latest": {
+    "kind": "page",
+    "cited": "2026-10-21",
+    "fetched": "2026-10-21",
+    "sha256": "2b1e2d5dc9242699718948be75937988eec27ca72372fe7f652c35d12f20d037",
+    "file": ".refs/learn.microsoft.com/en-us_cli_azure_authenticate-azure-cli.txt"
   },
   "https://learn.microsoft.com/en-us/javascript/api/%40azure/identity/defaultazurecredential": {
     "kind": "page",

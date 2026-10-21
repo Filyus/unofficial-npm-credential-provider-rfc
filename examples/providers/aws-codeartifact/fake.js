@@ -4,9 +4,9 @@
 // their fields follow the AWS API references, with two simplifications for
 // the conformance run: a caller is named by its access key id sent as the
 // bearer token (the real SDK signs each request with SigV4 and sends no
-// secret), and every answer is JSON (STS answers XML by default). Recalled,
-// not read: the IAM Identity Center device-authorization and token paths,
-// and the portal's role-credentials call.
+// secret), and every answer is JSON (STS answers XML by default). The portal's
+// GetRoleCredentials is read in AWS's reference; recalled, not read: the IAM
+// Identity Center device-authorization and token paths.
 //
 //   domains                       { name: owner }, the CodeArtifact domains
 //   principals                    { accessKeyId: { account, tokens } }: callers
@@ -172,8 +172,8 @@ const createFake = (state) => {
     if (method === 'POST' && path === '/token') {
       return deviceToken(request)
     }
-    if (method === 'POST' && path === '/federation/credentials') {
-      const session = sso.sessions[token]
+    if (method === 'GET' && path === '/federation/credentials') {
+      const session = sso.sessions[request.headers['x-amz-sso_bearer_token']]
       if (!session || session.expiresAt <= clock / 1000) {
         return json(401, { message: 'The SSO session has expired or is invalid' })
       }

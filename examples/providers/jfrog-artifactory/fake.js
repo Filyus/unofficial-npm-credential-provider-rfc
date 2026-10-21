@@ -73,7 +73,7 @@ const createFake = (state) => {
       }
       return json(200, answer)
     }
-    if (method === 'POST' && path === '/access/api/v1/tokens/revoke') {
+    if (method === 'DELETE' && path === '/access/api/v1/tokens/revoke') {
       if (!state.revocable) {
         return json(400, { error: 'the token is below the revocable threshold' })
       }

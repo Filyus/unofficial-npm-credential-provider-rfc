@@ -27,7 +27,9 @@
 // documented OAuth 2.0 ones), the members of the authority allowlist, `SYSTEM_COLLECTIONURI`
 // as the organization a job token belongs to, that the registry URL answers an
 // unauthenticated request with the tenant headers and an authenticated one
-// with 200, and `az account get-access-token`'s output. ILLUSTRATIVE: the
+// with 200. Read in Microsoft's documents: `az account get-access-token`'s
+// output fields `accessToken` and `expires_on` (Azure CLI 2.54.0 and later), and
+// that a YAML pipeline must map `System.AccessToken` into `env`. ILLUSTRATIVE: the
 // client id, and `https://az.example.test/`, which stands for running
 // `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798`
 // (a run cannot depend on az being installed, so the fake answers it over HTTP).

@@ -125,7 +125,7 @@ A provider holding only that token answers `not-found` ([trust-session-only.json
 
 ## Rejection
 
-**401.** On the stage reads the API documents 401 as the refusal ([API](https://api-docs.npmjs.com/)); the research recalls the same for a bad token on a public package (unverified).
+**401.** On the stage reads the API documents 401 as the refusal ([API](https://api-docs.npmjs.com/)); a bad token on a public package is not refused. Probed on 2026-10-21 with `curl -sS -i -H "Authorization: Bearer invalid-test-token"` (a made-up value, no credential): `GET https://registry.npmjs.org/lodash` gave 200 with the same body (SHA-256 `293201c6…`) as the same request without the header; `GET /is-odd?probe=<random>` (`CF-Cache-Status: MISS`), `GET /@types%2fnode` and `GET /@types/node/-/node-20.0.0.tgz` gave 200 too, with no `WWW-Authenticate`; `GET /-/whoami` with that token gave 401, `Content-Type: application/json`, body `{}`, no `WWW-Authenticate` (without a token: 401, body `{"error":"Unauthorized"}`). The token was one the registry does not know, not a lapsed session token, and the probe says nothing about a private package.
 
 npm sends the erase and then one retry ([erase table](../phase-2-credential-provider.md#erase-a-credential-was-rejected)); a 401 that names `otp` or `ipaddress` is handled by npm and reaches the provider as neither.
 
@@ -248,14 +248,14 @@ An `npm ci` in the same job asks for `read` as in [install.jsonl](npmjs/install.
 - **Following a `doneUrl` anywhere.** npm-profile follows any `http(s)` `doneUrl`; a provider refuses one outside `https://registry.npmjs.org/`, attaches no credential to the poll, and never sends anything to `loginUrl`.
 - **Reading from stdin on login.** npm's "press ENTER to open the browser" reads stdin, which belongs to the protocol.
 - **Starting a login on a 401.** The URL may be one a lockfile chose. Check with `/-/whoami` first, and answer erase `Ok`.
-- **Matching the wrong hosts.** `www.npmjs.com`, the `http:` form and alias hosts such as registry.yarnpkg.com are not registry.npmjs.org to npm, which gives them no credential (the alias hosts are recalled by the research, not verified).
+- **Matching the wrong hosts.** `www.npmjs.com`, the `http:` form and alias hosts such as registry.yarnpkg.com are not registry.npmjs.org to npm, which gives them no credential. `registry.yarnpkg.com` answered `curl -sS -i https://registry.yarnpkg.com/lodash` on 2026-10-21 with 200 and the same `ETag`, `Last-Modified`, `Content-Length` and body (SHA-256 `293201c6…`) as `https://registry.npmjs.org/lodash`, whose tarball URLs name `registry.npmjs.org`; whether the alias accepts a token was not probed.
 - **Mapping `trust` to the session token that serves `access`.** The RFC says it does not serve `trust`; see below for how firm that is.
 
 ## What this registry asks of the RFC
 
 - **No way to let a public read go out anonymously** ([Provider chaining](../phase-2-credential-provider.md#error-response), [Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)).
   - A chain provider for registry.npmjs.org is asked before every public packument and tarball. The RFC already accepts that a broken global provider fails anonymous reads from this host. The case here is narrower: the provider is healthy, but its only credential is a lapsed two-hour session token.
-  - Answering `Ok` with it sends a dead token (the research recalls that npmjs.com answers 401 to a bad token even on a public package; unverified), and the retry cannot succeed. `not-found` fails because no provider answers `Ok`, and under a per-registry list `url-not-supported` fails too.
+  - Answering `Ok` with it sends a dead token (a token the registry does not know got 200 on public reads when probed on 2026-10-21, see [401](#rejection), so a public read may still succeed with it), and for a private package the retry cannot succeed. `not-found` fails because no provider answers `Ok`, and under a per-registry list `url-not-supported` fails too.
   - Only in a global chain does `url-not-supported` end in the implicit `npm:token`, which sends the request anonymously when nothing is stored. But the RFC says a provider decides it "from `registry` alone", npm remembers it for the command (so a later publish loses the provider), and it is unclear whether a provider may answer it for a registry its own hello lists.
   - Two options: allow an explicit anonymous answer, or say that `url-not-supported` may reflect the provider's state for the registry (nothing usable stored) and not only its URL, and that npm's memory of it is then limited to reads. The second option weakens the guarantee that makes the memory sound.
   - **Not in the RFC:** an anonymous fall-through would turn a visible provider failure into an anonymous request; legacy fallback fixes the outcome by design.

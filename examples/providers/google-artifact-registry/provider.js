@@ -21,9 +21,13 @@
 // library call the page names) and the IAM Credentials API. In CI only the
 // federated identity of a credentials file the configuration names is used,
 // not the metadata server's, and a 403 retry is answered `other` for every
-// operation: there is no `repoAdmin` identity to move up to. The endpoint
-// paths and fields are recalled, not read (see fake.js), the revoke endpoint
-// of `logout` among them; the client id is invented.
+// operation: there is no `repoAdmin` identity to move up to. The revoke
+// endpoint of `logout` and the device flow's endpoints and field names
+// (`verification_url`, not RFC 8628's `verification_uri`) are read in Google's
+// documents, which also limit the device flow to a short list of scopes without
+// `cloud-platform` and have the polling request carry a `client_secret`; the
+// other paths and fields are recalled, not read (see fake.js); the client id is
+// invented.
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -315,7 +319,7 @@ const start = (args) => {
       operationIndependent: false,
     })
 
-  // Google's revoke endpoint (recalled, not read): the token in a form. Best effort.
+  // Google's revoke endpoint: the token in a form. Best effort.
   const revoke = async (token, what) => {
     try {
       const res = await ctx.request('POST', `${OAUTH}/revoke`, { form: { token } })

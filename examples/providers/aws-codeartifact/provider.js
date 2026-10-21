@@ -18,8 +18,10 @@
 // sts:GetCallerIdentity and sts:AssumeRole, as AWS documents them. Simplified
 // for the run, as in fake.js: a caller is its access key id sent as the
 // bearer token where the SDK would sign with SigV4, and the secret half of a
-// credential is never used or sent (in CI its presence is checked). Recalled, not read: the IAM Identity Center
-// device-authorization and token calls and the portal's role-credentials call.
+// credential is never used or sent (in CI its presence is checked). The portal's
+// GetRoleCredentials is read in AWS's reference (`GET /federation/credentials?account_id=&role_name=`
+// with the sign-in token in `x-amz-sso_bearer_token`; the portal host here is recalled).
+// Recalled, not read: the IAM Identity Center device-authorization and token calls.
 //
 // Difference from the page's provider, because the run has no AWS CLI: it
 // speaks the Identity Center device flow itself where the page runs `aws sso
@@ -194,9 +196,9 @@ const start = (args) => {
     }
     const cache = ssoCache()
     const portal = `https://portal.sso.${config.ssoRegion}.amazonaws.com`
-    const got = await ctx.request('POST', `${portal}/federation/credentials`, {
-      token: cache.accessToken,
-      body: { accountId: config.ssoAccountId, roleName: config.ssoRoleName },
+    const query = new URLSearchParams({ account_id: config.ssoAccountId, role_name: config.ssoRoleName })
+    const got = await ctx.request('GET', `${portal}/federation/credentials?${query}`, {
+      headers: { 'x-amz-sso_bearer_token': cache.accessToken },
     })
     if (got.status === 401) {
       return null
