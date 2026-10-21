@@ -243,11 +243,7 @@ class ListedHostFallbackTests(unittest.TestCase):
         self.assertEqual(self.chain("http://registry.example.test/npm/", self.LISTS, None,
                                     answers=["try-next-provider", "ok"]).result, "ok")
         outcome = self.chain("http://registry.example.test/npm/", self.LISTS, answers=["try-next-provider-not-found"])
-        self.assertEqual(outcome.result, "fail", "not-found at the end fails without the opt-in")
-        outcome = resolve_chain(["try-next-provider-not-found"], per_registry=False, stored_credential=True,
-                                legacy_fallback=True, registry="http://registry.example.test/npm/",
-                                providers=[ProviderListing("p0", self.LISTS)])
-        self.assertEqual(outcome.result, "stored-credential", "the legacy opt-in is for not-found, not for a declined form")
+        self.assertEqual(outcome.result, "fail", "not-found at the end fails unless the chain lists npm:token")
 
     def test_a_provider_whose_hello_leaves_the_registry_out_is_declined_without_a_message(self):
         # the whole path: the hello lists https, the lockfile URL is http

@@ -3,7 +3,7 @@ use credential_provider_protocol::{
     ProviderResponse, Request, RequestKind, generated::SENTINEL_ARGUMENT, read_json_line,
     write_json_line,
 };
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Write};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // npm starts a provider with the sentinel first; anything else is a person
@@ -128,6 +128,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => ProviderOk::done(request.kind.clone()),
             };
             write_json_line(&mut io::stdout(), &ProviderResponse::Ok(response))?;
+            continue;
+        }
+        // answers, and sends a second line nobody asked for, in one write
+        if scenario == "extra-line" {
+            let ok = ProviderResponse::Ok(ProviderOk::bearer("test-token", Granularity::Scope));
+            let mut both = Vec::new();
+            write_json_line(&mut both, &ok)?;
+            write_json_line(&mut both, &ok)?;
+            let mut stdout = io::stdout();
+            stdout.write_all(&both)?;
+            stdout.flush()?;
             continue;
         }
         if scenario == "invalid-json" {

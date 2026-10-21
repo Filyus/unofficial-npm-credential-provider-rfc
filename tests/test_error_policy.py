@@ -16,8 +16,8 @@ REQUEST = {
 
 
 class ErrorPolicyTests(unittest.TestCase):
-    def client(self, *, configured: bool = True, legacy_fallback: bool = False) -> CredentialClientModel:
-        client = CredentialClientModel(ProviderConfig(configured=configured, legacy_fallback=legacy_fallback))
+    def client(self, *, configured: bool = True) -> CredentialClientModel:
+        client = CredentialClientModel(ProviderConfig(configured=configured))
         client.receive_hello({"v": [1]})
         return client
 
@@ -28,9 +28,9 @@ class ErrorPolicyTests(unittest.TestCase):
 
     def test_not_found_moves_on_to_the_next_provider_whatever_the_config(self) -> None:
         # what happens when nobody answers Ok is the chain's decision (test_chain_policy)
-        for configured, legacy_fallback in ((True, False), (False, False), (True, True)):
-            with self.subTest(configured=configured, legacy_fallback=legacy_fallback):
-                outcome = self.client(configured=configured, legacy_fallback=legacy_fallback).handle_response(
+        for configured in (True, False):
+            with self.subTest(configured=configured):
+                outcome = self.client(configured=configured).handle_response(
                     REQUEST, {"Err": {"kind": "not-found"}}
                 )
                 self.assertEqual(outcome, "try-next-provider-not-found")

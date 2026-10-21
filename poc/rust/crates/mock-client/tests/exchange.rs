@@ -31,6 +31,27 @@ fn one_session_serves_sequential_requests_from_one_process() {
 }
 
 #[test]
+fn a_line_with_no_request_outstanding_ends_the_session() {
+    // the provider answers the first request and then sends a second line
+    // nobody asked for; without the check it would be the answer to the next
+    let mut session =
+        ProviderSession::spawn(provider_command("extra-line")).expect("provider starts");
+    let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
+    session.request(&request).expect("first request");
+    // both lines left the provider in one write; give the reader thread time
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let error = session
+        .request(&request)
+        .expect_err("the stray line is not an answer");
+    assert!(
+        error.to_string().contains("no request was outstanding"),
+        "{error}"
+    );
+    assert!(session.killed());
+}
+
+#[test]
 fn provider_refuses_unknown_kind_and_keeps_serving() {
     let mut session =
         ProviderSession::spawn(provider_command("get-success")).expect("provider starts");
@@ -181,7 +202,7 @@ fn provider_chain_fails_when_nobody_has_a_credential() {
             ClientScenario::InstallGet,
             kind,
         )
-        .expect_err("a not-found at the end fails without the legacy opt-in");
+        .expect_err("a not-found at the end fails unless the chain lists npm:token");
 
         assert!(error.to_string().contains("no provider had a credential"));
     }

@@ -197,13 +197,16 @@ class TranscriptTests(unittest.TestCase):
 
         self.assertEqual(client.state.value, "ready")
 
-    def test_not_found_can_use_explicit_legacy_fallback(self) -> None:
-        client = validate_transcript(
-            str(TRANSCRIPTS / "not-found.jsonl"),
-            config=ProviderConfig(configured=True, legacy_fallback=True),
-        )
-
-        self.assertEqual(client.state.value, "ready")
+    def test_a_line_with_no_request_outstanding_is_a_protocol_violation(self) -> None:
+        """Phase 2, Session lifecycle: requests carry no id, so a line the
+        provider sends while no request is outstanding ends the session; it is
+        never read as the answer to the next request."""
+        lines = (TRANSCRIPTS / "not-found.jsonl").read_text(encoding="utf-8").splitlines()
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "t.jsonl"
+            path.write_text("\n".join(lines + lines[-1:]) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ProtocolViolation, "without client request"):
+                validate_transcript(str(path))
 
 
 if __name__ == "__main__":

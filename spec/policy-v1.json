@@ -99,11 +99,8 @@
     "registryChainAllUrlNotSupported": "fail",
     "registryChainIgnoresStoredCredential": "warn",
     "notFoundAtEnd": "fail",
-    "notFoundAtEndWithLegacyFallback": "stored-credential-or-anonymous",
     "noCommonVersion": "fail",
-    "noCommonVersionWithLegacyFallback": "as-not-found",
-    "otherFailure": "fail",
-    "otherFailureWithLegacyFallback": "fail"
+    "otherFailure": "fail"
   },
   "chain": {
     "notFound": "try-next-provider",

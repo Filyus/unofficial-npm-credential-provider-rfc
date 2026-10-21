@@ -361,6 +361,24 @@ impl ProviderSession {
         if self.killed {
             return Err(ExchangeError::SessionEnded);
         }
+        // requests carry no id, so a line that arrived while none was
+        // outstanding would be read as the answer to this one: Phase 2,
+        // Session lifecycle
+        match self.lines.try_recv() {
+            Ok(Ok(Some(_))) => {
+                self.kill();
+                return Err(ExchangeError::Provider(
+                    "a line arrived while no request was outstanding".into(),
+                ));
+            }
+            Ok(Ok(None)) => {
+                return Err(ExchangeError::Provider(format!(
+                    "provider exited before {waiting_for}"
+                )));
+            }
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) => {}
+        }
         // the deadline starts before the write: a provider that reads nothing
         // is killed at the limit like one that reads and never answers
         let deadline = Instant::now() + limit;
@@ -590,8 +608,9 @@ pub enum ChainKind {
 /// lists the registry's host in any form: that is a URL form it declined, npm
 /// sends no stored credential, and the request fails, naming the provider and
 /// the forms it lists. A per-registry list that declines fails, and so does a
-/// chain in which someone answered `not-found` (the legacy opt-in is the
-/// model's business, not this mock's).
+/// chain in which someone answered `not-found`: a stored credential behind
+/// it is used only where the chain lists `npm:token`, which is the model's
+/// business, not this mock's.
 pub fn run_provider_chain(
     provider_commands: Vec<ProviderCommand>,
     scenario: ClientScenario,
@@ -641,7 +660,7 @@ pub fn run_provider_chain_with(
 
     if not_found {
         return Err(ExchangeError::Provider(
-            "not-found: no provider had a credential, and there is no explicit legacy fallback"
+            "not-found: no provider had a credential, and the chain does not list npm:token"
                 .into(),
         ));
     }

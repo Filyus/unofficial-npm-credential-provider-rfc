@@ -65,11 +65,8 @@ Source: `spec/policy-v1.json`.
 | `registryChainAllUrlNotSupported` | `fail` |
 | `registryChainIgnoresStoredCredential` | `warn` |
 | `notFoundAtEnd` | `fail` |
-| `notFoundAtEndWithLegacyFallback` | `stored-credential-or-anonymous` |
 | `noCommonVersion` | `fail` |
-| `noCommonVersionWithLegacyFallback` | `as-not-found` |
 | `otherFailure` | `fail` |
-| `otherFailureWithLegacyFallback` | `fail` |
 
 ## Provider Chain
 

@@ -346,7 +346,7 @@ And the publish, in its own session:
 ## What this registry asks of the RFC
 
 1. **A multi-tenant host, where the tenant is the scope** ([Provider chaining](../phase-2-credential-provider.md#error-response), [Registry matching](../phase-2-credential-provider.md#registry-matching)). The RFC decides `url-not-supported` from `registry` alone and remembers it per registry, which has no answer for a host like `npm.pkg.github.com`, where the same URL serves every owner and the provider's decision depends on `scope`. The text should say:
-   - which error a provider that serves some owners and not others uses: `not-found` lets `npm:token` or the legacy-fallback opt-in send a stored token behind it, `other` fails the install;
+   - which error a provider that serves some owners and not others uses: `not-found` lets a listed `npm:token` send a stored token behind it, `other` fails the install;
    - that a listed `npm:token` behind such a provider is how the stored token gets sent for an owner the provider declined.
 
    **In the RFC:** Provider chaining says such a provider answers `not-found` for the scopes it does not serve, never `url-not-supported`.

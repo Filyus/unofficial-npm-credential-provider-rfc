@@ -13,10 +13,10 @@ NOT_FOUND = "try-next-provider-not-found"
 TOKEN = STORED_CREDENTIAL_ENTRY
 
 
-def outcomes(answers, *, per_registry, legacy_fallback=False):
+def outcomes(answers, *, per_registry):
     """The chain's result with and without a stored credential."""
     return {
-        stored: resolve_chain(answers, per_registry=per_registry, stored_credential=stored, legacy_fallback=legacy_fallback)
+        stored: resolve_chain(answers, per_registry=per_registry, stored_credential=stored)
         for stored in (True, False)
     }
 
@@ -61,10 +61,6 @@ class ChainPolicyTests(unittest.TestCase):
             for answers in ([NOT_FOUND], [DECLINE, NOT_FOUND, DECLINE]):
                 with self.subTest(per_registry=per_registry, answers=answers):
                     self.assert_policy("notFoundAtEnd", outcomes(answers, per_registry=per_registry))
-                    self.assert_policy(
-                        "notFoundAtEndWithLegacyFallback",
-                        outcomes(answers, per_registry=per_registry, legacy_fallback=True),
-                    )
 
     def test_not_found_goes_on_to_the_next_provider(self):
         self.assertEqual(POLICY["chain"]["notFound"], "try-next-provider")
@@ -74,23 +70,16 @@ class ChainPolicyTests(unittest.TestCase):
     def test_no_common_version(self):
         for per_registry in (False, True):
             with self.subTest(per_registry=per_registry):
+                # it stops the chain like any other failure: a listed npm:token behind it is not reached
                 self.assert_policy("noCommonVersion", outcomes(["no-common-version", "ok"], per_registry=per_registry))
-                # with the opt-in it is a not-found: the chain goes on, and falls back at its end
-                self.assertEqual(POLICY["fallback"]["noCommonVersionWithLegacyFallback"], "as-not-found")
-                on = resolve_chain(["no-common-version", "ok"], per_registry=per_registry, stored_credential=True, legacy_fallback=True)
-                self.assertEqual((on.result, on.entry), ("ok", 1))
-                self.assert_policy(
-                    "notFoundAtEndWithLegacyFallback",
-                    outcomes(["no-common-version"], per_registry=per_registry, legacy_fallback=True),
-                )
+                self.assert_policy("noCommonVersion", outcomes(["no-common-version", TOKEN], per_registry=per_registry))
 
     def test_any_other_failure_stops_the_chain(self):
-        for legacy_fallback, key in ((False, "otherFailure"), (True, "otherFailureWithLegacyFallback")):
-            for per_registry in (False, True):
-                with self.subTest(per_registry=per_registry, legacy_fallback=legacy_fallback):
-                    results = outcomes([DECLINE, "fail", "ok"], per_registry=per_registry, legacy_fallback=legacy_fallback)
-                    self.assert_policy(key, results)
-                    self.assertEqual(results[True].entry, 1)
+        for per_registry in (False, True):
+            with self.subTest(per_registry=per_registry):
+                results = outcomes([DECLINE, "fail", "ok"], per_registry=per_registry)
+                self.assert_policy("otherFailure", results)
+                self.assertEqual(results[True].entry, 1)
 
     def test_listed_npm_token_is_used_where_it_stands_without_a_warning(self):
         first = resolve_chain([TOKEN, "ok"], per_registry=False, stored_credential=True)

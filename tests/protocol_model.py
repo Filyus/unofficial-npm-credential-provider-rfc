@@ -61,7 +61,6 @@ class ClientState(str, Enum):
 @dataclass(frozen=True)
 class ProviderConfig:
     configured: bool = True
-    legacy_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -179,7 +178,7 @@ class CredentialClientModel:
             raise
         if PROTOCOL_VERSION not in versions:
             self.state = ClientState.FAILED
-            if self.config.configured and not self.config.legacy_fallback:
+            if self.config.configured:
                 raise ProtocolViolation("no compatible protocol version")
             return 0
         self.version = PROTOCOL_VERSION
@@ -798,7 +797,6 @@ def resolve_chain(
     *,
     per_registry: bool,
     stored_credential: bool,
-    legacy_fallback: bool = False,
     oidc_token: bool = False,
     registry: str | None = None,
     providers: list[ProviderListing] | None = None,
@@ -811,9 +809,10 @@ def resolve_chain(
 
     A global chain that does not list `npm:token` ends with it implicitly, but
     only while every provider before it declined the registry: after a
-    `not-found` the stored credential needs the legacy opt-in, as it does
-    after a version mismatch. A per-registry list never consults a stored
-    credential it does not list, and says so.
+    `not-found` the stored credential is used only where the chain lists
+    `npm:token`, and a version mismatch fails like any other error. A
+    per-registry list never consults a stored credential it does not list,
+    and says so.
 
     `registry` and `providers` (each provider's hello, in chain order) say what
     the hellos list. A global chain every provider of which declined the
@@ -847,13 +846,11 @@ def resolve_chain(
             return done("ok", index)
         if answer == "try-next-provider":
             continue
-        if answer == "try-next-provider-not-found" or (answer == "no-common-version" and legacy_fallback):
+        if answer == "try-next-provider-not-found":
             not_found = True
             continue
         return done("fail", index)
     if not_found:
-        if legacy_fallback:
-            return done("stored-credential" if stored_credential else "anonymous")
         return done("fail")
     if per_registry:
         return done("fail")
