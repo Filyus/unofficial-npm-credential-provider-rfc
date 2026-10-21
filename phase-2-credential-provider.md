@@ -766,16 +766,17 @@ In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentia
 
 ## Unresolved Questions
 
-None in the protocol as written; facts not verified yet are listed in [claims.md](claims.md#not-verified). The last open question of fact, which npmjs.com tokens serve the `/-/stage` reads, was answered by a live test for one account and package ([stage-tiers-test.md](stage-tiers-test.md)).
+None in the protocol as written; facts not verified yet are in [claims.md](claims.md#not-verified).
 
-These are the decisions the document makes that the npm maintainers may want to take differently, each of which shrinks or changes version 1:
+Decisions the npm maintainers may want to take differently, each of which shrinks or changes version 1:
 
-1. **The global chain in version 1.** It is what lets one provider serve every registry a team uses, and what spawns a provider for every command that reaches the network and makes a provider's `url-not-supported` part of the defence against a project-chosen registry. Version 1 could ship per-registry lists only and add the global chain later.
-2. **The size of the operation catalogue.** Twelve operations follow npm's commands one to one; a smaller set (`read`, `publish` and the open identifier rule for the rest) would defer the staged-version lookup and the governance operations to a later minor.
-3. **A signal for a prompt in progress, or request ids.** An interactive `get` has five minutes and the session is strictly sequential, so a provider that hangs stalls an install for that long; a one-line "prompting" message, as NuGet has, or ids that allow pipelining later, would have to be in version 1 to be relied on.
-4. **The scheme rules.** Phase 1 sends a helper's credential over `https:` only; Phase 2 sends `registry` with its scheme and keys its cache by it, while a `//host/path/` key carries none; one table of what is matched, sent, cached and declined may serve readers better than the rules in four places.
-5. **One mechanism for a stored token behind providers.** The implicit `npm:token`, the warning and `credential-provider-legacy-fallback` answer overlapping questions; collapsing them is possible at the cost of a migration path.
-6. **The Phase 1 trust rule.** Deciding where a `tokenHelper` came from by filesystem identity is the most involved change to `@npmcli/config`; a smaller rule (default user and global files and those named on the command line or in the environment only) is possible at the cost of `--userconfig` inside a checkout.
+1. Ship the global chain in version 1, or per-registry lists only ([Session lifecycle](#session-lifecycle)).
+2. Twelve operations, or `read` and `publish` with open names for the rest ([Operations](#4-operations)).
+3. A "prompting" signal or request ids, so that a hung prompt does not stall the session for five minutes ([Session lifecycle](#session-lifecycle)).
+4. One table of what is matched, sent, cached and declined by scheme, instead of rules in four places ([Registry matching](#registry-matching)).
+5. One mechanism for a stored token behind providers, instead of the implicit `npm:token`, the warning and `credential-provider-legacy-fallback` ([Legacy fallback](#legacy-fallback)).
+
+Phase 1 lists its own questions under [Unresolved Questions in Phase 1](phase-1-token-helper.md#unresolved-questions).
 
 ## Future possibilities
 
