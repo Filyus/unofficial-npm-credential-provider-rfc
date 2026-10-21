@@ -9,7 +9,10 @@
 //
 //   node poc/platform-probes/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 //
-// Both checkouts must have the prototype applied.
+// Both checkouts must have the prototype applied. PROBE_ROOT names the
+// directory the probes work in (default: the temp directory), so that they can
+// run on another volume: a FAT volume or an SMB share on Windows, where
+// device and inode numbers and path spellings behave differently.
 
 const fs = require('fs')
 const os = require('os')
@@ -31,13 +34,27 @@ const results = []
 const info = (what, value) => results.push({ kind: 'info', what, value })
 const check = (what, ok, detail = '') => results.push({ kind: ok ? 'ok' : 'FAIL', what, value: detail })
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'npm-token-helper-probes-'))
+const base = process.env.PROBE_ROOT ? path.resolve(process.env.PROBE_ROOT) : os.tmpdir()
+fs.mkdirSync(base, { recursive: true })
+const root = fs.mkdtempSync(path.join(base, 'npm-token-helper-probes-'))
+const UNC = root.startsWith('\\\\')
 const write = (p, content) => {
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, content)
 }
 
 // ---------- what this filesystem does ----------
+
+info('probes run in', process.env.PROBE_ROOT ? `PROBE_ROOT ${base}` : `the temp directory ${base}`)
+{
+  const { dev, ino } = fs.statSync(root, { bigint: true })
+  const file = path.join(root, 'ino-probe')
+  write(file, '')
+  const same = fs.statSync(file, { bigint: true })
+  info('fs.stat on the probe root returns', `dev ${dev} ino ${ino}; a file in it: dev ${same.dev} ino ${same.ino}`)
+  info('a second file in the same directory has another inode',
+    (write(file + '2', ''), fs.statSync(file + '2', { bigint: true }).ino !== same.ino))
+}
 
 const caseProbe = path.join(root, 'CaseProbe')
 write(caseProbe, '')
@@ -60,8 +77,8 @@ if (nfdReachesNfc) {
   info('realpath of the NFD spelling returns', nfdRealpath)
 }
 
-const tmpReal = fs.realpathSync.native(os.tmpdir())
-info('os.tmpdir() is reached through a link', tmpReal !== os.tmpdir() ? `${os.tmpdir()} -> ${tmpReal}` : false)
+const tmpReal = fs.realpathSync.native(base)
+info('the probe directory is reached through a link', tmpReal !== base ? `${base} -> ${tmpReal}` : false)
 const stat = p => fs.statSync(p, { bigint: true })
 info('dev:ino agree through the link', `${stat(root).ino === stat(fs.realpathSync.native(root)).ino}` +
   ` (ino ${stat(root).ino ? 'nonzero' : 'zero'})`)
@@ -98,6 +115,14 @@ const load = async (userconfig, cwd) => {
   return config.get(KEY)
 }
 
+// the 8.3 spelling of an existing path, from cmd.exe's %~s modifier
+const shortName = (file) => {
+  const out = require('child_process').spawnSync(process.env.ComSpec || 'cmd.exe',
+    ['/d', '/c', 'for', '%I', 'in', `("${file}")`, 'do', '@echo', '%~sI'], { encoding: 'utf8', windowsVerbatimArguments: true, cwd: path.dirname(file) })
+  const line = (out.stdout || '').trim()
+  return out.status === 0 && line && line.toLowerCase() !== file.toLowerCase() ? line : null
+}
+
 const trust = async () => {
   const helperLine = `${KEY}=${path.join(root, 'helper')}\n`
   write(path.join(root, 'home', '.npmrc'), '')
@@ -124,9 +149,28 @@ const trust = async () => {
     const nfdFile = path.join(root, 'Project-café', 'ci.npmrc')
     check('the project file through an NFD spelling is refused', await load(nfdFile, project) === undefined)
   }
-  if (tmpReal !== os.tmpdir()) {
+  if (tmpReal !== base) {
     const viaReal = path.join(fs.realpathSync.native(project), 'ci.npmrc')
     check('the project file through the resolved temp path is refused', await load(viaReal, project) === undefined, viaReal)
+  }
+  // the user's own file, in the home directory, is trusted whatever the
+  // filesystem says about inodes (on some it says zero for every file)
+  write(path.join(root, 'home', '.npmrc'), helperLine)
+  check('control: the user\'s own ~/.npmrc is trusted',
+    await load(path.join(root, 'home', '.npmrc'), project) !== undefined)
+  if (WIN) {
+    // the verbatim spelling of the same file names the same file
+    const verbatim = `\\\\?\\${path.join(project, 'ci.npmrc')}`
+    check('the project file through a \\\\?\\ verbatim spelling is refused',
+      await load(verbatim, project) === undefined, verbatim.replace(root, '<root>'))
+    const slashes = path.join(project, 'ci.npmrc').replace(/\\/g, '/')
+    check('the project file spelled with forward slashes is refused', await load(slashes, project) === undefined)
+    // an 8.3 short name, where the volume has them (FAT always does)
+    const short = shortName(path.join(project, 'ci.npmrc'))
+    info('the 8.3 short name of the project file', short || 'none')
+    if (short && short.toLowerCase() !== path.join(project, 'ci.npmrc').toLowerCase()) {
+      check('the project file through its 8.3 short name is refused', await load(short, project) === undefined, short)
+    }
   }
   if (!WIN) {
     write(path.join(project, '..\\evil', 'npmrc'), helperLine)
@@ -140,6 +184,83 @@ const trust = async () => {
 }
 
 // ---------- the helper runtime ----------
+
+// A helper path that Win32 would read as another file: a trailing space or
+// dot is dropped, a slash after a file name is a directory, `\\?\` turns every
+// normalization off, and a space is where arguments start. Each helper prints
+// a token of its own and appends it to a log, so what ran is known even when
+// the prototype reports a failure. The prototype either refuses the value or
+// runs exactly the file it names; running another file (the decoy that the
+// normalized spelling reaches) is the failure. What it does is recorded as info.
+const verbatim = p => `\\\\?\\${p}`
+const created = []
+const spellings = async (short) => {
+  let n = 0
+  // files: [name, token] under one directory; value: the helper path given;
+  // names: the tokens of the files the value names (none: it must not run)
+  const probe = async (label, files, value, names) => {
+    const dir = path.join(root, 'spellings', String(++n))
+    const log = path.join(dir, 'ran.log')
+    for (const [name, token] of files) {
+      const file = verbatim(path.join(dir, name))
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, `@echo off\r\necho ${token}>>"${log}"\r\necho ${token}\r\n`)
+      created.push(file)
+    }
+    const given = value(dir)
+    const outcome = await getTokenHelperHeader(given, `//spelling/${n}/`, 15000).then(h => `header ${h}`, e => `refused: ${short(e.message)}`)
+    const ran = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean) : []
+    info(label, `${short(JSON.stringify(given))} -> ${outcome}; ran ${ran.length ? ran.join(', ') : 'nothing'}`)
+    const wrong = ran.filter(token => !names.includes(token))
+    check(label, !wrong.length && (!outcome.startsWith('header ') || names.includes(outcome.split(' ').pop())),
+      `${wrong.length ? `ran ${wrong.join(', ')}` : names.length || !ran.length ? 'refused or ran what it names' : 'ran'}`)
+  }
+  const decoy = [['helper.cmd', 'tok-decoy']]
+  const both = (extra) => [...decoy, [extra, 'tok-named']]
+
+  await probe('a .cmd helper in a directory with a space in its name is refused or runs that file',
+    [['with space\\helper.cmd', 'tok-named']], d => path.join(d, 'with space', 'helper.cmd'), ['tok-named'])
+  await probe('a .bat helper in a directory with a space in its name is refused or runs that file',
+    [['with space\\helper.bat', 'tok-named']], d => path.join(d, 'with space', 'helper.bat'), ['tok-named'])
+  await probe('a file followed by an argument is refused and nothing runs',
+    [['helper.cmd', 'tok-decoy']], d => `${path.join(d, 'helper.cmd')} --arg`, [])
+  await probe('a helper path with a trailing space, where only the file without it exists, is refused or runs nothing else',
+    decoy, d => `${path.join(d, 'helper.cmd')} `, [])
+  await probe('a helper path with a trailing dot, where only the file without it exists, is refused or runs nothing else',
+    decoy, d => `${path.join(d, 'helper.cmd')}.`, [])
+  await probe('a helper path with a trailing space, where a file with that name exists beside the decoy, is refused or runs the file it names',
+    both('helper.cmd '), d => `${path.join(d, 'helper.cmd')} `, ['tok-named'])
+  await probe('a helper path with a trailing dot, where a file with that name exists beside the decoy, is refused or runs the file it names',
+    both('helper.cmd.'), d => `${path.join(d, 'helper.cmd')}.`, ['tok-named'])
+  await probe('a helper path with a backslash after the file name is refused or runs nothing',
+    decoy, d => `${path.join(d, 'helper.cmd')}\\`, [])
+  await probe('a helper path with a slash after the file name is refused or runs nothing',
+    decoy, d => `${path.join(d, 'helper.cmd')}/`, [])
+  await probe('a helper path with a trailing space and a slash is refused or runs nothing',
+    decoy, d => `${path.join(d, 'helper.cmd')} /`, [])
+  await probe('a \\\\?\\ verbatim helper path is refused or runs that file',
+    [['helper.cmd', 'tok-named']], d => verbatim(path.join(d, 'helper.cmd')), ['tok-named'])
+  await probe('a \\\\?\\ verbatim helper path with a trailing space is refused or runs the file it names',
+    both('helper.cmd '), d => `${verbatim(path.join(d, 'helper.cmd'))} `, ['tok-named'])
+  await probe('a \\\\?\\ verbatim helper path with a trailing dot is refused or runs the file it names',
+    both('helper.cmd.'), d => `${verbatim(path.join(d, 'helper.cmd'))}.`, ['tok-named'])
+  await probe('a helper path with forward slashes is refused or runs that file',
+    [['helper.cmd', 'tok-named']], d => path.join(d, 'helper.cmd').replace(/\\/g, '/'), ['tok-named'])
+  await probe('a helper path in another letter case is refused or runs that file',
+    [['helper.cmd', 'tok-named']], d => path.join(d, 'HELPER.CMD'), ['tok-named'])
+  await probe('a helper path through an 8.3 short directory name is refused or runs that file',
+    [['a long directory name\\helper.cmd', 'tok-named']], d => {
+      const short8 = shortName(path.join(d, 'a long directory name'))
+      return short8 ? path.join(short8, 'helper.cmd') : path.join(d, 'a long directory name', 'helper.cmd')
+    }, ['tok-named'])
+  for (const file of created) {
+    try {
+      fs.rmSync(file, { force: true })
+    } catch (er) {
+      info('could not remove', `${short(file)}: ${er.code}`)
+    }
+  }
+}
 
 // .cmd helpers go through cmd.exe, which gives meaning to & ^ ! ; ( ) and
 // more: in a directory name each must reach the helper unchanged, start it in
@@ -163,8 +284,14 @@ const windows = async () => {
     const header = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => h, e => e.message)
     const cwd = fs.existsSync(path.join(dir, 'cwd.txt')) ? fs.readFileSync(path.join(dir, 'cwd.txt'), 'utf8') : null
     const injected = [root, dir, path.dirname(dir), process.cwd()].some(d => fs.existsSync(path.join(d, 'injected-marker')))
+    // cmd.exe cannot start in a UNC directory and falls back to the Windows
+    // directory, so on a share only the run is required, and the directory is
+    // recorded
+    if (UNC) {
+      info(`a .cmd helper in "${name}" started in`, cwd === dir ? 'its own directory' : cwd)
+    }
     check(`a .cmd helper in "${name}" runs as itself, in its own directory`,
-      header === 'Bearer tok-cmd' && cwd === dir && !injected, `${header}; cwd ${cwd === dir ? 'ok' : cwd}`)
+      header === 'Bearer tok-cmd' && (UNC || cwd === dir) && !injected, `${header}; cwd ${cwd === dir ? 'ok' : cwd}`)
   }
   for (const name of ['100%done', '%TEMP%']) {
     const helper = path.join(root, 'cmd-refused', name, 'helper.cmd')
@@ -172,6 +299,7 @@ const windows = async () => {
     const outcome = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => `header ${h}`, e => e.message)
     check(`a .cmd helper under "${name}" is refused with a reason`, outcome.includes('contains " or %'), short(outcome))
   }
+  await spellings(short)
   const ps1 = path.join(root, 'ps1', 'helper.ps1')
   write(ps1, 'Write-Output tok\r\n')
   info('a .ps1 helper', await getTokenHelperHeader(ps1, '//ps1/', 15000).then(h => `header ${h}`, e => short(e.message)))

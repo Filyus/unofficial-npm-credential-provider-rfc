@@ -112,6 +112,56 @@ jobs:
         run: node rfc/poc/npm-config-fuzz/spellings.js npm-cli npm-registry-fetch "$RUNNER_TEMP" 500 "$GITHUB_RUN_NUMBER"
       - name: Platform probes
         run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+      # The same probes on a volume that is not the runner's NTFS temp
+      # directory: Windows has filesystems without inode numbers (FAT) and a
+      # network share reports another identity again. The runner has admin
+      # rights; a step that cannot create its volume fails, it never skips.
+      - name: Platform probes on a FAT32 volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP 'probe-fat.vhd'
+          $letter = 'P'
+          $script = Join-Path $env:RUNNER_TEMP 'probe-fat-diskpart.txt'
+          $diskpart = {
+            param($lines)
+            Set-Content -Path $script -Value $lines -Encoding ascii
+            diskpart /s $script
+            if ($LASTEXITCODE -ne 0) { throw "diskpart exited with status $LASTEXITCODE" }
+          }
+          try {
+            & $diskpart @("create vdisk file=`"$vhd`" maximum=128 type=fixed", "select vdisk file=`"$vhd`"", 'attach vdisk',
+              'create partition primary', 'format fs=fat32 quick label=PROBEFAT', "assign letter=$letter")
+            $volume = Get-Volume -DriveLetter $letter
+            if ($volume.FileSystem -ne 'FAT32') { throw "the volume ${letter}: is $($volume.FileSystem), not FAT32" }
+            Write-Host "probes run on ${letter}: $($volume.FileSystem) (label $($volume.FileSystemLabel)), a virtual disk"
+            $env:PROBE_ROOT = "${letter}:\probes"
+            $flags = @(); if ($env:DEPRECATIONS) { $flags += $env:DEPRECATIONS }
+            node @flags rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+            if ($LASTEXITCODE -ne 0) { throw "the probes on FAT32 exited with status $LASTEXITCODE" }
+          } finally {
+            if (Test-Path $vhd) { & $diskpart @("select vdisk file=`"$vhd`"", 'detach vdisk') }
+          }
+      - name: Platform probes on an SMB share
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'probe-smb'
+          $name = 'probeshare'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          try {
+            New-SmbShare -Name $name -Path $dir -FullAccess (whoami) | Out-Null
+            $unc = "\\localhost\$name"
+            if (-not (Test-Path $unc)) { throw "$unc cannot be reached" }
+            $backing = Get-Volume -DriveLetter ($dir.Substring(0, 1))
+            Write-Host "probes run on the SMB share $unc, which serves $dir on $($backing.FileSystem)"
+            $env:PROBE_ROOT = "$unc\probes"
+            $flags = @(); if ($env:DEPRECATIONS) { $flags += $env:DEPRECATIONS }
+            node @flags rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+            if ($LASTEXITCODE -ne 0) { throw "the probes on the SMB share exited with status $LASTEXITCODE" }
+          } finally {
+            if (Get-SmbShare -Name $name -ErrorAction SilentlyContinue) { Remove-SmbShare -Name $name -Force }
+          }
       - name: Every claim's evidence still exists
         run: node rfc/poc/claims/check.js npm-cli npm-registry-fetch
 
