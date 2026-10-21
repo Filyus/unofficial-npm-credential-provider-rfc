@@ -75,7 +75,7 @@ credentialProvider[]=npm-credential-provider-github
 credentialProvider[]=npm:token
 ```
 
-The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Listing `npm:token` last keeps the stored credential for registries the provider does not serve, without the warning the implicit entry draws. The cost against the per-registry form is that a request to `npm.pkg.github.com` this provider cannot answer falls to `npm:token`, which may hold a standing token: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
+The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Listing `npm:token` last keeps the stored credential for registries the provider does not serve, without the warning the implicit entry draws. The cost against the per-registry form is that a request to `npm.pkg.github.com` for a scope this provider answers `not-found` falls to the listed `npm:token`, which may hold a standing token: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
 
 On GHES the line names the instance's own registry URL, and the provider takes the host from an argument, `--host HOSTNAME`, because it has to map the npm host to the host of the GitHub API:
 

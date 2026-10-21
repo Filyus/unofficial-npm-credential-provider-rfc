@@ -65,12 +65,7 @@ The provider is a global chain, not a per-registry list, for three reasons:
 
 **The reference provider's settings.** [The reference provider](providers/corporate-sso/provider.js) reads a JSON file named by a `--config <file>` argument that the lines above leave out; it fails to start without one. The file holds the settings shown here as arguments: `idp` is the `--idp` origin, and `serviceIdentity` names the CI identity file ([CI](#ci)). The rest is for the run: where its store is, which address answers for each host, the clock, the person's scripted answers ([providers/README.md](providers/README.md)).
 
-The chain ends with the implicit `npm:token`. A user with a stored token for a company host does not hit it for the `https:` hosts, since the provider serves them. It does for the `http:` form of a host, which npm treats as answered `url-not-supported`, and npm then warns that it used the stored credential ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). Where that must fail instead, add a per-registry list for the host, which takes it out of the global chain:
-
-```ini
-//npm.corp.example.com/:credentialProvider[]=/opt/corp-npm/bin/corp-npm-credential-provider --idp https://idp.corp.example.com
-//npm-eu.corp.example.com/:credentialProvider[]=/opt/corp-npm/bin/corp-npm-credential-provider --idp https://idp.corp.example.com
-```
+The chain ends with the implicit `npm:token`, which a company host never reaches. The `https:` hosts are served by the provider. The `http:` form of a company host is not: the hello lists the host, so the request fails, naming the provider and the forms it lists, whether or not a token is stored ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). The implicit entry serves only a registry the hello does not list, and since this is the only provider and lists its hosts, npm uses a stored token for such a registry without a warning.
 
 ## Hello
 

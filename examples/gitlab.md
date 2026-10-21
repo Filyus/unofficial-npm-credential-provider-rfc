@@ -216,7 +216,7 @@ The token lasts while the job runs ([job token](https://docs.gitlab.com/ci/jobs/
 - After a 401 the `erase` before it has nothing to delete ([ci-rejection.jsonl](gitlab/ci-rejection.jsonl)).
 - A 403 on a publish sends no erase, and the retry is the same `other` ([ci-forbidden.jsonl](gitlab/ci-forbidden.jsonl)).
 
-**A deploy token in a CI variable** needs no provider: `_authToken=${VAR}` in the user's npmrc is that credential, and a provider that finds neither a job token nor a login answers `not-found`, so the chain falls through to it, with the warning the RFC gives a global chain that declined a registry. The provider reading the variable itself would only copy it, and would have to guess its name and which scopes it has.
+**A deploy token in a CI variable** needs no provider: `_authToken=${VAR}` in the user's npmrc is that credential, and a provider that finds neither a job token nor a login answers `not-found`. After a `not-found` the stored credential is used only where the chain lists `npm:token`, so the CI image adds `credentialProvider[]=npm:token` after the provider's line; the entry then serves the variable's token, with no fallback warning, since the user wrote it down. The provider reading the variable itself would only copy it, and would have to guess its name and which scopes it has.
 
 ## Where it is easy to go wrong
 
