@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","version":"1.5.0","operation":"stage","command":"stage","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"operation-not-supported","message":"Artifactory has no staged publishing for npm"}}}
 {"from":"client","event":"close"}

@@ -19,9 +19,7 @@
         "capabilities": [
           "login",
           "logout",
-          "erase",
-          "auth-challenges",
-          "retry-context"
+          "erase"
         ]
       }
     },

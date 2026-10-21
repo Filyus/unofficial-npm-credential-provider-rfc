@@ -52,7 +52,7 @@ A key and a hello entry exist for each URL form the user uses: a lockfile writte
 ```
 
 - `v`: version 1 only.
-- `capabilities`: `login` and `logout` because the provider implements them (login is `aws sso login`); `erase` because it keeps a token to drop. It does not list `auth-challenges`: CodeArtifact's `WWW-Authenticate` header, if any, is not documented, so the provider never reads `authChallenges`.
+- `capabilities`: `login` and `logout` because the provider implements them (login is `aws sso login`); `erase` because it keeps a token to drop. It announces nothing for `authChallenges` or the retry fields, which npm sends to every provider: CodeArtifact's `WWW-Authenticate` header, if any, is not documented, so the provider never reads `authChallenges`.
 - `registries`: the endpoints named in the provider's own arguments, so npm sends nothing about any other registry ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Entries are prefixes for npm's comparison, not patterns, so a provider cannot list "any CodeArtifact host". The provider's own check can be exact: `registry` is the key's URL, and the path it parses must be exactly `/npm/{repository}/`.
 - The provider sends hello before it starts the AWS CLI or SDK. Python-based AWS tooling is slow to start (about a second, recalled, not measured here), and hello has a 10-second budget ([Timeouts](../phase-2-credential-provider.md#session-lifecycle)).
 

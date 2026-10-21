@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/43/packages/npm/","scope":"@other","package":"lib","operation":"read","command":"ci","interactive":false}}
 {"from":"provider","message":{"Err":{"kind":"not-found","message":"the job token serves only its own project"}}}
 {"from":"client","event":"close"}

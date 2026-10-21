@@ -74,12 +74,12 @@ The project `.npmrc` carries no token: a `_authToken` there would be a standing 
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://gitlab.example.com/api/v4/projects/"]}
+{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://gitlab.example.com/api/v4/projects/"]}
 ```
 
 - `"v":[1]` is the only version this provider speaks.
 - `registries` lists one entry, the `/api/v4/projects/` path on the instance. It matches at a segment boundary, so it covers every project URL, and npm never asks the provider about npmjs.com or any other host, nor about a group or instance URL on this host ([Registry matching](../phase-2-credential-provider.md#registry-matching)). The scheme is `https:`, so an `http:` form of the host is not served.
-- `login` and `logout` because the provider runs the OAuth flow and keeps the refresh token; `erase` because it deletes the deploy tokens it minted when one is rejected; `retry-context` because it uses `httpStatus` on a retry. Capabilities are advisory ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
+- `login` and `logout` because the provider runs the OAuth flow and keeps the refresh token; `erase` because it deletes the deploy tokens it minted when one is rejected; it uses `httpStatus` on a retry without announcing anything, since npm sends the retry fields to every provider. Capabilities are advisory ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
 
 ## Install
 

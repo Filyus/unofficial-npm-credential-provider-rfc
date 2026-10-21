@@ -37,8 +37,6 @@ pub const CAPABILITIES: &[&str] = &[
     "login",
     "logout",
     "erase",
-    "auth-challenges",
-    "retry-context",
 ];
 pub const AUTH_TYPES: &[&str] = &[
     "bearer",

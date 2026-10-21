@@ -77,6 +77,8 @@ credentialProvider[]=npm:token
 
 The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Listing `npm:token` last keeps the stored credential for registries the provider does not serve, without the warning the implicit entry draws. The cost against the per-registry form is that a request to `npm.pkg.github.com` for a scope this provider answers `not-found` falls to the listed `npm:token`, which may hold a standing token: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
 
+The listed entry does not reach a URL form the provider declined on its own host. The provider declines a lockfile URL `http://npm.pkg.github.com/`, since its hello lists only the `https:` form, and the request fails, naming the provider and the form it lists, rather than send the `https:` token over `http:` ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). npm's `//npm.pkg.github.com/` key carries no scheme, so the stored token would otherwise match.
+
 On GHES the line names the instance's own registry URL, and the provider takes the host from an argument, `--host HOSTNAME`, because it has to map the npm host to the host of the GitHub API:
 
 ```ini
@@ -90,15 +92,15 @@ GitHub's GHES page prints the token key with a double slash, `//npm.HOSTNAME//:_
 ## Hello
 
 ```json
-{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase","retry-context"]}
+{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}
 ```
 
 - `v`: protocol version 1.
 - `registries`: the one github.com host. npm matches requests against it itself and sends the provider nothing about other registries. On GHES the entry is the instance's registry URL, built from `--host` and the provider's own `subdomainIsolation` setting (on unless set to `false`): `https://npm.HOSTNAME/` or `https://HOSTNAME/_registry/npm/`, never the bare `https://HOSTNAME/`, which is the web UI and API host. List both forms only if the instance really serves both.
 - `login`, `logout`: the provider stores a pasted token or runs its own device flow, and removes both on logout.
 - `erase`: the provider wants to hear about rejections. It cannot replace a stored token, and the stored token is the credential it hands out, so it keeps it and answers `Ok`; the retry that follows checks the token and answers `other` either way, since the provider has no other credential it would release for that request ([Rejection](#rejection)).
-- `retry-context`: the provider reads `retry` and `httpStatus`.
-- No `auth-challenges`: GitHub sends no `WWW-Authenticate` header on a 401 (probed anonymously on 2026-10-17: an existing package without a token gave a 401 with a JSON body and no such header), so there is nothing to read.
+- The provider reads `retry` and `httpStatus` without announcing anything: npm sends them to every provider.
+- It reads no `authChallenges`: GitHub sends no `WWW-Authenticate` header on a 401 (probed anonymously on 2026-10-17: an existing package without a token gave a 401 with a JSON body and no such header), so there is nothing to read.
 
 On GHES the provider's other calls follow the host too: the device flow at `https://HOSTNAME/login/...`, the REST calls (`GET /user`, `POST /credentials/revoke`) under `https://HOSTNAME/api/v3`. [install-ghes.jsonl](github-packages/install-ghes.jsonl) (subdomain isolation on, `npm.ghes.example.com`) and [install-ghes-no-isolation.jsonl](github-packages/install-ghes-no-isolation.jsonl) (off, `ghes.example.com/_registry/npm/`) each run one session on an instance: the hello names that form only, an install is served, a 401 retry checks the token at `/api/v3/user`, a pasted-token login is checked there too, and logout revokes at `/api/v3/credentials/revoke`. The conformance fake serves the REST API only under that prefix for these runs, so a call to the github.com path fails them.
 

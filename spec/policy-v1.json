@@ -37,9 +37,7 @@
     "capabilities": [
       "login",
       "logout",
-      "erase",
-      "auth-challenges",
-      "retry-context"
+      "erase"
     ],
     "authTypes": [
       "bearer",
@@ -95,6 +93,7 @@
     "noProviderConfigured": "stored-credential-or-anonymous",
     "globalChainAllUrlNotSupported": "stored-credential-or-anonymous-with-warning",
     "globalChainAllUrlNotSupportedOnListedHost": "fail",
+    "listedStoredCredentialOnListedHost": "fail",
     "globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries": true,
     "registryChainAllUrlNotSupported": "fail",
     "registryChainIgnoresStoredCredential": "warn",

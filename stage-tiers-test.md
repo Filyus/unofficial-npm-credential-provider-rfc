@@ -1,6 +1,6 @@
 # Which npmjs.com tokens read `/-/stage`
 
-A live test for the one question the RFC leaves to evidence: which token tiers npmjs.com accepts on the staged-publishing reads. The answer sets a provider's default `stage-read` mapping on npmjs.com ([Operations](phase-2-credential-provider.md#4-operations)); it changes nothing in the protocol. The documentation names no tier: the API lists granular tokens on every `/-/stage` path and documents 401 as the only refusal on the list, and 401 and 404 on the record and the tarball ([API](https://api-docs.npmjs.com/)).
+A live test for the one question the RFC leaves to evidence: which token tiers npmjs.com accepts on the staged-publishing reads. The answer is the evidence for a provider's default `stage-read` mapping on npmjs.com, within the scope tested below (npm 11.19.0, one account, one package, HTTP GETs) ([Operations](phase-2-credential-provider.md#4-operations)); it changes nothing in the protocol. The documentation names no tier: the API lists granular tokens on every `/-/stage` path and documents 401 as the only refusal on the list, and 401 and 404 on the record and the tarball ([API](https://api-docs.npmjs.com/)).
 
 It needs an npmjs.com account and real tokens, so it is run by hand.
 
@@ -70,7 +70,7 @@ Run once, by hand, with `poc/stage-tiers/run.js` (so not re-run by CI, and not r
 
 No response carried `WWW-Authenticate`, and none was a one-time-password challenge.
 
-- **Each token, read-only ones included, was answered 200 on the three reads** (plain HTTP GETs R1–R4 sent from Node's `fetch` with each token; one account, one package, one staged version; the stricter publishing-access setting was not tried). So, for these requests, a provider could answer `stage-read` on npmjs.com with a separate read-only token and no presence check. The `npm stage list`, `view` and `download` commands were not run with T2–T5, so that they work in CI is not shown by this test.
+- **Each token, read-only ones included, was answered 200 on the three reads** (plain HTTP GETs R1–R4 sent from Node's `fetch` with each token; npm 11.19.0; one account, one package, one staged version; the stricter publishing-access setting was not tried). So, for these requests and no others, a provider could answer `stage-read` on npmjs.com with a separate read-only token and no presence check. The `npm stage list`, `view` and `download` commands were not run with T2–T5, so that they work in CI is not shown by this test.
 - **The list is filtered by the account, not by the token:** T5, selected only to Q, still listed P's staged version, while the record and the tarball honoured its selection with 404.
 - **The dist-tag in `publishConfig` was not used:** `npm stage publish` reported staging "with tag latest" although `publishConfig.tag` named another tag. The version was rejected, never approved, so what approval would have done to `latest` was not observed.
 

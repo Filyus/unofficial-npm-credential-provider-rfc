@@ -430,7 +430,7 @@ const start = async (args) => {
   return {
     hello: {
       v: [1],
-      capabilities: ['login', 'logout', 'erase', 'retry-context'],
+      capabilities: ['login', 'logout', 'erase'],
       registries: [`${instance}/api/v4/projects/`],
     },
     handlers: { get: guarded(get), erase: guarded(erase), login: guarded(login), logout: guarded(logout) },

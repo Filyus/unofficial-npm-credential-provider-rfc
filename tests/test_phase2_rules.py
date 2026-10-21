@@ -235,9 +235,35 @@ class ListedHostFallbackTests(unittest.TestCase):
         self.assertEqual(self.chain("https://registry.npmjs.org/", None).result, "stored-credential")
         self.assertEqual(self.chain("https://registry.npmjs.org/", None, stored=False).result, "anonymous")
 
-    def test_a_listed_npm_token_entry_is_not_affected(self):
-        outcome = self.chain("http://registry.example.test/npm/", self.LISTS, answers=["try-next-provider", "npm:token"])
-        self.assertEqual(outcome.result, "stored-credential", "the user put the stored credential in the chain")
+    def test_a_listed_npm_token_after_a_declined_listed_host_fails_too(self):
+        # npm's `//host/path/` key ignores the scheme: the https token would go out over http
+        self.assertEqual(POLICY["fallback"]["listedStoredCredentialOnListedHost"], "fail")
+        registry = "http://registry.example.test/npm/"
+        for stored in (True, False):
+            outcome = self.chain(registry, self.LISTS, answers=["try-next-provider", "npm:token"], stored=stored)
+            self.assertEqual(outcome.result, "fail", stored)
+            self.assertEqual(outcome.warnings, ())
+            self.assertIn("p0 lists https://registry.example.test/npm/", outcome.message)
+        for per_registry in (False, True):
+            providers = [ProviderListing("p0", self.LISTS)]
+            outcome = resolve_chain(["try-next-provider", "npm:token"], per_registry=per_registry, stored_credential=True,
+                                    registry=registry, providers=providers)
+            self.assertEqual(outcome.result, "fail", per_registry)
+
+    def test_a_listed_npm_token_is_unaffected_where_no_earlier_provider_declined_the_host(self):
+        registry = "http://registry.example.test/npm/"
+        # it stands first, or behind a provider that answered not-found or does not list the host
+        self.assertEqual(self.chain(registry, self.LISTS, answers=["npm:token", "try-next-provider"]).result, "stored-credential")
+        self.assertEqual(self.chain(registry, self.LISTS, answers=["try-next-provider-not-found", "npm:token"]).result,
+                         "stored-credential")
+        self.assertEqual(self.chain(registry, ["https://other.example.test/"], answers=["try-next-provider", "npm:token"]).result,
+                         "stored-credential")
+        self.assertEqual(self.chain(registry, None, answers=["try-next-provider", "npm:token"]).result, "stored-credential")
+        # a provider after the entry did not decline anything before it
+        providers = [ProviderListing("p0", ["https://other.example.test/"]), ProviderListing("p1", self.LISTS)]
+        outcome = resolve_chain(["try-next-provider", "npm:token", "try-next-provider"], per_registry=False,
+                                stored_credential=True, registry=registry, providers=providers)
+        self.assertEqual(outcome.result, "stored-credential")
 
     def test_a_provider_that_answered_ok_or_not_found_decides_as_before(self):
         self.assertEqual(self.chain("http://registry.example.test/npm/", self.LISTS, None,

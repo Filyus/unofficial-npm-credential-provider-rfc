@@ -94,6 +94,18 @@ class ChainPolicyTests(unittest.TestCase):
         self.assertEqual(resolve_chain([DECLINE, TOKEN], per_registry=False, stored_credential=False).result, "anonymous")
         self.assertEqual(resolve_chain([DECLINE, TOKEN], per_registry=False, stored_credential=True).warnings, ())
 
+    def test_listed_stored_credential_on_listed_host(self):
+        # an earlier provider declined the http form of the https host its hello lists
+        from tests.protocol_model import ProviderListing
+
+        providers = [ProviderListing("p0", ["https://registry.example.test/"])]
+        results = {
+            stored: resolve_chain([DECLINE, TOKEN], per_registry=False, stored_credential=stored,
+                                  registry="http://registry.example.test/", providers=providers)
+            for stored in (True, False)
+        }
+        self.assert_policy("listedStoredCredentialOnListedHost", results)
+
     def test_implicit_npm_token_is_not_consulted_after_a_not_found(self):
         self.assertEqual(
             POLICY["chain"]["implicitStoredCredentialEntry"],

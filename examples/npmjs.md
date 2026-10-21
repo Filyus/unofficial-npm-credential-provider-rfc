@@ -59,14 +59,14 @@ Because the chain is asked about every registry, this provider lists `registries
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://registry.npmjs.org/"]}
+{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}
 ```
 
 - `v`: only version 1.
 - `login`, `logout`: the provider runs npm's web login itself and revokes a session token on logout.
 - `erase`: without it npm sends no erase, and a rejected token is never reported to the provider.
-- `retry-context`: the provider reads `retry` and `httpStatus`, to tell a 401 from a 403.
-- No `auth-challenges`: npmjs.com sent no `WWW-Authenticate` on any `/-/stage` read in the live test, and npm handles the `otp` and `ipaddress` challenges itself ([erase table](../phase-2-credential-provider.md#erase-a-credential-was-rejected)), so the field would carry nothing the provider uses.
+- The provider reads `retry` and `httpStatus`, to tell a 401 from a 403, and announces nothing for them: npm sends them to every provider.
+- It reads no `authChallenges`: npmjs.com sent no `WWW-Authenticate` on any `/-/stage` read in the live test, and npm handles the `otp` and `ipaddress` challenges itself ([erase table](../phase-2-credential-provider.md#erase-a-credential-was-rejected)), so the field would carry nothing the provider uses.
 - `registries`: the `https:` form only. npm then answers `url-not-supported` for the `http:` form on its own, and sends the provider nothing about any other registry, whether the provider is in a global chain or a per-registry list. A provider still answers it itself, from `registry` alone, in `get`, `erase`, `login` and `logout` (no transcript shows it, because npm never sends such a request: the conformance harness does, to every provider and every kind).
 
 ## Install

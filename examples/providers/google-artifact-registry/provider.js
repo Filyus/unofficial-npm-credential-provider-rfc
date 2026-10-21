@@ -42,7 +42,7 @@ const path = require('node:path')
 const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext, plain } = require('../lib/context.js')
 
-const CAPABILITIES = ['erase', 'login', 'logout', 'retry-context']
+const CAPABILITIES = ['erase', 'login', 'logout']
 const CLIENT_ID = 'example-gar-provider-client'
 const EXCHANGE_GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange'
 const CLOUD_PLATFORM = 'https://www.googleapis.com/auth/cloud-platform'

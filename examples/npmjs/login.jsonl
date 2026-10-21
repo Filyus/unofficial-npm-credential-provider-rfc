@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://registry.npmjs.org/","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"login"}}}
 {"from":"client","event":"close"}

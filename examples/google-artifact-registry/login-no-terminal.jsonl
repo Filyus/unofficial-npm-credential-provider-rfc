@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout","retry-context"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"There is no terminal to show the sign-in on, so no sign-in was started. Nothing was stored. Run npm login from a terminal."}}}
 {"from":"client","event":"close"}

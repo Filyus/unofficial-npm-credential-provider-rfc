@@ -331,7 +331,7 @@ const start = async (args) => {
   }
 
   return {
-    hello: { v: [1], registries: hosts.registries, capabilities: ['login', 'logout', 'erase', 'retry-context'] },
+    hello: { v: [1], registries: hosts.registries, capabilities: ['login', 'logout', 'erase'] },
     handlers: { get: guarded(get), erase: guarded(erase), login: guarded(login), logout: guarded(logout) },
   }
 }

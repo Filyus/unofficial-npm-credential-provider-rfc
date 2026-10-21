@@ -820,7 +820,10 @@ def resolve_chain(
     hello lists the registry's host in any form: that is a URL form the
     provider declined, so the request fails, naming the provider and the forms
     it lists. Elsewhere the fallback warns, except where every provider lists
-    its registries and none lists this host: no provider stands behind it."""
+    its registries and none lists this host: no provider stands behind it.
+    A listed `npm:token` follows the same rule: where an earlier provider
+    answered url-not-supported for a registry whose host its hello lists, the
+    entry sends no stored credential and the request fails the same way."""
     if oidc_token:
         # a token from a successful trusted-publishing exchange: no provider is
         # asked, and it is not a stored credential, so nothing is "ignored"
@@ -837,14 +840,31 @@ def resolve_chain(
         # no provider configured for the registry: what npm does today
         return done("stored-credential" if stored_credential else "anonymous")
     not_found = False
+    declined_before: list[ProviderListing] = []
+    provider_index = 0
     for index, answer in enumerate(entries):
         if answer == STORED_CREDENTIAL_ENTRY:
+            if registry is not None and providers is not None:
+                # a stored credential is never sent to a URL form a provider
+                # declined on a host its hello lists, listed or implicit
+                forms = [(provider.name, listed_forms(provider.registries, registry)) for provider in declined_before]
+                forms = [(name, listing) for name, listing in forms if listing]
+                if forms:
+                    named = "; ".join(f"{name} lists {', '.join(listing)}" for name, listing in forms)
+                    return ChainOutcome(
+                        GLOBAL_CHAIN_LISTED_HOST_OUTCOME, index, (),
+                        f"{registry} is a URL form a provider declined on a host its hello lists, "
+                        f"so npm sends no stored credential: {named}",
+                    )
             if stored_credential:
                 return done("stored-credential", index)
             continue
+        provider_index += 1
         if answer == "ok":
             return done("ok", index)
         if answer == "try-next-provider":
+            if providers is not None and provider_index <= len(providers):
+                declined_before.append(providers[provider_index - 1])
             continue
         if answer == "try-next-provider-not-found":
             not_found = True

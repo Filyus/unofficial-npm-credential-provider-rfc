@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"the person did not answer within 4 minutes 30 seconds"}}}
 {"from":"client","event":"close"}

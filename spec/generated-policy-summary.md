@@ -13,7 +13,7 @@ Source: `spec/policy-v1.json`.
 | Operations | `read`, `publish`, `stage`, `stage-read`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access`, `trust`, `stage-reject`, `account` |
 | Operations that require `version` | `publish`, `stage`, `stage-reject` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
-| Capabilities | `login`, `logout`, `erase`, `auth-challenges`, `retry-context` |
+| Capabilities | `login`, `logout`, `erase` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |
@@ -61,6 +61,7 @@ Source: `spec/policy-v1.json`.
 | `noProviderConfigured` | `stored-credential-or-anonymous` |
 | `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous-with-warning` |
 | `globalChainAllUrlNotSupportedOnListedHost` | `fail` |
+| `listedStoredCredentialOnListedHost` | `fail` |
 | `globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries` | `True` |
 | `registryChainAllUrlNotSupported` | `fail` |
 | `registryChainIgnoresStoredCredential` | `warn` |

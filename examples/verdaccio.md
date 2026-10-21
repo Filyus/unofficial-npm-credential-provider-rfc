@@ -71,14 +71,14 @@ It also needs `--config <file>`, which holds its store and where it keeps what i
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase","retry-context"],"registries":["https://npm.example.test/verdaccio/"]}
+{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.example.test/verdaccio/"]}
 ```
 
 - `v`: the protocol version.
 - `login`, `logout`: the provider logs in with a password and removes its tokens at logout.
 - `erase`: it keeps in-memory copies and wants to be told when one is rejected.
-- `retry-context`: it reads `retry` and `httpStatus`, which it needs to tell a read-only refusal from a revoked token.
-- `auth-challenges` is left out. Every Verdaccio 401 that is not an OTP demand carries a bare `WWW-Authenticate: Bearer`, with no realm or error code ([final.ts](https://github.com/verdaccio/verdaccio/blob/8857b15ac2d33969b3aea8f3e77cd5020161228f/packages/middleware/src/middlewares/final.ts)), so the challenges tell it nothing. npm may still send them; the field is advisory ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
+- It reads `retry` and `httpStatus`, which it needs to tell a read-only refusal from a revoked token, and announces nothing for them: npm sends them to every provider.
+- It reads no `authChallenges`. Every Verdaccio 401 that is not an OTP demand carries a bare `WWW-Authenticate: Bearer`, with no realm or error code ([final.ts](https://github.com/verdaccio/verdaccio/blob/8857b15ac2d33969b3aea8f3e77cd5020161228f/packages/middleware/src/middlewares/final.ts)), so the challenges tell it nothing. npm sends them anyway and the provider ignores them ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
 - `registries`: the configured base, with its scheme. npm then sends the provider nothing about another registry, and a request for the `http:` form of this one is answered `url-not-supported` by npm itself.
 
 ## Install
