@@ -1,4 +1,4 @@
-From 5c1b1c0bc229ea5c1f924acedb71f5869eba9016 Mon Sep 17 00:00:00 2001
+From de1d74f543c846356180d151a4df4cfa88e36a75 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -37,9 +37,9 @@ Prototype for the credential provider RFC discussed in npm/rfcs#850.
  README.md            |   64 ++
  lib/auth.js          |   25 +-
  lib/index.js         |  142 +++-
- lib/token-helper.js  |  462 +++++++++++++
- test/token-helper.js | 1508 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 2183 insertions(+), 18 deletions(-)
+ lib/token-helper.js  |  492 ++++++++++++++
+ test/token-helper.js | 1533 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 2238 insertions(+), 18 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
@@ -386,10 +386,10 @@ index 91d450f..86d32aa 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..ea66c49
+index 0000000..42edf04
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,492 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -469,6 +469,12 @@ index 0000000..ea66c49
 +const reason = (err) => {
 +  if (err.signal) {
 +    return `was killed by ${err.signal}`
++  }
++  if (err.code === 127 || err.code === 9009) {
++    // a shell's and cmd.exe's status for a command that was not found
++    return `exited with status ${err.code}, which a shell gives when a command it runs is not found; ` +
++      'npm takes the node_modules/.bin directories it added for a script out of the helper\'s PATH, ' +
++      'so a tool installed in a project has to be called by its absolute path'
 +  }
 +  if (typeof err.code === 'number') {
 +    return `exited with status ${err.code}`
@@ -631,16 +637,40 @@ index 0000000..ea66c49
 +const NPM_SET =
 +  /^(npm_config_.*|node_options|editor|node_env|color|init_cwd|node|npm_execpath|npm_node_execpath|npm_command)$/i
 +// The helper is an absolute path, but a helper that is a script calls its tools
-+// by name; when npm runs inside `npm run`, PATH leads with each
-+// node_modules/.bin up the tree and npm's node-gyp-bin, so a dependency could
-+// choose those tools. They are taken out of PATH, which is otherwise kept.
-+const SCRIPT_PATH = /[\\/]node_modules[\\/]\.bin[\\/]?$|[\\/]node-gyp-bin[\\/]?$/i
-+const withoutScriptPaths = (value, delimiter = path.delimiter) =>
-+  value.split(delimiter).filter((entry) => !SCRIPT_PATH.test(entry)).join(delimiter)
-+const helperEnv = (env, delimiter) =>
++// by name. When npm runs inside `npm run`, @npmcli/run-script puts each
++// node_modules/.bin from the package up to the root, then its own node-gyp-bin,
++// in front of PATH. A dependency's bin is linked there even when its install
++// scripts never ran (npm 12's default, or --ignore-scripts), so it could be the
++// `aws` a helper runs. Only what npm added is taken out: that leading block, up
++// to run-script's node-gyp-bin (a nested run repeats it), and the
++// node_modules/.bin of the working directory and its parents, which another
++// package manager's runner puts there. A node_modules/.bin the user put on PATH
++// anywhere else stays.
++const BIN = /[\\/]node_modules[\\/]\.bin[\\/]?$/i
++const RUN_SCRIPT_GYP = /[\\/]@npmcli[\\/]run-script[\\/]lib[\\/]node-gyp-bin[\\/]?$/i
++const withoutScriptPaths = (value, delimiter = path.delimiter, cwd = process.cwd()) => {
++  const paths = delimiter === ';' ? path.win32 : path.posix
++  const key = (entry) => {
++    const resolved = paths.resolve(entry)
++    return paths === path.win32 ? resolved.toLowerCase() : resolved
++  }
++  const ancestors = new Set()
++  for (let dir = paths.resolve(cwd); ; dir = paths.dirname(dir)) {
++    ancestors.add(key(paths.join(dir, 'node_modules', '.bin')))
++    if (paths.dirname(dir) === dir) {
++      break
++    }
++  }
++  const entries = value.split(delimiter)
++  const block = entries.findLastIndex((entry) => RUN_SCRIPT_GYP.test(entry))
++  return entries.filter((entry, i) =>
++    !(i <= block && (BIN.test(entry) || RUN_SCRIPT_GYP.test(entry))) &&
++    !(entry && ancestors.has(key(entry)))).join(delimiter)
++}
++const helperEnv = (env, delimiter, cwd) =>
 +  Object.fromEntries(Object.entries(env)
 +    .filter(([name]) => !NPM_SET.test(name))
-+    .map(([name, value]) => [name, /^path$/i.test(name) ? withoutScriptPaths(value, delimiter) : value]))
++    .map(([name, value]) => [name, /^path$/i.test(name) ? withoutScriptPaths(value, delimiter, cwd) : value]))
 +
 +// Stops a helper that outlived its deadline, or that printed too much. SIGTERM
 +// first, so a helper that cleans up can; SIGKILL if it ignores that. Windows
@@ -854,10 +884,10 @@ index 0000000..ea66c49
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..f4a9b19
+index 0000000..0c23400
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1508 @@
+@@ -0,0 +1,1533 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -1429,12 +1459,37 @@ index 0000000..f4a9b19
 +  t.same(helperEnv({ ...Object.fromEntries(dropped.map(name => [name, 'x'])), ...kept }), kept)
 +})
 +
-+t.test('a helper\'s PATH loses the directories npm prepends for a script', async t => {
-+  const posix = ['/repo/node_modules/.bin', '/repo/sub/node_modules/.bin/', '/usr/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin', '/usr/bin', '/opt/node_modules.bin']
-+  t.same(helperEnv({ PATH: posix.join(':') }, ':'), { PATH: '/usr/bin:/opt/node_modules.bin' })
-+  const windows = ['C:\\repo\\node_modules\\.bin', 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin']
-+  t.same(helperEnv({ Path: windows.join(';') }, ';'), { Path: 'C:\\Windows\\System32' }, 'Windows spells it Path')
-+  t.same(helperEnv({ PATHEXT: '.COM;.EXE' }, ';'), { PATHEXT: '.COM;.EXE' }, 'only PATH itself is filtered')
++t.test('a helper\'s PATH loses the directories npm prepends for a script, and only those', async t => {
++  const gyp = '/usr/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin'
++  const pathOf = (entries, cwd) => helperEnv({ PATH: entries.join(':') }, ':', cwd).PATH.split(':')
++  // what run-script builds for a script in /repo/sub, before the user's own PATH
++  t.same(pathOf(['/repo/sub/node_modules/.bin', '/repo/node_modules/.bin', '/node_modules/.bin', gyp,
++    '/home/u/.tools/node_modules/.bin', '/usr/bin'], '/repo/sub'),
++  ['/home/u/.tools/node_modules/.bin', '/usr/bin'], 'the user\'s own node_modules/.bin stays')
++  t.same(pathOf(['/a/node_modules/.bin', gyp, '/b/node_modules/.bin/', gyp, '/usr/bin'], '/elsewhere'),
++    ['/usr/bin'], 'a nested run repeats the block, wherever the script moved to')
++  t.same(pathOf(['/home/u/.npm/_npx/0a1b/node_modules/.bin', '/usr/local/bin', '/repo/node_modules/.bin', gyp,
++    '/usr/bin'], '/repo'), ['/usr/local/bin', '/usr/bin'], 'npm exec\'s cache goes, the global bin it adds stays')
++  t.same(pathOf(['/repo/node_modules/.bin', '/usr/bin', '/home/u/.tools/node_modules/.bin', '/opt/node_modules.bin'],
++    '/repo/pkg'), ['/usr/bin', '/home/u/.tools/node_modules/.bin', '/opt/node_modules.bin'],
++  'another runner\'s block is found through the working directory and its parents')
++  t.same(pathOf(['/usr/bin', '/srv/node_modules/.bin'], '/repo'), ['/usr/bin', '/srv/node_modules/.bin'],
++    'outside a script nothing is taken out')
++  const windows = ['C:\\Repo\\node_modules\\.bin', 'C:\\Windows\\System32',
++    'C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin',
++    'D:\\tools\\node_modules\\.bin']
++  t.same(helperEnv({ Path: windows.join(';') }, ';', 'c:\\repo'), { Path: 'C:\\Windows\\System32;D:\\tools\\node_modules\\.bin' },
++    'Windows spells it Path and compares without case')
++  t.same(helperEnv({ Path: 'C:\\Windows;C:\\Repo\\node_modules\\.bin' }, ';', 'c:\\repo\\pkg'), { Path: 'C:\\Windows' },
++    'a parent\'s node_modules/.bin spelled in another case is the same directory on Windows')
++  t.same(helperEnv({ PATHEXT: '.COM;.EXE' }, ';', 'c:\\repo'), { PATHEXT: '.COM;.EXE' }, 'only PATH itself is filtered')
++  t.same(helperEnv({ PATH: ':/usr/bin' }, ':', '/repo'), { PATH: ':/usr/bin' }, 'an empty entry is left as it was')
++})
++
++t.test('a helper that could not find a command says why the tool may be missing', async t => {
++  t.match(reason({ code: 127 }), /status 127.*not found.*node_modules\/\.bin.*absolute path/)
++  t.match(reason({ code: 9009 }), /status 9009/)
++  t.equal(reason({ code: 126 }), 'exited with status 126')
 +})
 +
 +t.test('empty output fails the request', async t => {
