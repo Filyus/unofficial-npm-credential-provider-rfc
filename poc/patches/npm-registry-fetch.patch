@@ -1,4 +1,4 @@
-From de1d74f543c846356180d151a4df4cfa88e36a75 Mon Sep 17 00:00:00 2001
+From 391c9bfa0ac6e9db9168f96390a45f05b34f7e7e Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat: add tokenHelper, compatible with pnpm
@@ -18,7 +18,8 @@ More than 1 MiB of output also ends it. Every failure, including a spawn
 that throws, rejects with ETOKENHELPER and a cause of only { code, signal }.
 stderr is logged as warnings with the helper's own credential, as it is
 and as JSON, a shell's quotes and a URL write it, and anything that looks like
-one masked. A body failure or an abort while the helper
+one masked. An error response to a request that carried the credential
+has it hidden in the same forms from its message, body and headers. A body failure or an abort while the helper
 runs rejects the request without waiting for it. On Windows a .cmd/.bat
 helper runs in its own directory and a path containing `"` or `%` is
 refused.
@@ -34,20 +35,20 @@ own, since only the caller knows which config file a value came from.
 
 Prototype for the credential provider RFC discussed in npm/rfcs#850.
 ---
- README.md            |   64 ++
+ README.md            |   67 ++
  lib/auth.js          |   25 +-
- lib/index.js         |  142 +++-
- lib/token-helper.js  |  492 ++++++++++++++
- test/token-helper.js | 1533 ++++++++++++++++++++++++++++++++++++++++++
- 5 files changed, 2238 insertions(+), 18 deletions(-)
+ lib/index.js         |  148 +++-
+ lib/token-helper.js  |  526 ++++++++++++++
+ test/token-helper.js | 1607 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 2355 insertions(+), 18 deletions(-)
  create mode 100644 lib/token-helper.js
  create mode 100644 test/token-helper.js
 
 diff --git a/README.md b/README.md
-index f474cdc..0175b88 100644
+index f474cdc..b80b6ba 100644
 --- a/README.md
 +++ b/README.md
-@@ -589,6 +589,70 @@ Can be scoped to a registry by using a "nerf dart" for that registry. That is:
+@@ -589,6 +589,73 @@ Can be scoped to a registry by using a "nerf dart" for that registry. That is:
  }
  ```
  
@@ -81,7 +82,10 @@ index f474cdc..0175b88 100644
 +never the helper's output. Lines the helper writes to stderr are logged as
 +`token-helper` warnings, with the helper's own credential and anything that
 +looks like a credential (`Bearer …`, `Basic …`, `token=…`, `"password": "…"`)
-+masked. A request whose `opts.signal` aborts, or whose body fails, while the
++masked. If the registry answers a request that carried the credential with an
++error, the credential is hidden in the same forms (as is, JSON-escaped,
++shell-quoted, percent-encoded) from the error's `message`, `body` and `headers`,
++so a registry that echoes the `Authorization` header does not get it printed. A request whose `opts.signal` aborts, or whose body fails, while the
 +helper runs is rejected without waiting for it; the helper itself keeps
 +running, and its result is still cached for the requests that follow. Requests with `opts.offline`
 +make no network request and do not run the helper.
@@ -186,7 +190,7 @@ index 9270025..c37bf33 100644
      } else if (auth) {
        this.auth = auth
 diff --git a/lib/index.js b/lib/index.js
-index 91d450f..86d32aa 100644
+index 91d450f..411121b 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -3,6 +3,9 @@
@@ -194,7 +198,7 @@ index 91d450f..86d32aa 100644
  const checkResponse = require('./check-response.js')
  const getAuth = require('./auth.js')
 +const getTokenHelperHeader = require('./token-helper.js')
-+const { mayCarryCredential } = getTokenHelperHeader
++const { mayCarryCredential, redactError } = getTokenHelperHeader
 +const { log } = require('proc-log')
  const fetch = require('make-fetch-happen')
  const JSONStream = require('./json-stream')
@@ -313,14 +317,27 @@ index 91d450f..86d32aa 100644
 +  }
 +
 +  const doFetch = async fetchBody => {
-+    const p = (carriesHelperCredential
++    const checked = (carriesHelperCredential
 +      ? sendHelped(uri, headers, method, fetchBody)
 +      : sendOnce(uri, headers, method, fetchBody, false)
 +    ).then(res => checkResponse({
        method,
        uri,
        res,
-@@ -164,7 +217,62 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+@@ -140,6 +193,12 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+       auth,
+       opts,
+     }))
++    // a registry that echoes the credential in an error does not get it shown
++    const p = carriesHelperCredential
++      ? checked.catch(er => {
++        throw redactError(er, headers.authorization)
++      })
++      : checked
+ 
+     if (typeof opts.otpPrompt === 'function') {
+       return p.catch(async er => {
+@@ -164,7 +223,62 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
      }
    }
  
@@ -386,10 +403,10 @@ index 91d450f..86d32aa 100644
  module.exports.getAuth = getAuth
 diff --git a/lib/token-helper.js b/lib/token-helper.js
 new file mode 100644
-index 0000000..42edf04
+index 0000000..dc079da
 --- /dev/null
 +++ b/lib/token-helper.js
-@@ -0,0 +1,492 @@
+@@ -0,0 +1,526 @@
 +'use strict'
 +
 +const { execFile } = require('child_process')
@@ -565,6 +582,39 @@ index 0000000..42edf04
 +    text = text.split(secret).join('***')
 +  }
 +  return text
++}
++
++// A registry may echo the credential it was sent in an error body or a header,
++// and npm prints and logs the error. The header npm sent on the request is
++// known exactly, so it is hidden, in the forms scrub() knows, from the fields
++// of an HTTP error that are shown: the message, the body (parsed or as bytes)
++// and the headers. The error keeps its class and its other fields.
++const redact = (value, authorization) => {
++  if (typeof value === 'string') {
++    return scrub(value, authorization)
++  }
++  if (Buffer.isBuffer(value)) {
++    const text = value.toString('utf8')
++    const hidden = scrub(text, authorization)
++    return hidden === text ? value : Buffer.from(hidden)
++  }
++  if (Array.isArray(value)) {
++    return value.map(item => redact(item, authorization))
++  }
++  if (value && typeof value === 'object') {
++    return Object.fromEntries(Object.entries(value)
++      .map(([key, item]) => [scrub(key, authorization), redact(item, authorization)]))
++  }
++  return value
++}
++
++const redactError = (er, authorization) => {
++  for (const field of ['message', 'body', 'headers']) {
++    if (er && er[field] !== undefined) {
++      er[field] = redact(er[field], authorization)
++    }
++  }
++  return er
 +}
 +
 +// mask() hides credentials the helper did not print but may be echoing, such
@@ -876,6 +926,7 @@ index 0000000..42edf04
 +module.exports.reason = reason
 +module.exports.mask = mask
 +module.exports.scrub = scrub
++module.exports.redactError = redactError
 +module.exports.helperEnv = helperEnv
 +module.exports.killTree = killTree
 +module.exports.run = run
@@ -884,10 +935,10 @@ index 0000000..42edf04
 +module.exports.TIMEOUT = TIMEOUT
 diff --git a/test/token-helper.js b/test/token-helper.js
 new file mode 100644
-index 0000000..0c23400
+index 0000000..04c987c
 --- /dev/null
 +++ b/test/token-helper.js
-@@ -0,0 +1,1533 @@
+@@ -0,0 +1,1607 @@
 +'use strict'
 +
 +const EventEmitter = require('events')
@@ -2420,6 +2471,80 @@ index 0000000..0c23400
 +  await recorded.json('/pkg', { ...OPTS, registry: 'http://[::1]/npm/', tokenHelpers: { '//[::1]/npm/': helper } })
 +  t.equal(calls[0].uri, 'http://[::1]/npm/pkg')
 +  t.equal(calls[0].headers.authorization, 'Bearer s3cret')
++})
++
++// A registry that echoes the Authorization it was sent in an error. The
++// helper's credential is known exactly, so what npm shows or logs of the error
++// (message, body, headers) does not have it, in the forms stderr masking hides.
++const ECHOED = 's3cr"et+/&\\z9'
++const ECHOED_FORMS = {
++  raw: ECHOED,
++  json: JSON.stringify(ECHOED).slice(1, -1),
++  percent: encodeURIComponent(ECHOED),
++}
++const shown = (value) => [JSON.stringify(value), String(value)].join('\n')
++const leaks = (value) => {
++  const text = shown(value)
++  return Object.entries(ECHOED_FORMS)
++    .filter(([, form]) => text.includes(form) || text.includes(JSON.stringify(form).slice(1, -1)))
++    .map(([name]) => name)
++}
++const failing = async (t, reply, opts = {}) => {
++  const helper = makeHelper(t, print(ECHOED))
++  const logs = logsOf(t)
++  tnock(t, 'https://helper.registry').get('/npm/pkg').reply(...reply)
++  const er = await fetch.json('/pkg', { ...OPTS, tokenHelpers: { [REG_KEY]: helper }, ...opts }).catch(e => e)
++  return { er, logs }
++}
++
++t.test('an error body that echoes the credential raw, JSON-escaped or percent-encoded does not show it', async t => {
++  const { er, logs } = await failing(t, [500, {
++    error: `bad credential ${ECHOED_FORMS.raw}`,
++    request: { authorization: `Bearer ${ECHOED_FORMS.json}`, [ECHOED_FORMS.percent]: true },
++    seen: [`token=${ECHOED_FORMS.percent}`, 7, null],
++  }])
++  t.equal(er.statusCode, 500)
++  t.equal(er.message, '500 Internal Server Error - GET https://helper.registry/npm/pkg - bad credential ***')
++  t.same(er.body, {
++    error: 'bad credential ***',
++    request: { authorization: '***', '***': true },
++    seen: ['token=***', 7, null],
++  })
++  t.same(leaks({ message: er.message, body: er.body, headers: er.headers, logs }), [])
++  t.equal(er.name, 'HttpErrorGeneral', 'it is still the same error')
++})
++
++t.test('a header that echoes the credential, and the message that quotes it, do not show it', async t => {
++  const { er, logs } = await failing(t, [401, { error: 'no' }, {
++    'www-authenticate': `Bearer error="invalid_token", error_description="${ECHOED_FORMS.raw}"`,
++    'x-debug': `Authorization: Bearer ${ECHOED_FORMS.raw}`,
++    'x-debug-url': ECHOED_FORMS.percent,
++  }])
++  t.equal(er.name, 'HttpErrorAuthUnknown')
++  t.equal(er.message, 'Unable to authenticate, need: Bearer error="invalid_token", error_description="***"')
++  t.same(er.headers['www-authenticate'], ['Bearer error="invalid_token", error_description="***"'])
++  t.same(er.headers['x-debug'], ['Authorization: ***'])
++  t.same(er.headers['x-debug-url'], ['***'])
++  t.same(leaks({ message: er.message, body: er.body, headers: er.headers, logs }), [])
++})
++
++t.test('a body that is not JSON, as bytes, does not show the credential either', async t => {
++  const { er } = await failing(t, [502, `<pre>Authorization: Bearer ${ECHOED_FORMS.raw} (${ECHOED_FORMS.percent})</pre>`])
++  t.ok(Buffer.isBuffer(er.body))
++  t.equal(er.body.toString(), '<pre>Authorization: *** (***)</pre>')
++  t.same(leaks({ message: er.message, body: er.body.toString(), headers: er.headers }), [])
++})
++
++t.test('a body that does not have the credential is the same object', async t => {
++  const { er } = await failing(t, [502, Buffer.from([0xff, 0xfe, 0x00])])
++  t.same(er.body, Buffer.from([0xff, 0xfe, 0x00]))
++})
++
++t.test('an error of a request without a helper credential is not touched', async t => {
++  tnock(t, 'https://helper.registry').get('/npm/pkg').reply(500, { error: `bad ${ECHOED}` })
++  const er = await fetch.json('/pkg', { ...OPTS, [`${REG_KEY}:_authToken`]: ECHOED }).catch(e => e)
++  t.ok(er.message.endsWith(`- bad ${ECHOED}`), 'a stored token is not the helper\'s credential')
++  t.same(er.body, { error: `bad ${ECHOED}` })
 +})
 -- 
 2.52.0.windows.1
