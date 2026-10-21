@@ -637,8 +637,7 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Auth {
     Bearer {
         token: Secret,
@@ -649,10 +648,39 @@ pub enum Auth {
     },
     /// An `auth.type` this build does not know, sent by a newer provider: a
     /// well-formed name (`is_identifier`) it has no variant for. npm has
-    /// nothing it can send, so a client fails the request as an `other` answer;
-    /// it is never written.
-    #[serde(skip_serializing)]
+    /// nothing it can send, so a client fails the request as an `other` answer.
+    /// It is written back as `{"type": <name>}`, which reads as itself, so a
+    /// message the crate holds always survives its writer and reader.
     Unknown(String),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum KnownAuthRef<'a> {
+    Bearer {
+        token: &'a Secret,
+    },
+    Basic {
+        username: &'a str,
+        password: &'a Secret,
+    },
+}
+
+impl Serialize for Auth {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::Bearer { token } => KnownAuthRef::Bearer { token }.serialize(serializer),
+            Self::Basic { username, password } => {
+                KnownAuthRef::Basic { username, password }.serialize(serializer)
+            }
+            Self::Unknown(name) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("type", name)?;
+                map.end()
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1859,6 +1887,11 @@ mod tests {
             panic!("an Ok")
         };
         assert_eq!(ok.auth, Some(Auth::Unknown("digest".into())));
+        // what the crate reads it writes back, and reads again as the same value
+        let written = serde_json::to_string(&ok.auth).unwrap();
+        assert_eq!(written, r#"{"type":"digest"}"#);
+        let back: Option<Auth> = serde_json::from_str(&written).unwrap();
+        assert_eq!(back, ok.auth);
         ok.validate_for(&RequestKind::Get).unwrap();
         for bad in [
             r#"{"type":"Digest"}"#,
