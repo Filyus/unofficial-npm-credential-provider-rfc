@@ -1,0 +1,37 @@
+# Runs the Verdaccio provider against the Verdaccio versions npm serves now
+# under the `latest` and `next-7` tags, not the ones conformance.yml pins.
+# The pinned run checks this repository's code; this one catches Verdaccio
+# changing under it, and says which version it got.
+name: verdaccio-latest
+
+on:
+  schedule:
+    - cron: '50 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verdaccio-latest:
+    name: verdaccio provider against verdaccio@${{ matrix.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [latest, next-7]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: resolve verdaccio@${{ matrix.tag }}
+        id: resolve
+        run: |
+          version=$(npm view "verdaccio@${{ matrix.tag }}" version)
+          test -n "$version"
+          echo "verdaccio@${{ matrix.tag }} is $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: provider against verdaccio ${{ steps.resolve.outputs.version }}
+        run: node examples/providers/live/verdaccio.js --version ${{ steps.resolve.outputs.version }}

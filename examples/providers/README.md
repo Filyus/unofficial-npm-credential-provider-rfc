@@ -120,6 +120,8 @@ Each scenario that can run against a real server runs twice, once on the fake as
 
 A scenario that cannot run against a real server is listed in [`live/verdaccio-skips.json`](live/verdaccio-skips.json) with its reason, and the run prints the list; a scenario neither run nor listed fails it, and so does a listing of a scenario that does not exist. The reasons are in [the Verdaccio page](../verdaccio.md#against-a-real-verdaccio): the 2FA scenarios need a TOTP enrolment, one scenario a server error and one a server that never answers, and two the 7.x staging flag, which 6.10.6 does not have. CI runs the job for 6.10.6 and for 7.0.0-next-7.31 ([`conformance.yml`](../../.github/workflows/conformance.yml), `verdaccio-live`).
 
+Two workflows run it. `conformance.yml` runs the pinned versions above on every push, which checks this repository's code against a server that does not move. [`verdaccio-latest.yml`](../../.github/workflows/verdaccio-latest.yml) runs nightly, and on demand, against what npm serves under the `latest` and `next-7` tags, and prints the exact version it resolved: a failure there with the pinned run green means Verdaccio changed, and the version it names is where.
+
 What the live run found on its first day, and fixed:
 
 - the login (above), in the provider and in the fake;
