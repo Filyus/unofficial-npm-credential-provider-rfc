@@ -557,7 +557,7 @@ const realRun = async ({ instance, transcript, scenario, log }) => {
 // `job`, `admin`), `garbage`, or none. `{p}` is the widgets project, `{o}` the other one,
 // `{g}` the group, `{device_code}` the code the last device authorization gave.
 const PROBE_FAKE_STATE = () => ({
-  oauth: { refreshToken: 'probe-refresh', accessToken: 'probe-access', next: [], interval: 5, pending: 1 },
+  oauth: { refreshToken: 'probe-refresh', accessToken: 'probe-access', next: [], interval: 5, pending: 1, clientId: 'probe-client', scopes: ['api'] },
   access: { 'probe-dev-access': { level: 30 } },
   jobToken: 'probe-job-token',
   tokens: ['probe-created-1', 'probe-created-2', 'probe-created-3', 'probe-created-4', 'probe-created-5', 'probe-created-6'],

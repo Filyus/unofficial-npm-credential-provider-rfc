@@ -153,6 +153,10 @@ const createFake = (state) => {
         return body.refresh_token === oauth.refreshToken && !oauth.revoked.includes(body.refresh_token) ? issue() : oauthError(400, 'invalid_grant')
       }
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
+        // a code nobody gave is no grant, however soon it is asked about
+        if (body.device_code !== 'device-code') {
+          return oauthError(400, 'invalid_grant')
+        }
         if (oauth.slowDown) {
           if (oauth.notBefore === undefined) {
             oauth.notBefore = clock + 5000
@@ -175,11 +179,18 @@ const createFake = (state) => {
           oauth.pending -= 1
           return oauthError(400, 'authorization_pending')
         }
-        return body.device_code === 'device-code' ? issue() : oauthError(400, 'invalid_grant')
+        return issue()
       }
       return oauthError(400, 'unsupported_grant_type')
     }
     if (method === 'POST' && path === '/oauth/authorize_device') {
+      // an application the fake is told about (`oauth.clientId`, `oauth.scopes`) is the only one it serves
+      if (oauth.clientId && body.client_id !== oauth.clientId) {
+        return oauthError(401, 'invalid_client', { vary: 'Accept' })
+      }
+      if (oauth.scopes && body.scope && !body.scope.split(' ').every((scope) => oauth.scopes.includes(scope))) {
+        return oauthError(400, 'invalid_scope', { vary: 'Accept' })
+      }
       return json(
         200,
         {
@@ -194,7 +205,10 @@ const createFake = (state) => {
       )
     }
     if (method === 'POST' && path === '/oauth/revoke') {
-      oauth.revoked.push(body.token)
+      // revoking a token nobody knows revokes nothing
+      if ([oauth.accessToken, oauth.refreshToken, ...Object.keys(state.access || {})].includes(body.token)) {
+        oauth.revoked.push(body.token)
+      }
       return json(200, {}, OK)
     }
 
@@ -267,14 +281,18 @@ const createFake = (state) => {
       const [, project, rest] = registry
       const dist = /^-\/package\/(.+)\/dist-tags\/([^/]+)$/.exec(rest)
       const name = decodeURIComponent(dist ? dist[1] : rest)
+      // a package the project does not hold, or a project that does not exist, is looked up at npmjs.com,
+      // before any credential is looked at when the project is not there
+      if (method === 'GET' && !dist && !PROJECTS.has(project)) {
+        return { status: 302, headers: { ...NO, location: `https://registry.npmjs.org/${rest}`, 'content-type': 'text/plain' }, json: `You are being redirected to https://registry.npmjs.org/${rest}` }
+      }
       const who = principal(token, project)
       if (who.answer) {
         return who.answer
       }
       if (method === 'GET' && !dist) {
         const versions = state.packages[name]
-        // a package the project does not hold, or a project that does not exist, is looked up at npmjs.com
-        if (!versions || !PROJECTS.has(project)) {
+        if (!versions) {
           return { status: 302, headers: { ...NO, location: `https://registry.npmjs.org/${rest}`, 'content-type': 'text/plain' }, json: `You are being redirected to https://registry.npmjs.org/${rest}` }
         }
         return json(200, packument(name, versions), { ...NO, 'content-type': 'application/octet-stream' })
