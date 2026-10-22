@@ -23,9 +23,6 @@ on:
   schedule:
     # after the fuzz soak
     - cron: '30 3 * * *'
-  # TEMPORARY, while the workflow is not on the default branch and so cannot be dispatched
-  push:
-    branches: [gitlab-live]
 
 permissions:
   contents: read
