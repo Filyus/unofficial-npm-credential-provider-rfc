@@ -91,7 +91,7 @@ The same run is the [nightly `fuzz` workflow](../../.github/workflows/fuzz.yml),
 
 ## What the fakes are
 
-The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. Only the Verdaccio fake has been held against a real server (below); the others have not run against a live registry, since no secret is needed and none is in the repository.
+The fakes answer as the vendors document their APIs, where the pages cite them; a call the provider's author recalled rather than read is marked so in a comment in the provider. The corporate gateway is invented, as on its page. Only the Verdaccio and GitLab fakes have been held against a real server (below); the others have not run against a live registry, since no secret is needed and none is in the repository.
 
 ## Against a real server
 
@@ -128,6 +128,23 @@ What the live run found on its first day, and fixed:
 - the fake's token create, token list, revocation of a key nobody holds (a real 200), packument, publish and 401 headers, which a real server answers otherwise;
 - the fake's staging, which was a route (`PUT /-/stage/<package>`) the 7.x line does not have: staging is `POST /-/stage/package/<package>`, answering `stageId`, and a record is read and rejected by its UUID;
 - the fake's crash, a 500, on an unauthenticated token create, where Verdaccio answers 401.
+
+### GitLab
+
+[`live/gitlab.js`](live/gitlab.js) does the same for the GitLab provider, against a real GitLab CE that [`gitlab-live.yml`](../../.github/workflows/gitlab-live.yml) starts as a docker container (the harness itself needs a running instance and the name of its container, since it makes an administrator's token and a few other things in the Rails console, `docker exec <container> gitlab-rails runner`; nothing is run in docker on a laptop by the repository's tests).
+
+The rules are the Verdaccio run's: every scenario runs on the fake and on GitLab, the transcript is asserted with the tokens GitLab issued standing in for the scenario's, and what npm would send after each released credential goes to both.
+
+The calls and answers are lined up (status, `WWW-Authenticate` without its prose, `Vary` without `Accept-Encoding`, `Cache-Control`, the media type, the keys of the body). A new divergence fails the run and an allowlist entry ([`gitlab-divergences.json`](live/gitlab-divergences.json), a reason each, empty today) fails it when stale, the skipped scenarios ([`gitlab-skips.json`](live/gitlab-skips.json)) are printed with their reasons, and 62 requests no scenario reaches are probed (the API and the registry with each kind of credential, a deploy token on the group and instance URLs, the OAuth endpoints with bad input, an unapproved device code polled twice).
+
+The code both runs share is [`live/common.js`](live/common.js).
+
+What differs from Verdaccio's run:
+
+- **One instance for all scenarios**, set up once through GitLab's own interfaces: an administrator's token from the Rails console, then the REST API for a group `acme`, two projects, the users `maint` (Maintainer), `dev` (Developer) and `outsider`, an OAuth application and the package `@acme/widgets@2.4.0`. A scenario resets what it touches and gets what its state names: OAuth tokens from the device authorization grant (a scripted person signs in on GitLab's web pages and presses Authorize and Confirm), deploy tokens from the API, and a CI job token made in the Rails console, since there is no runner. The scenarios' project numbers (42, 43) stand for the two projects, and their clock is moved to the real time.
+- **What the person does beside the provider** is done on both sides: where the transcript says the registry refused a credential, the deploy token is deleted as in the project's settings before npm's request, and that request must get the transcript's status (`rejection`, `rejection-revoked`); a device code is approved after the first poll has been told to wait. The proxy makes up the real time the provider's synthetic clock skips, since GitLab judges a poll against its own interval.
+- **After a session**, the requests that show a token is dead (the old refresh token after a refresh, the revoked tokens after a logout) go to both.
+- **It runs on manual dispatch and every night, not on every push.** The image is 1.6 GB, GitLab takes about 3 minutes to start and a run is about 7 minutes in all, which is too much for each push. A dispatch runs the pinned image, `gitlab/gitlab-ce:19.5.1-ce.0` by default (the `image` input chooses another), a reproducible check of our code against one GitLab; the nightly run, at 03:30 UTC after the fuzz soak, is against `gitlab/gitlab-ce:latest`, which catches GitLab changing under us. Both print the GitLab version they got at the start and in the last line, so a failed nightly run says which GitLab changed. What was seen, and what the run found, is on [the GitLab page](../gitlab.md#against-a-real-gitlab).
 
 ## What the reference providers simplify
 

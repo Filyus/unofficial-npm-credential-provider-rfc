@@ -68,8 +68,6 @@ jobs:
           echo "ready after $(( $(date +%s) - start )) s"
           echo "GitLab version file: $(docker exec gitlab cat /opt/gitlab/embedded/service/gitlab-rails/VERSION)"
       - name: provider against GitLab
-        env:
-          GITLAB_LIVE_TRACE: '1'
         run: |
           expect=""
           case "$GITLAB_IMAGE" in

@@ -7,10 +7,12 @@
 // GitLab endpoints, as the page cites them: POST /projects/:id/deploy_tokens
 // and DELETE /projects/:id/deploy_tokens/:token_id (deploy tokens API), and
 // the OAuth token endpoint with a refresh_token grant (OAuth 2.0 API).
-// Recalled, not read, and so unverified here: the device authorization
+// Recalled when it was written, and since tried against GitLab CE 19.5.1
+// (examples/gitlab.md, "Against a real GitLab"): the device authorization
 // endpoint `POST /oauth/authorize_device` and its response fields, the
 // device-code grant type on `/oauth/token`, `POST /oauth/revoke`, the
 // `api` scope a deploy-token call needs, and `expires_at` as a bare date.
+// All of them answered as this provider takes them to.
 
 const crypto = require('node:crypto')
 const { serve, ok, err, log } = require('../lib/protocol.js')
