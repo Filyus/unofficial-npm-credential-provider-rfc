@@ -45,7 +45,7 @@ npm still saves the two-hour token as `_authToken` in the user `~/.npmrc`, so ev
 
 pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm:
 
-- The request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), had 42 👍 and no comments on 2026-10-17, and the `Priority 1` label was added on 2026-10-01.
+- The request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), had 43 👍 and no comments on 2026-10-22, and the `Priority 1` label was added on 2026-10-01.
 - A `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all, and npm 12 reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), an error under `strict-npmrc`. A configuration shared with pnpm is on a path to breaking npm outright.
 
 ## Scope
