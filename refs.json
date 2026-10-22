@@ -258,6 +258,13 @@
     "sha256": "6a3a3c93958cf0155a19a332417b88b31d072633b3d72708fbd1ceca69c6e60d",
     "file": ".refs/docs.cloud.google.com/iam_docs_workload-identity-federation-with-deployment-pipelines.txt"
   },
+  "https://docs.cloud.google.com/sdk/gcloud/reference/artifacts/print-settings/npm": {
+    "kind": "page",
+    "cited": "2026-10-22",
+    "fetched": "2026-10-22",
+    "sha256": "33fd7e86f6f61803907411e714fe2ffac70d7f827aae627f1ac52a4b2852eb2c",
+    "file": ".refs/docs.cloud.google.com/sdk_gcloud_reference_artifacts_print-settings_npm.txt"
+  },
   "https://docs.cloud.google.com/sdk/gcloud/reference/auth/login": {
     "kind": "page",
     "cited": "2026-10-20",
@@ -1195,6 +1202,13 @@
     "fetched": "2026-10-20",
     "sha256": "41840f9e62c78cdc2e2b400931c2a0f0885a6275ee481f632d613bb87892ceb4",
     "file": ".refs/learn.microsoft.com/en-us_azure_devops_cli_entra-tokens.txt"
+  },
+  "https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/entra-oauth?view=azure-devops": {
+    "kind": "page",
+    "cited": "2026-10-22",
+    "fetched": "2026-10-22",
+    "sha256": "02f8943bb3d6e3fb6b7a795b150a61e2e07c021f7c93ac06c0e7c131b8dd7de5",
+    "file": ".refs/learn.microsoft.com/en-us_azure_devops_integrate_get-started_authentication_entra-oauth.txt"
   },
   "https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/oauth": {
     "kind": "page",

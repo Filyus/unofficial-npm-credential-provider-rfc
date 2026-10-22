@@ -1,7 +1,7 @@
 # RFC draft: `tokenHelper` for npm (Phase 1a)
 
 > Status: Draft
-> Revision: 31 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 31 follows the reworked prototype)
+> Revision: 32 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 32 follows the second round of review of the reworked prototype)
 > Date: 2026-10-22
 
 > Phase 1a of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. [Phase 1b](phase-1b-credential-hardening.md) hardens how every credential travels, and [Phase 2](phase-2-credential-provider.md), a credential provider protocol, is a separate document.
@@ -70,7 +70,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 
 - `tokenHelper` and `credentialProvider` are accepted only from the user config file and the global config file.
 - In a project or workspace `.npmrc`, in `publishConfig`, in `npm_config_*` environment variables and on the command line they are ignored with a warning.
-- A user or global file does not count when a project's config chose it; [Where it may be set](#where-it-may-be-set) says what that means.
+- A user or global file does not count when the repository chose it, or when the command line or the environment put it inside the project; [Where it may be set](#where-it-may-be-set) says what that means.
 
 ### The setting
 
@@ -92,13 +92,14 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 
 ### Where it may be set
 
-Only in a user or global file that a project did not choose. npm loads project config before the user and global files, and a project `.npmrc` can name those files, so the rule is:
+Only in a user or global file that the repository did not choose. npm loads project config before the user and global files, and a project `.npmrc` can name those files; the command line and the environment can name them too, and a job that sets them is not always the user (`npm ci --prefix sub` makes `sub/etc/npmrc` the global file, a CI job writes `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, and a repository can carry either file, with a helper whose value may use `${VAR}`). So the rule is:
 
 - **Honoured** only from the user config file and the global config file, and only when `userconfig`, `globalconfig` and `prefix` were not set by a project `.npmrc`. Keys are compared as npm applies them, after `${VAR}` expansion: `user${UNSET?}config=` is `userconfig`.
-- **Not honoured** otherwise: the key is ignored with a warning, including every key in a file that a project's setting selected, wherever that file lies.
-- **A child npm** inherits the chosen paths as environment values, so npm sets a marker that tells it which files its parent did not trust. The marker is set only when a helper is configured, so it changes nothing for anyone else.
+- **Not honoured** when the file's path was chosen on the command line or in the environment (`--userconfig`, `--globalconfig`, `--prefix`, `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG`, `NPM_CONFIG_PREFIX`, `PREFIX`) and its real path (`fs.realpathSync.native`, so a link or a spelling does not hide it) lies inside the project, whose root is npm's own `localPrefix`, also resolved. A file left at its default path is never refused by this: a home directory that is the checkout (a PaaS with `HOME=/app`) is the user's own.
+- **Otherwise not honoured:** the key is ignored with a warning, including every key in a file that a project's setting selected, wherever that file lies.
+- **A child npm** inherits the chosen paths as environment values, so npm sets a marker that tells it which files its parent did not trust; the child also applies the rule itself. The marker is set only when a helper is configured, so it changes nothing for anyone else.
 
-The rule needs no knowledge of where a file lies and does not depend on how a path is spelled. Where the home directory is the checkout itself (a PaaS with `HOME=/app`), a repository's `.npmrc` is the user's file, as it is for every other user-level setting. [Phase 1b](phase-1b-credential-hardening.md#project-config-cannot-choose-the-user-or-global-file) removes a project's ability to name those files at all.
+The rule needs no inode comparison and no walk up the directory tree. Its edges are limits, not claims: the project root is `localPrefix`, so under `--prefix X` the root is `X` and a global file `X/etc/npmrc` is refused, which also takes a user's own `npm -g --prefix ~/.npm-global` helper in that global file (the user file still works); and a file inside the checkout but outside `localPrefix` (a sibling package of a monorepo that is not the root) is honoured. [Phase 1b](phase-1b-credential-hardening.md#project-config-cannot-choose-the-user-or-global-file) removes the ability to name those files from a project at all.
 
 pnpm instead fails on the key in project config; npm warns and carries on, as it does for other settings it ignores.
 
@@ -116,14 +117,14 @@ The runner lives in npm/cli, on `@npmcli/promise-spawn`; npm-registry-fetch hold
 - **Working directory.** The helper's own directory, never npm's, which is usually the repository: on Windows a command started by bare name (the `node` in a cmd-shim) is looked up in the current directory first.
 - **Input.** None: stdin is closed at once, so a helper that reads it gets end of input.
 - **Limits.** 1 MiB of output, and 60 seconds: `@npmcli/promise-spawn` has no timeout, so the runner owns it and sends SIGTERM at 60 seconds and SIGKILL 2 seconds later, ending the whole process tree on Windows. Elsewhere only the helper process is signalled. After the helper exits, npm reads its output for at most 250 ms more and then stops waiting, so a background process it left holding stdout does not keep npm waiting until the deadline.
-- **Recursion.** npm sets a variable for the helper; an npm that the helper itself runs sees it and starts no helper, so a wrapper that calls `npm` cannot loop.
+- **Recursion.** npm sets `NPM_INTERNAL_TOKEN_HELPER_RUNNING` for the helper. An npm that the helper itself runs, and that would run a helper, finds it and fails with `ETOKENHELPER` ("a token helper's own npm cannot run a token helper"), so a wrapper that calls `npm` cannot loop, and cannot hide that it tried. The name is long and specific on purpose: `NPM_TOKEN_HELPER` or `TOKEN_HELPER` is a name a user or a CI job could have set for their own reasons, and a guard that fails would then break every command with a helper configured. An npm that needs no helper (another registry, none configured) is unaffected.
 
 #### Environment
 
 The helper gets npm's environment without what npm set from a project's config or about itself:
 
 - Removed: what npm exported from its own config. That is every `npm_config_*` variable, and four others, each set only from the config key named: `NODE_OPTIONS` from `node-options`, `EDITOR` from `editor`, `NODE_ENV` (set to `production` when the resulting `omit` list holds `dev`, whether from `omit`, `only` or `production`) and `COLOR` from `color`. Where npm overwrote a value the user had in the environment it started with, the helper gets that value back; where there was none, the variable is absent. A project's `.npmrc` reaches a child this way, and `node-options` alone would let a repository load code into a node-based helper and read the credential it prints.
-- An npm that a script started (a script that runs `npm publish`) finds `NODE_OPTIONS` and `EDITOR` already set from its parent's config, which the parent exported as `npm_config_node_options` and `npm_config_editor`: a value equal to that is npm's too, and absent for the helper.
+- An npm that a script started (a script that runs `npm publish`) finds all four already set by its parent, and a value that is what the parent set is npm's too, absent for the helper. It is recognised by what the parent exported: `NODE_OPTIONS` and `EDITOR` equal `npm_config_node_options` and `npm_config_editor`; `NODE_ENV` is `production` while `npm_config_omit` holds `dev`, or `npm_config_production` is `true`, or `npm_config_only` is `prod` or `production`; `COLOR` is `0` or `1` where `npm_config_global_prefix` shows a parent npm ran, since every npm sets `COLOR` itself. A value the user had set to the same thing is lost to this, because the two cannot be told apart; the helper then gets none.
 - Where npm does this ([npm/cli at 12.2.1](sources.md#external-facts)): `set-envs.js` writes the `npm_config_*` variables and sets `EDITOR` and `NODE_OPTIONS` from the `editor` and `node-options` config; `definitions.js` sets `NODE_ENV` while resolving `omit`, and `lib/npm.js` sets `COLOR`, both on npm's own process environment, so the runner records the user's values when npm starts.
 - `PATH` loses the directories npm put in front of it for a script: each `node_modules/.bin` from the package up to the root, and the `node-gyp-bin` directory. A `node_modules/.bin` the user put on `PATH` elsewhere stays.
 
@@ -135,7 +136,9 @@ This does not protect the helper from a project's own script, which can set any 
 
 The first time a request to that registry is about to be sent, at most once per registry and helper per npm process, whatever the outcome. A token that expires during a long command is not fetched again: the registry's 401 is reported as for a stored token, and Phase 2's `expiresAt` and retry are what cover it.
 
-Never for a request made offline. The packument (the registry's metadata document for a package) fetch that precedes a write is made online whatever `--offline` says, and so runs the helper. A helper also runs before a `--prefer-offline` request the HTTP cache could have answered, since npm resolves the credential before the cache is consulted. A helper therefore caches what it fetches: it is started once per npm process.
+Never for a request made offline. The packument (the registry's metadata document for a package) fetch that precedes a write is made online whatever `--offline` says, and so runs the helper.
+
+A helper also runs before a `--prefer-offline` request the HTTP cache could have answered, since npm resolves the credential before the cache is consulted, and a helper that fails fails every request to that registry, public packages included, where a request without the credential might have been answered from the cache or by the registry. That is deliberate: a failure is visible, as in pnpm 11, where pnpm 12 sends the request without `Authorization` and a private registry answers 401 or 404 with nothing to say why. A helper therefore caches what it fetches: it is started once per npm process.
 
 #### stderr
 
@@ -155,7 +158,9 @@ npm trims the output, including a leading byte order mark such as Windows PowerS
 | More than 1 MiB of output | `ETOKENHELPER`; the helper is killed |
 | Running longer than 60 seconds | `ETOKENHELPER`; the helper is killed |
 
-Every failure names the helper, and npm does not fall back to another credential for that registry. The status is `helperExitCode`, not `exitCode`, because npm's exit handler would take `exitCode` for its own: npm exits as for any of its errors. A failure is also logged as a warning with the helper's stderr. Killing a helper on POSIX signals the helper process only, so a helper script should `exec` the command that does the work.
+Every failure names the helper, and npm does not fall back to another credential for that registry, the stored `_authToken` included: a user who migrates to a helper has usually left a token behind that expired long ago, and falling back to it would turn the helper's failure into a 401 from a credential nobody is maintaining, hiding the real cause. The status is `helperExitCode`, not `exitCode`, because npm's exit handler would take `exitCode` for its own: npm exits as for any of its errors. A failure is also logged as a warning with the helper's stderr. Killing a helper on POSIX signals the helper process only, so a helper script should `exec` the command that does the work.
+
+A value that is not an existing file is never printed, in any message (the refusals, the failures, `login`, `logout`, `profile` and the warnings for the unscoped, slash-less and per-scope forms), because it may be a token pasted into the setting by mistake, and a base64 token has `/` in it and passes for a path. The message names the config key and says the value is not shown; a value that names a file is shown.
 
 A message that can be acted on says how:
 
@@ -165,11 +170,13 @@ A message that can be acted on says how:
 | The value is a bare name | Give the absolute path |
 | On Windows, a `.ps1` or `.js` file | Use a `.cmd` wrapper that starts it |
 | Exit status 127, a shell's "command not found" | The helper could not find a tool it calls; use its absolute path |
+| A script whose `#!` interpreter is missing | The interpreter is named, with a pointer to Windows line endings where the line ends in a carriage return |
 
 ### Which requests get the credential
 
 A helper's credential is treated as a stored `_authToken` for the same registry key:
 
+- **Which keys.** The library asks for the keys a stored credential would be looked up under, longest first, and stops at the first key that holds a stored credential which sets `Authorization` (a token, `_auth`, or a username and password). A key that holds only a client certificate and key (mTLS) sets no `Authorization` and does not stop the walk, so an mTLS pair at a longer key does not shadow a helper at a shorter one.
 - **Which URLs.** A request whose URL falls under the key, and a full URL on the registry's host (npm's fallback for tarballs), get it; a tarball on another host or port does not. The key carries no scheme, so a lockfile `resolved` URL over `http:` on the registry's host gets the credential as it would get a stored token. The port is part of the key: `//host:8443/` is not `//host/`, and a default port is no port.
 - **Redirects** are followed as make-fetch-happen follows them for a stored token.
 - **Transport.** `proxy`, `https-proxy`, `noproxy`, `ca`, `cafile`, `strict-ssl` and `local-address` come from wherever npm reads them today, a project `.npmrc` included.
@@ -179,6 +186,11 @@ A helper's credential is treated as a stored `_authToken` for the same registry 
 |---|---|---|
 | A project `.npmrc` can choose the proxy and certificates a helper's credential goes through, and a registry served over `http:` receives it in the clear | Both are today's rules for a stored token; a helper held to a stricter rule than the token it replaces would make the helper the only credential that cannot reach an `http:` registry, and would settle for one credential a question that belongs to all of them | [Phase 1b](phase-1b-credential-hardening.md) applies one rule to every credential: `https:` or loopback only, transport from config a project cannot write |
 
+| Limit | Reason | Widens when |
+|---|---|---|
+| A helper in a directory that others can write is run as it is | The helper is the user's own program at a path the user chose, and a check of ownership and modes differs on every platform (ACLs on Windows, network shares) | A platform check is specified, or the helper is run through [Phase 2](phase-2-credential-provider.md)'s provider with its own trust rule |
+| A repository can make npm run the user's helper: its `registry=` or a lockfile `resolved` URL names the host whose key the helper is configured under, and the helper's credential goes to that host | The credential is the user's for that host: a project that points npm at it gets what the user gave that host, as with a stored `_authToken` for it, and the helper is not run for a host the user did not configure | [Phase 1b](phase-1b-credential-hardening.md) restricts where any credential may be sent |
+
 ### Precedence and commands
 
 | Situation | Behaviour |
@@ -186,6 +198,7 @@ A helper's credential is treated as a stored `_authToken` for the same registry 
 | A helper and a stored token for the same registry key | The helper is used; npm warns once per registry, naming the `_authToken` it ignores. A token stored under a longer key than the helper's, such as the path of a package's registry, is the more specific credential and wins |
 | OIDC trusted publishing in use | The OIDC token wins over both |
 | `publish`, `whoami`, `get-identity` (which `access list packages` also uses to check for a login) | A configured helper counts as being logged in |
+| The registry answers 401 | The error says that the registry refused the token the helper printed and to refresh the login or the cache of the tool behind it; it does not suggest `npm login`, which does not change what a helper prints |
 | `logout` | Says why it cannot act: the helper setting has to be removed, and a stored token is named, not revoked, since revoking would send the helper's credential |
 | `login` | Refuses: the token it saved would never be sent, and its requests would carry the helper's credential |
 | `profile enable-2fa` | Says why it cannot work through a helper |
@@ -226,17 +239,18 @@ The two agree on an absolute path with no spaces and no arguments that prints a 
 
 ### Vendor CLIs
 
-Vendor CLIs already print what a helper needs; since a helper takes no arguments, each becomes a two-line script:
+Vendor CLIs already print what a helper needs; since a helper takes no arguments, each becomes a two-line script. The header column is what each vendor's documentation shows npm being given, checked on 2026-10-22:
 
 | Registry | Command printing the credential | Lifetime | Header |
 |---|---|---|---|
-| AWS CodeArtifact | `aws codeartifact get-authorization-token --domain D --domain-owner ACCOUNT --query authorizationToken --output text` | 12 h default, 15 min–12 h ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)) | Bearer |
-| Google Artifact Registry | `gcloud auth print-access-token` | 60 min ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)) | Bearer |
-| GitHub Packages | `gh auth token` (after `gh auth refresh -s read:packages`) | until revoked | Bearer |
-| JFrog Artifactory | `jf atc --expiry=3600 \| jq -r .access_token` | as requested, within the platform limit | Bearer |
-| Azure Artifacts | a script printing `Basic <base64(user:PAT)>` | PAT lifetime | Basic: the documented npm scheme for Azure feeds is username + PAT ([docs](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops)), which the scheme pass-through above covers |
+| AWS CodeArtifact | `aws codeartifact get-authorization-token --domain D --domain-owner ACCOUNT --query authorizationToken --output text` | 12 h default, 15 min to 12 h ([docs](https://docs.aws.amazon.com/codeartifact/latest/ug/tokens-authentication.html)) | Bearer: the documented npm setting is `_authToken=$CODEARTIFACT_AUTH_TOKEN` ([npm with CodeArtifact](https://docs.aws.amazon.com/codeartifact/latest/ug/npm-auth.html)) |
+| Google Artifact Registry | `gcloud auth print-access-token`, with the user name in front | 60 min ([docs](https://docs.cloud.google.com/artifact-registry/docs/nodejs/authentication)) | Basic: Google's page forms the credential as the pair `oauth2accesstoken:<token>` (the user name and password of a `_password` entry, which npm sends as Basic), so the script prints `Basic <base64(oauth2accesstoken:token)>`. The page does not say that a bare Bearer token is accepted for npm, so a script does not rely on it |
+| GitHub Packages | `gh auth token` (after `gh auth refresh -s read:packages`) | until revoked | Bearer: GitHub documents `_authToken=TOKEN` ([npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)) |
+| JFrog Artifactory | `jf atc --expiry=3600 \| jq -r .access_token` | as requested, within the platform limit | Bearer: JFrog documents `_authToken=<identity token>` and says `_auth` is not supported by npm 9 and newer ([npm repositories](https://docs.jfrog.com/artifactory/docs/npm-repositories)). That page names an identity token and does not say that an access token minted by `jf atc` is accepted there; the row is untested against a live Artifactory |
 
 Not every row narrows to reading. `gh auth token` prints a token that always carries `repo`, `read:org` and `gist` besides the package scope ([gh auth login](https://cli.github.com/manual/gh_auth_login)), and GitHub documents classic tokens for Packages ([npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)); `jf atc` prints a token with the rights of the user it is minted for.
+
+Azure Artifacts has no row: its npm page documents a personal access token only, a base64 `_password` with any `username` (a Basic credential), and `vsts-npm-auth` to refresh it ([docs](https://learn.microsoft.com/en-us/azure/devops/artifacts/npm/npmrc?view=azure-devops)). Microsoft documents Microsoft Entra tokens for Azure DevOps (resource `499b84ac-1321-427f-aa17-267ca6975798`, [docs](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/entra-oauth?view=azure-devops)), but not that an npm feed accepts one, so no short-lived route through `az account get-access-token` is claimed. A helper that prints `Basic <base64(user:PAT)>` works with a long-lived PAT, which is what the helper is meant to move off the disk, not to introduce.
 
 For npmjs.com itself a helper helps less: the two-hour session token comes from an interactive browser login with 2FA, so a helper can keep it in the OS keychain instead of `~/.npmrc` but cannot renew it silently.
 
@@ -257,8 +271,9 @@ It is the right first step: compatible with pnpm, small next to the protocol, an
 This section is informative: it describes one way to meet the requirements above.
 
 - **Where it plugs in.** In `npm-registry-fetch`, `regFetch()` resolves auth synchronously (`getAuth()` in `lib/auth.js`) before the asynchronous fetch starts. A helper call is asynchronous, so a helper-backed credential has to be resolved inside the async fetch path, which `regFetch()` already returns as a promise. pnpm's TypeScript CLI runs `tokenHelper` with `spawnSync`, which blocks the event loop while the helper runs and rules out a long-lived session.
-- **The seam in npm-registry-fetch.** A new option, proposed as `opts.getAuthorization(regKey)`: async, it returns a header value or nothing. The library keeps matching a request to a registry key where it does today (`lib/auth.js`), calls the function for that key when no OIDC token is in effect, and sends what it returns. It has no process code, so another tool that uses the library is never left with a child, and never runs a program because a config key says so.
-- **The runner in npm/cli.** A module in `lib/utils` on `@npmcli/promise-spawn` implements [How the helper runs](#how-the-helper-runs): the checks on the value, the directory, environment and `PATH`, the recursion guard, the time and size limits, the mapping of output to a header, the masking of stderr and the error messages. It keeps one promise per registry per process, and npm passes it to the library as `getAuthorization`.
+- **The seam in npm-registry-fetch.** A new option, proposed as `opts.getAuthorization({ regKey, uri })`: async, it takes an object so that later phases can add fields without breaking callers, and returns a header value or nothing. The library keeps matching a request to a registry key where it does today (`lib/auth.js`), calls the function for that key when no OIDC token is in effect, and sends what it returns. It exports `getAuth.supportsGetAuthorization`, `true` where the option is honoured. It has no process code, so another tool that uses the library is never left with a child, and never runs a program because a config key says so.
+- **The runner in npm/cli.** A module in `lib/utils` on `@npmcli/promise-spawn` implements [How the helper runs](#how-the-helper-runs): the checks on the value, the directory, environment and `PATH`, the recursion guard, the time and size limits, the mapping of output to a header, the masking of stderr and the error messages. It keeps one promise per registry and helper per process, a refusal of the value (which looks at the file system) and a failure included, so the file system is looked at once and not once per request, and npm passes the function to the library as `getAuthorization`.
+- **Version skew.** An npm-registry-fetch that predates the option ignores it and sends every request with no credential, silently. npm/cli therefore raises its dependency floor to `^20.1.0`, the next minor after 20.0.1 (the first release with the option), and a command that makes requests fails with `ETOKENHELPER` and a message naming the missing capability when a helper is configured and `getAuth.supportsGetAuthorization` is not set; `config`, `help` and `completion` still run, so the setting can be removed. Only the copy npm itself resolves is checked: a library bundled further down a dependency that carries its own copy is not.
 - **Config.** `@npmcli/config` gains the per-registry `tokenHelper` key, filtered by source as [Trust](#trust) requires. The key is read from trusted files only, and a `//<registry>/:tokenHelper` key among the options a caller passes to the library does nothing: tools other than npm (npm-check-updates among them) merge every `.npmrc` key they read, a project's included, into those options.
 - **Commands.** `publish`, `whoami` and `get-identity` count a helper as a login; `logout` and `profile enable-2fa` say why they cannot act; `config set` refuses the key in project config. The OIDC exchange in `oidc.js` is changed as little as makes it win over a helper.
 - **Prototype.** [phase-1-implementation.md](phase-1-implementation.md) describes the prototype, the checks it went through and what each statement in this document maps to; the earlier, hardened prototype is on the branches named there. [sources.md](sources.md) holds what the RFC says about npm, pnpm and others.
@@ -283,6 +298,6 @@ No change for anyone who has not configured a helper.
 
 ## Open decisions for the npm maintainers
 
-Phase 1a has none open. The trust rule is decided ([Where it may be set](#where-it-may-be-set)), and so is the rest of the behaviour above. What the maintainers are asked to confirm in a design note is naming only: the option `opts.getAuthorization` and the environment variable that guards recursion, either of which can change without changing a rule.
+Phase 1a has none open. The trust rule is decided ([Where it may be set](#where-it-may-be-set)), and so is the rest of the behaviour above. What the maintainers are asked to confirm in a design note is naming only: the option `opts.getAuthorization({ regKey, uri })` and the environment variable `NPM_INTERNAL_TOKEN_HELPER_RUNNING` that guards recursion, either of which can change without changing a rule.
 
 The protocol's own are in [Phase 2's open decisions](phase-2-credential-provider.md#open-decisions-for-the-npm-maintainers).
