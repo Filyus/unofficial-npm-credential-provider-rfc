@@ -383,6 +383,14 @@ const main = async () => {
         env: { NPM_CONFIG_PREFIX: '<dir>/sub' },
         files: { 'sub/etc/npmrc': helperLine },
       }],
+      // the common CI shape: the install runs for a subdirectory, from the root
+      // of the repository, with the user file at the root
+      ['prefix-client-env-userconfig-at-root', {
+        args: ['view', 'demo', 'version', '--prefix', 'client'],
+        userconfigFlag: false,
+        env: { NPM_CONFIG_USERCONFIG: '<dir>/repo-user.npmrc' },
+        files: { 'client/package.json': '{}' },
+      }],
       ['userconfig-flag-into-the-checkout', {
         args: ['view', 'demo', 'version', '--userconfig', 'repo-user.npmrc'],
         userconfigFlag: false,

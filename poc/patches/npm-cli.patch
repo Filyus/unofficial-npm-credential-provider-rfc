@@ -1,4 +1,4 @@
-From 3cad8030db8bc923e505e30143aa20c967bc3565 Mon Sep 17 00:00:00 2001
+From e12ef8c6aa87399c9534aa70e20035ff15db5cbb Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:11:57 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -41,8 +41,10 @@ publishConfig, the environment and on the command line it is ignored with a
 warning, and so is a user or global file when project config sets userconfig,
 globalconfig or prefix (keys compared after ${VAR} expansion), or when its path
 was chosen on the command line or in the environment and its real path lies
-inside the project (`npm ci --prefix sub`, `--userconfig ./ci.npmrc`,
-NPM_CONFIG_USERCONFIG into the checkout). A child npm is told which files its
+inside a project root: the project found from the current directory by the
+usual walk up the tree whatever --prefix says, and localPrefix unless the
+command is global (`npm ci --prefix sub`, `npm --prefix client ci` with
+NPM_CONFIG_USERCONFIG at the repository root, `--userconfig ./ci.npmrc`). A child npm is told which files its
 parent did not trust in npm_config_token_helper_untrusted, set only when one of
 them has a helper. The unscoped, slash-less and per-package-scope forms are
 ignored with a warning that names the line to write instead.
@@ -75,11 +77,11 @@ login; config set refuses the unscoped form and project config.
  test/lib/utils/publish-config.js           |  26 +
  test/lib/utils/token-helper.js             | 657 +++++++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 150 ++++-
+ workspaces/config/lib/index.js             | 233 +++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 239 ++++++++
+ workspaces/config/test/index.js            | 285 +++++++++
  workspaces/config/test/set-envs.js         |  25 +
- 27 files changed, 1827 insertions(+), 9 deletions(-)
+ 27 files changed, 1933 insertions(+), 32 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -1778,7 +1780,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..80222c5 100644
+index 37dfecf..88afaa1 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -4,7 +4,8 @@ const ini = require('ini')
@@ -1895,16 +1897,113 @@ index 37dfecf..80222c5 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -858,13 +933,78 @@ class Config {
+@@ -795,8 +870,27 @@ class Config {
+       return
+     }
+ 
++    const found = await this.#walkLocalPrefix({ apply: true })
++    if (found.prefix) {
++      this.localPrefix = found.prefix
++      this.localPackage = found.package
++    }
++    if (!this.localPrefix) {
++      this.localPrefix = this.cwd
++    }
++  }
++
++  // The project directory found from the current directory by the usual walk
++  // up the tree, as `{ prefix, package }` (`prefix` is null outside any
++  // project). With `apply`, it also records a found workspace root in the
++  // default layer and warns about a workspace's own .npmrc; without, it only
++  // looks, so that a token helper's trust rule can ask where the project is
++  // whatever `--prefix` says.
++  async #walkLocalPrefix ({ apply = false } = {}) {
+     const cliWorkspaces = this.#get('workspaces', 'cli')
+     const isGlobal = this.#get('global') || this.#get('location') === 'global'
++    let prefix = null
++    let localPackage
+ 
+     for (const p of walkUp(this.cwd)) {
+       // HACK: this is an option set in tests to stop the local prefix from being set
+@@ -807,22 +901,22 @@ class Config {
+ 
+       const hasPackageJson = await fileExists(p, 'package.json')
+ 
+-      if (!this.localPrefix && (hasPackageJson || await dirExists(p, 'node_modules'))) {
+-        this.localPrefix = p
+-        this.localPackage = hasPackageJson
++      if (!prefix && (hasPackageJson || await dirExists(p, 'node_modules'))) {
++        prefix = p
++        localPackage = hasPackageJson
+ 
+         // if workspaces are disabled, or we're in global mode, return now
+         if (cliWorkspaces === false || isGlobal) {
+-          return
++          break
+         }
+ 
+         // otherwise, continue the loop
+         continue
+       }
+ 
+-      if (this.localPrefix && hasPackageJson) {
++      if (prefix && hasPackageJson) {
+         const pkgJson = require('@npmcli/package-json')
+-        // if we already set localPrefix but this dir has a package.json
++        // if we already found a prefix but this dir has a package.json
+         // then we need to see if `p` is a workspace root by reading its package.json
+         // however, if reading it fails then we should just move on
+         const { content: pkg } = await pkgJson.normalize(p).catch(() => ({ content: {} }))
+@@ -833,38 +927,121 @@ class Config {
+         const mapWorkspaces = require('@npmcli/map-workspaces')
+         const workspaces = await mapWorkspaces({ cwd: p, pkg })
+         for (const w of workspaces.values()) {
+-          if (w === this.localPrefix) {
+-            // see if there's a .npmrc file in the workspace, if so log a warning
+-            if (await fileExists(this.localPrefix, '.npmrc')) {
+-              log.warn('config', `ignoring workspace config at ${this.localPrefix}/.npmrc`)
+-            }
++          if (w === prefix) {
++            if (apply) {
++              // see if there's a .npmrc file in the workspace, if so log a warning
++              if (await fileExists(prefix, '.npmrc')) {
++                log.warn('config', `ignoring workspace config at ${prefix}/.npmrc`)
++              }
+ 
+-            // set the workspace in the default layer, which allows it to be overridden easily
+-            const { data } = this.data.get('default')
+-            data.workspace = [this.localPrefix]
+-            this.localPrefix = p
+-            this.localPackage = hasPackageJson
+-            log.info('config', `found workspace root at ${this.localPrefix}`)
++              // set the workspace in the default layer, which allows it to be overridden easily
++              const { data } = this.data.get('default')
++              data.workspace = [prefix]
++              log.info('config', `found workspace root at ${p}`)
++            }
+             // we found a root, so we return now
+-            return
++            return { prefix: p, package: hasPackageJson }
+           }
+         }
+       }
+     }
+ 
+-    if (!this.localPrefix) {
+-      this.localPrefix = this.cwd
+-    }
++    return { prefix, package: localPackage }
    }
  
-   loadUserConfig () {
-+    this.#trustTokenHelpers('user')
+-  loadUserConfig () {
++  async loadUserConfig () {
++    await this.#trustTokenHelpers('user')
      return this.#loadFile(this.#get('userconfig'), 'user')
    }
  
-   loadGlobalConfig () {
-+    this.#trustTokenHelpers('global')
+-  loadGlobalConfig () {
++  async loadGlobalConfig () {
++    await this.#trustTokenHelpers('global')
      return this.#loadFile(this.#get('globalconfig'), 'global')
    }
  
@@ -1916,7 +2015,7 @@ index 37dfecf..80222c5 100644
 +  // applies them, after ${VAR} expansion: `user${UNSET?}config=` is
 +  // `userconfig`. A child npm inherits the chosen paths as environment values,
 +  // so its parent passes on which files it did not trust.
-+  #trustTokenHelpers (where) {
++  async #trustTokenHelpers (where) {
 +    const { raw } = this.data.get('project')
 +    const chosen = ['userconfig', 'globalconfig', 'prefix'].some(key =>
 +      Object.keys(raw).some(k => envReplace(k, this.env) === key))
@@ -1925,7 +2024,7 @@ index 37dfecf..80222c5 100644
 +        'project config sets userconfig, globalconfig or prefix, so the file may not be the user\'s')
 +    } else if (this.#inheritedUntrusted().includes(where)) {
 +      this.#tokenHelperRefusals.set(where, 'the parent npm process did not trust it')
-+    } else if (this.#chosenInsideProject(where)) {
++    } else if (await this.#chosenInsideProject(where)) {
 +      this.#tokenHelperRefusals.set(where,
 +        'its path was chosen on the command line or in the environment and lies inside the project')
 +    } else {
@@ -1937,12 +2036,16 @@ index 37dfecf..80222c5 100644
 +  // writes `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, and `npm ci --prefix
 +  // sub` makes `sub/etc/npmrc` the global file. A file whose path was chosen
 +  // there, and not left at its default, is not the user's own when it is inside
-+  // the project, where the repository can have written it. The comparison is
-+  // between real paths, against npm's own project root (localPrefix), so a link
-+  // or a spelling cannot hide the file. A file at its default path is never
-+  // refused here: a home directory that is the checkout (HOME=/app) is the
-+  // user's own. A file that does not exist has no key to refuse.
-+  #chosenInsideProject (where) {
++  // a project root, where the repository can have written it. The roots are the
++  // project found from the current directory by the usual walk up the tree
++  // whatever `--prefix` says (`npm --prefix client ci` run in the repository
++  // root with a userconfig at the root), and `localPrefix` itself unless the
++  // command is global (`npm -g --prefix ~/.npm-global` is the user's own).
++  // The comparison is between real paths, so a link or a spelling cannot hide
++  // the file. A file at its default path is never refused here: a home
++  // directory that is the checkout (HOME=/app) is the user's own. A file that
++  // does not exist has no key to refuse.
++  async #chosenInsideProject (where) {
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
 +    // asked of the raw input: a value for globalconfig is stored beneath every layer
 +    const chosen = keys.some(key => ['cli', 'env'].some(layer => this.data.get(layer).raw[key] !== undefined)) ||
@@ -1950,13 +2053,29 @@ index 37dfecf..80222c5 100644
 +    if (!chosen) {
 +      return false
 +    }
++    let file
 +    try {
-+      const file = realpathSync.native(this.#get(where === 'user' ? 'userconfig' : 'globalconfig'))
-+      const away = relative(realpathSync.native(this.localPrefix), file)
-+      return away === '' || !(away === '..' || away.startsWith('..' + sep) || isAbsolute(away))
++      file = realpathSync.native(this.#get(where === 'user' ? 'userconfig' : 'globalconfig'))
 +    } catch {
 +      return false
 +    }
++    const roots = [(await this.#walkLocalPrefix()).prefix]
++    if (!(this.#get('global') || this.#get('location') === 'global')) {
++      roots.push(this.localPrefix)
++    }
++    return roots.some(root => {
++      if (!root) {
++        return false
++      }
++      let real
++      try {
++        real = realpathSync.native(root)
++      } catch {
++        return false
++      }
++      const away = relative(real, file)
++      return away === '' || !(away === '..' || away.startsWith('..' + sep) || isAbsolute(away))
++    })
 +  }
 +
 +  #inheritedUntrusted () {
@@ -1974,7 +2093,7 @@ index 37dfecf..80222c5 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1116,14 @@ class Config {
+@@ -976,6 +1153,14 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2010,10 +2129,10 @@ index 12719b5..0338354 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..e035b0f 100644
+index 9f83d98..9328539 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
-@@ -2468,3 +2468,242 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2468,288 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2023,16 +2142,19 @@ index 9f83d98..e035b0f 100644
 +const HELPER = process.platform === 'win32' ? 'C:\\tools\\token.cmd' : '/usr/local/bin/token'
 +const helperIn = (flat, regKey) => flat.tokenHelpers?.[regKey]
 +
-+const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false } = {}) => {
++const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false } = {}) => {
 +  const path = t.testdir({
 +    home: { '.npmrc': user },
 +    prefix: { etc: { npmrc: global } },
 +    // files inside the repository, which a checkout can carry
 +    project: {
-+      'package.json': '{}',
++      'package.json': inWorkspace ? '{"workspaces":["packages/*"]}' : '{}',
++      packages: { a: { 'package.json': '{"name":"a"}' } },
 +      'ci.npmrc': sub,
 +      sub: { etc: { npmrc: sub } },
 +    },
++    // a directory that is in no project
++    outside: { 'x.npmrc': sub },
 +    'other.npmrc': `//other.registry/:tokenHelper=${HELPER}\n`,
 +  })
 +  const logs = []
@@ -2051,12 +2173,14 @@ index 9f83d98..e035b0f 100644
 +    fs.writeFileSync(join(path, 'project', '.npmrc'), fill(project))
 +  }
 +  const config = new Config({
-+    npmPath: `${path}/npm`,
++    // outside any project the walk up the tree would end in the repository
++    // that holds these tests, unless it meets npm's own directory first
++    npmPath: outside ? path : `${path}/npm`,
 +    env: Object.fromEntries(Object.entries({ HOME: `${path}/home`, ...env }).map(([k, v]) => [k, fill(v)])),
 +    argv: [process.execPath, __filename,
 +      ...(files ? [`--userconfig=${path}/home/.npmrc`, `--globalconfig=${path}/prefix/etc/npmrc`] : []),
 +      ...argv.map(fill)],
-+    cwd: `${path}/project`,
++    cwd: `${path}/${outside ? 'outside' : inWorkspace ? 'project/packages/a' : 'project'}`,
 +    excludeNpmCwd: true,
 +    shorthands,
 +    definitions,
@@ -2142,6 +2266,47 @@ index 9f83d98..e035b0f 100644
 +      t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
 +    })
 +  }
++
++  t.test('npm --prefix client ci from the repository root, with a userconfig at the root', async t => {
++    const { config, warned } = await loadHelperConfig(t, {
++      files: false,
++      sub: keyed,
++      argv: ['--prefix=<path>/project/client'],
++      env: { npm_config_userconfig: '<path>/project/ci.npmrc' },
++    })
++    t.notOk(helperIn(config.flat, '//helper.registry/'), 'the project is the one the walk finds, not --prefix')
++    t.ok(warned.some(w => w.includes(refused)), 'reported')
++  })
++
++  t.test('a global command: --prefix is the user\'s own, the project found from the cwd is not', async t => {
++    const own = await loadHelperConfig(t, { files: false, global: keyed, argv: ['--global', '--prefix=<path>/prefix'] })
++    t.equal(helperIn(own.config.flat, '//helper.registry/'), HELPER, 'npm -g --prefix outside the project')
++    const inside = await loadHelperConfig(t, { files: false, sub: keyed, argv: ['--global', '--prefix=<path>/project/sub'] })
++    t.notOk(helperIn(inside.config.flat, '//helper.registry/'), 'npm -g --prefix into the repository, run inside it')
++    t.ok(inside.warned.some(w => w.includes(refused)))
++  })
++
++  t.test('a workspace of a monorepo: the root of the repository counts', async t => {
++    const { config, warned } = await loadHelperConfig(t, {
++      files: false,
++      sub: keyed,
++      inWorkspace: true,
++      env: { npm_config_userconfig: '<path>/project/ci.npmrc' },
++    })
++    t.notOk(helperIn(config.flat, '//helper.registry/'), 'a file at the root, run from a workspace')
++    t.ok(warned.some(w => w.includes(refused)))
++  })
++
++  t.test('a current directory in no project: a chosen file is the user\'s', async t => {
++    const { config } = await loadHelperConfig(t, {
++      files: false, outside: true, user: keyed, argv: ['--userconfig=<path>/home/.npmrc'],
++    })
++    t.equal(helperIn(config.flat, '//helper.registry/'), HELPER)
++    const inCwd = await loadHelperConfig(t, {
++      files: false, outside: true, sub: keyed, argv: ['--userconfig=<path>/outside/x.npmrc'],
++    })
++    t.notOk(helperIn(inCwd.config.flat, '//helper.registry/'), 'but a file in that directory itself is not: it is the root npm falls back to')
++  })
 +
 +  t.test('a link from outside the project to a file inside it', async t => {
 +    const { config, path } = await loadHelperConfig(t, {
@@ -2293,7 +2458,7 @@ index 9426265..e899208 100644
 2.52.0.windows.1
 
 
-From 9a8340f049055b745f045f4b4f49fcd057ab6cbe Mon Sep 17 00:00:00 2001
+From a4bf0c7b23b3ce6bedab24e54cf81f32d1d3e8b4 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:12:42 +0500
 Subject: [PATCH 2/2] feat: tell a user of a tokenHelper what to do in login,
