@@ -1,4 +1,4 @@
-From d2fdc477fd8053c6d75554dd715746af71cf18a1 Mon Sep 17 00:00:00 2001
+From 3cad8030db8bc923e505e30143aa20c967bc3565 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:11:57 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -56,7 +56,7 @@ login; config set refuses the unscoped form and project config.
  lib/commands/config.js                     |  10 +
  lib/commands/publish.js                    |   7 +-
  lib/commands/unpublish.js                  |   4 +-
- lib/npm.js                                 |  28 +
+ lib/npm.js                                 |  26 +
  lib/utils/get-identity.js                  |   2 +-
  lib/utils/oidc.js                          |  10 +
  lib/utils/publish-config.js                |  24 +
@@ -79,7 +79,7 @@ login; config set refuses the unscoped form and project config.
  workspaces/config/lib/set-envs.js          |   9 +
  workspaces/config/test/index.js            | 239 ++++++++
  workspaces/config/test/set-envs.js         |  25 +
- 27 files changed, 1829 insertions(+), 9 deletions(-)
+ 27 files changed, 1827 insertions(+), 9 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -251,26 +251,17 @@ index fc390a2..626785a 100644
          this.npm.config.checkUnknown('publishConfig', key)
        }
 diff --git a/lib/npm.js b/lib/npm.js
-index 5c42dbe..5bf08da 100644
+index 5c42dbe..4c77f0b 100644
 --- a/lib/npm.js
 +++ b/lib/npm.js
-@@ -12,6 +12,10 @@ const pkg = require('../package.json')
- const { deref } = require('./utils/cmd-list.js')
- const { jsonError, outputError } = require('./utils/output-error.js')
- 
-+// commands that make no registry request, and that remove a setting npm cannot
-+// honour: they run whatever the library can do
-+const NO_REQUESTS = ['config', 'help', 'help-search', 'completion']
-+
- class Npm {
-   static get version () {
-     return pkg.version
-@@ -289,6 +293,18 @@ class Npm {
-       execWorkspaces = true
+@@ -294,6 +294,20 @@ class Npm {
+       await commandInstance.checkDevEngines()
      }
  
 +    // a command that makes requests does not start with a helper it cannot ask
-+    if (this.config.flat.tokenHelpers && !NO_REQUESTS.includes(commandPath[0]) &&
++    // (not `config`, `help` or `completion`, which can remove the setting)
++    if (this.config.flat.tokenHelpers &&
++      !['config', 'help', 'help-search', 'completion'].includes(commandPath[0]) &&
 +      !require('npm-registry-fetch').getAuth.supportsGetAuthorization) {
 +      // an npm-registry-fetch without the option sends every request with no
 +      // credential and no word about it
@@ -281,10 +272,10 @@ index 5c42dbe..5bf08da 100644
 +      ), { code: 'ETOKENHELPER' })
 +    }
 +
-     // Check dev engines if needed
-     if (commandInstance.checkDevEngines && !this.global) {
-       await commandInstance.checkDevEngines()
-@@ -411,6 +427,12 @@ class Npm {
+     // Execute command with or without definitions
+     if (Command.definitions) {
+       // config.argv contains the full argv with flags (set by Config in production, by MockNpm in tests)
+@@ -411,6 +425,12 @@ class Npm {
      return this.#command?.name
    }
  
@@ -297,7 +288,7 @@ index 5c42dbe..5bf08da 100644
    get flatOptions () {
      const { flat } = this.config
      flat.nodeVersion = process.version
-@@ -418,6 +440,12 @@ class Npm {
+@@ -418,6 +438,12 @@ class Npm {
      if (this.command) {
        flat.npmCommand = this.command
      }
@@ -2302,7 +2293,7 @@ index 9426265..e899208 100644
 2.52.0.windows.1
 
 
-From f63848b3f4aaff2c76a4ed45a6fe56dc70517fc1 Mon Sep 17 00:00:00 2001
+From 9a8340f049055b745f045f4b4f49fcd057ab6cbe Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:12:42 +0500
 Subject: [PATCH 2/2] feat: tell a user of a tokenHelper what to do in login,
