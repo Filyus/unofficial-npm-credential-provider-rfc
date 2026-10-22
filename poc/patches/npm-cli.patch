@@ -1,4 +1,4 @@
-From e12ef8c6aa87399c9534aa70e20035ff15db5cbb Mon Sep 17 00:00:00 2001
+From f96f71d150126330328c8756ee69b5f0dfc210b8 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:11:57 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -79,9 +79,9 @@ login; config set refuses the unscoped form and project config.
  workspaces/config/lib/definitions/index.js |   8 +
  workspaces/config/lib/index.js             | 233 +++++++-
  workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 285 +++++++++
+ workspaces/config/test/index.js            | 289 +++++++++
  workspaces/config/test/set-envs.js         |  25 +
- 27 files changed, 1933 insertions(+), 32 deletions(-)
+ 27 files changed, 1937 insertions(+), 32 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -2129,10 +2129,10 @@ index 12719b5..0338354 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..9328539 100644
+index 9f83d98..eddfa01 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
-@@ -2468,3 +2468,288 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2468,292 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2321,6 +2321,10 @@ index 9f83d98..9328539 100644
 +  t.test('files outside the project, and a default path inside it, stay the user\'s', async t => {
 +    const outside = await loadHelperConfig(t, { user: keyed })
 +    t.equal(helperIn(outside.config.flat, '//helper.registry/'), HELPER, 'a chosen file outside the project')
++    const missing = await loadHelperConfig(t, {
++      files: false, user: keyed, argv: ['--userconfig=<path>/home/.npmrc', '--prefix=<path>/missing'],
++    })
++    t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there is no root')
 +    const home = await loadHelperConfig(t, { files: false, project: null, user: '', env: { HOME: '<path>/project' } })
 +    t.same(home.config.tokenHelperUntrusted, [], 'a home directory that is the checkout')
 +    const prefixOutside = await loadHelperConfig(t, { files: false, global: keyed, env: { npm_config_prefix: '<path>/prefix' } })
@@ -2458,7 +2462,7 @@ index 9426265..e899208 100644
 2.52.0.windows.1
 
 
-From a4bf0c7b23b3ce6bedab24e54cf81f32d1d3e8b4 Mon Sep 17 00:00:00 2001
+From 8aa269a42f57dea9c89365fdfd00c2285bb9d4b8 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 19:12:42 +0500
 Subject: [PATCH 2/2] feat: tell a user of a tokenHelper what to do in login,
