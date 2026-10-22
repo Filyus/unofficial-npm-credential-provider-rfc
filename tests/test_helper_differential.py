@@ -32,7 +32,7 @@ const refusal = (helper) => {
   }
   return 'was not found'
 }
-module.exports = (config) => async (regKey) => {
+module.exports = (config) => async ({ regKey }) => {
   const helper = config.flat.tokenHelpers[regKey]
   const refused = refusal(helper)
   if (refused) throw new Error(`Token helper ${JSON.stringify(helper)} ${refused}`)

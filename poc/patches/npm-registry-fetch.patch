@@ -1,17 +1,20 @@
-From 53fc91b825bcfbb4cdc38e5eacb28bda2dd66f5b Mon Sep 17 00:00:00 2001
+From 2e27571902aa04ab055d64c5fe7f2725b4a32834 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 14:46:14 +0500
 Subject: [PATCH] feat: add opts.getAuthorization, a callback that supplies the
  Authorization header
 
-A caller can pass an async function that is given a registry key and returns
-the value of the Authorization header, or nothing. It is asked for the keys a
-stored credential for the request would be looked up under, longest first: the
-keys of the request's URL, then, for a URL on the registry's own host (a
-tarball), the keys of the registry. The first value returned is sent. The walk
-ends at the key where a stored credential was found, so the function wins over
-a stored credential for the same key and a credential stored under a longer key
-wins over the function's for a shorter one.
+A caller can pass an async function that is given `{ regKey, uri }` (an object,
+so that fields can be added later) and returns the value of the Authorization
+header, or nothing. It is asked for the keys a stored credential for the request
+would be looked up under, longest first: the keys of the request's URL, then,
+for a URL on the registry's own host (a tarball), the keys of the registry. The
+first value returned is sent. The walk ends at the first key that holds a stored
+credential which sets Authorization (a token, _auth, or a username and
+password), so the function wins over a stored credential for the same key and a
+credential stored under a longer key wins over the function's for a shorter
+one. A key that holds only a client certificate and key sets no Authorization,
+so an mTLS pair at a longer key does not shadow the function at a shorter one.
 
 The value is sent as a stored credential is: same transport options, same
 http: behaviour and same redirects, and the otp retry asks again. It is not
@@ -20,42 +23,53 @@ function rejects the request unchanged. A body that is a promise or a stream
 and fails while the function runs rejects the request as well, and a stream is
 piped into gzip only once the function is done.
 
+getAuth.supportsGetAuthorization is true, so a caller that cannot do without
+the option can tell a library that ignores it.
+
 The library runs no program: a caller that wants a credential from one, such as
 npm with a configured tokenHelper, does that in the function.
 ---
- README.md    |  24 ++++++++++
- lib/auth.js  |  52 +++++++++++++++++---
- lib/index.js |  48 ++++++++++++++++---
- test/auth.js | 133 +++++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 244 insertions(+), 13 deletions(-)
+ README.md    |  32 +++++++++++
+ lib/auth.js  |  65 +++++++++++++++++++--
+ lib/index.js |  48 +++++++++++++---
+ test/auth.js | 159 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 291 insertions(+), 13 deletions(-)
 
 diff --git a/README.md b/README.md
-index f474cdc..6a47980 100644
+index f474cdc..0534136 100644
 --- a/README.md
 +++ b/README.md
-@@ -263,6 +263,30 @@ If present, other auth-related values in `opts` will be completely ignored,
+@@ -263,6 +263,38 @@ If present, other auth-related values in `opts` will be completely ignored,
  including `alwaysAuth`, `email`, and `otp`, when calculating auth for a request,
  and the auth details in `opts.forceAuth` will be used instead.
  
 +##### <a name="opts-getAuthorization"></a> `opts.getAuthorization`
 +
-+* Type: `async (regKey) => string | undefined`
++* Type: `async ({ regKey, uri }) => string | undefined`
 +* Default: null
 +
-+Called with a registry key (`//<host>[:<port>]/<path>/`) to supply the value of
-+the `Authorization` header from somewhere other than the options, for example
-+from a program the caller runs. It is asked for the keys a stored credential
-+for the request would be looked up under (the request's URL from the longest
-+key up, then the registry's keys for a URL on the registry's host), and the
-+first value returned is sent as the header. For a key that also has a stored
-+credential, the returned value wins. The request is otherwise sent exactly as
++Called with an object holding a registry key (`//<host>[:<port>]/<path>/`) and
++the URL of the request, to supply the value of the `Authorization` header from
++somewhere other than the options, for example from a program the caller runs.
++It is an object so that fields can be added later without breaking callers.
++It is asked for the keys a stored credential for the request would be looked up
++under (the request's URL from the longest key up, then the registry's keys for a
++URL on the registry's host), and the first value returned is sent as the header.
++For a key that also has a stored credential, the returned value wins. The walk
++stops at a key that holds a stored credential which sets `Authorization` (a
++token, `_auth`, or a username and password); a key that holds only a client
++certificate and key does not stop it. The request is otherwise sent exactly as
 +it is for a stored `_authToken`. An error thrown by the function rejects the
 +request as it is. It is not called for an `opts.offline` request, nor when
 +[`opts.forceAuth`](#opts-forceAuth) is set. This library runs nothing itself.
 +
++A caller that must not run without the option being honoured (a version older
++than the one that added it ignores it) can check `getAuth.supportsGetAuthorization`,
++which is `true` where it is.
++
 +```
 +{
-+  getAuthorization: async (regKey) => regKey === '//npm.corp.example.com/'
++  getAuthorization: async ({ regKey }) => regKey === '//npm.corp.example.com/'
 +    ? `Bearer ${await fetchToken()}`
 +    : undefined
 +}
@@ -65,7 +79,7 @@ index f474cdc..6a47980 100644
  
  * Type: Boolean
 diff --git a/lib/auth.js b/lib/auth.js
-index 9270025..a453f16 100644
+index 9270025..876efe5 100644
 --- a/lib/auth.js
 +++ b/lib/auth.js
 @@ -6,25 +6,31 @@ const { URL } = require('url')
@@ -106,20 +120,37 @@ index 9270025..a453f16 100644
  }
  
  // Not only do we want to know if there is auth, but if we are calling `npm
-@@ -178,4 +184,38 @@ class Auth {
+@@ -49,6 +55,13 @@ const hasAuth = (regKey, opts) => {
+   return false
+ }
+ 
++// Whether the options hold a stored credential under `regKey` that sets the
++// Authorization header; a certificate and key alone do not.
++const setsAuthorization = (regKey, opts) => {
++  const authKey = hasAuth(regKey, opts)
++  return Boolean(authKey) && authKey !== 'certfile'
++}
++
+ const sameHost = (a, b) => {
+   const parsedA = new URL(a)
+   const parsedB = new URL(b)
+@@ -178,4 +191,44 @@ class Auth {
    }
  }
  
-+// Asks `opts.getAuthorization(regKey)` for a header value under the registry
-+// keys a stored credential for `uri` would be looked up under: the keys of the
-+// URI from the longest up, then, for a URI on the registry's own host (a
-+// tarball), the keys of the registry. The first key for which the function
-+// returns a value wins. The walk ends at the key `auth` was found under, so a
-+// function wins over a stored credential for the same key, and a credential
-+// stored under a longer key wins over a function's for a shorter one.
-+// Resolves to undefined when there is no function, when the request brings its
-+// own `forceAuth`, or when no key has a value.
-+const authorize = async (uri, opts, auth) => {
++// Asks `opts.getAuthorization({ regKey, uri })` for a header value under the
++// registry keys a stored credential for `uri` would be looked up under: the
++// keys of the URI from the longest up, then, for a URI on the registry's own
++// host (a tarball), the keys of the registry. The first key for which the
++// function returns a value wins. The walk ends at the first key that holds a
++// stored credential which sets Authorization (a token, `_auth`, or a username
++// and password), so a function wins over a stored credential for the same key,
++// and a credential stored under a longer key wins over a function's for a
++// shorter one. A key that holds only a client certificate and key (mTLS) sets
++// no Authorization and does not end the walk. Resolves to undefined when there
++// is no function, when the request brings its own `forceAuth`, or when no key
++// has a value.
++const authorize = async (uri, opts) => {
 +  const { getAuthorization, forceAuth } = opts
 +  if (typeof getAuthorization !== 'function' || forceAuth) {
 +    return undefined
@@ -132,11 +163,11 @@ index 9270025..a453f16 100644
 +    }
 +  }
 +  for (const regKey of keys) {
-+    const value = await getAuthorization(regKey)
++    const value = await getAuthorization({ regKey, uri })
 +    if (value) {
 +      return value
 +    }
-+    if (regKey === auth.regKey) {
++    if (setsAuthorization(regKey, opts)) {
 +      break
 +    }
 +  }
@@ -145,8 +176,11 @@ index 9270025..a453f16 100644
 +
  module.exports = getAuth
 +module.exports.authorize = authorize
++// What a caller checks to know the library it was handed serves
++// opts.getAuthorization; an older one ignores the option without a word
++module.exports.supportsGetAuthorization = true
 diff --git a/lib/index.js b/lib/index.js
-index 91d450f..6928294 100644
+index 91d450f..4dafec3 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -3,6 +3,7 @@
@@ -192,7 +226,7 @@ index 91d450f..6928294 100644
 +  if (typeof opts.getAuthorization !== 'function' || opts.offline) {
 +    return send()
 +  }
-+  return getAuthorization(authorize(uri, opts, auth), body, bodyIsStream).then(authorization => {
++  return getAuthorization(authorize(uri, opts), body, bodyIsStream).then(authorization => {
 +    if (authorization) {
 +      headers.authorization = authorization
 +    }
@@ -219,7 +253,7 @@ index 91d450f..6928294 100644
  
  module.exports.getAuth = getAuth
 diff --git a/test/auth.js b/test/auth.js
-index ac65822..d436a03 100644
+index ac65822..ee3c816 100644
 --- a/test/auth.js
 +++ b/test/auth.js
 @@ -1,6 +1,7 @@
@@ -230,16 +264,22 @@ index ac65822..d436a03 100644
  const tnock = require('./util/tnock.js')
  
  const fetch = require('..')
-@@ -619,3 +620,135 @@ t.test('registry host matches, path does not, send auth', t => {
+@@ -619,3 +620,161 @@ t.test('registry host matches, path does not, send auth', t => {
  t.test('getAuth is exported', async t => {
    t.equal(fetch.getAuth, getAuth)
  })
 +
++t.test('getAuth says it serves opts.getAuthorization', async t => {
++  t.equal(getAuth.supportsGetAuthorization, true)
++})
++
 +t.test('opts.getAuthorization', async t => {
 +  const calls = []
 +  const answers = {}
-+  const getAuthorization = async regKey => {
++  const uris = []
++  const getAuthorization = async ({ regKey, uri }) => {
 +    calls.push(regKey)
++    uris.push(uri)
 +    return answers[regKey]
 +  }
 +  const reg = 'https://mock.reg/prefix/'
@@ -250,6 +290,7 @@ index ac65822..d436a03 100644
 +    .reply(200, '"ok"')
 +  t.beforeEach(() => {
 +    calls.length = 0
++    uris.length = 0
 +    for (const k of Object.keys(answers)) {
 +      delete answers[k]
 +    }
@@ -259,6 +300,25 @@ index ac65822..d436a03 100644
 +    reply(t, undefined)
 +    t.equal(await fetch.json('/hello', base), 'ok')
 +    t.strictSame(calls, ['//mock.reg/prefix/hello', '//mock.reg/prefix/', '//mock.reg/prefix', '//mock.reg/', '//mock.reg'])
++  })
++
++  await t.test('is given an object with the key and the URL of the request', async t => {
++    reply(t, undefined)
++    await fetch.json('/hello', base)
++    t.strictSame(uris, Array(5).fill('https://mock.reg/prefix/hello'))
++  })
++
++  await t.test('an mTLS pair at a longer key does not shadow the function at a shorter one', async t => {
++    const dir = t.testdir({ 'my.cert': 'my cert', 'my.key': 'my key' })
++    answers['//mock.reg/'] = 'Bearer fromfn'
++    reply(t, 'Bearer fromfn')
++    await fetch.json('/hello', {
++      ...base,
++      '//mock.reg/prefix/:certfile': `${dir}/my.cert`,
++      '//mock.reg/prefix/:keyfile': `${dir}/my.key`,
++    })
++    t.strictSame(calls, ['//mock.reg/prefix/hello', '//mock.reg/prefix/', '//mock.reg/prefix', '//mock.reg/'], 'the walk went past the pair')
++    t.strictSame(calls.slice(-1), ['//mock.reg/'], 'and stopped at the function\'s value')
 +  })
 +
 +  await t.test('the value is the header, as is', async t => {

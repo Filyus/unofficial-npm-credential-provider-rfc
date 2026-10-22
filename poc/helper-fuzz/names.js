@@ -26,7 +26,7 @@ const runner = require(path.resolve(process.argv[2], 'lib', 'utils', 'token-help
 // each call, so that nothing is cached
 const getTokenHelperHeader = (helper, regKey, timeout) => runner(
   { flat: { tokenHelpers: { [regKey]: helper } }, get: () => undefined },
-  {}, process.platform, { timeout, grace: 2000, drain: 250 })(regKey)
+  {}, process.platform, { timeout, grace: 2000, drain: 250 })({ regKey })
 
 const windows = process.platform === 'win32'
 const NAMES = windows

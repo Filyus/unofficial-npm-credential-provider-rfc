@@ -38,7 +38,7 @@ Module._load = load
 
 const REG = '//bridge.example/'
 const HELPER = process.platform === 'win32' ? 'C:\\bridge\\helper.exe' : '/bridge/helper'
-const ask = (helper) => runner({ flat: { tokenHelpers: { [REG]: helper } }, get: () => undefined }, {})(REG)
+const ask = (helper) => runner({ flat: { tokenHelpers: { [REG]: helper } }, get: () => undefined }, {})({ regKey: REG })
 
 const logs = []
 process.on('log', (level, ...args) => logs.push([level, ...args]))

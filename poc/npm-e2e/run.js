@@ -225,7 +225,7 @@ const main = async () => {
       '--prefer-online',
       // a helper that works shows its stderr at this level
       '--loglevel=verbose',
-    ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } }, (err, out, errOut) =>
+    ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.replaceAll('<dir>', dir)])) } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
     return {
       name,
@@ -338,8 +338,9 @@ const main = async () => {
     expect(failed, 'the helper\'s stderr is a warning', failed.output.split(/\r?\n/).some(l => /warn token-helper no keychain today/.test(l)))
     expect(failed, 'no request is sent, with the stored token or without', failed.requests.length === 0)
 
-    // a helper that runs npm itself: that npm sees the guard and starts no
-    // helper, so nothing loops; its request carries no credential
+    // a helper that runs npm itself: that npm sees the guard and fails with
+    // ETOKENHELPER instead of running a helper, so nothing loops and nothing
+    // is sent from it
     const nestedConfig = path.join(root, 'nested-user.npmrc')
     const nested = writeHelper(root, 'nested', [
       "const { spawnSync } = require('child_process')",
@@ -347,14 +348,77 @@ const main = async () => {
       `  ${JSON.stringify(`--registry=${registry}`)}, ${JSON.stringify(`--userconfig=${nestedConfig}`)},`,
       `  ${JSON.stringify(`--globalconfig=${nestedConfig}.global`)}, ${JSON.stringify(`--cache=${nestedConfig}.cache`)}],`,
       "  { env: process.env, encoding: 'utf8', timeout: 20000 })",
-      "process.stderr.write('nested npm said ' + JSON.stringify(r.stdout.trim()) + '\\n')",
+      "process.stderr.write('nested npm exited ' + r.status + ' ' + (/ETOKENHELPER/.test(r.stderr) && /own npm cannot run a token helper/.test(r.stderr) ? 'with ETOKENHELPER' : 'otherwise') + '\\n')",
       "process.stdout.write('helper-token\\n')",
     ].join('\n'))
     fs.writeFileSync(nestedConfig, `${nerf}:tokenHelper=${nested}\n`)
     const recursion = await run('recursion-guard', { user: `${nerf}:tokenHelper=${nested}\n` })
     expect(recursion, 'view succeeds with the helper token', !recursion.failed && recursion.requests.at(-1) === 'GET Bearer helper-token')
-    expect(recursion, 'the helper\'s own npm reached the registry without a credential', recursion.requests[0] === 'GET -')
-    expect(recursion, 'and printed the version', recursion.notices.some(l => l.includes('nested npm said "1.0.0"')))
+    expect(recursion, 'the helper\'s own npm sent nothing', recursion.requests.length === 1)
+    expect(recursion, 'and failed with ETOKENHELPER, saying a token helper\'s own npm cannot run one',
+      recursion.output.includes('nested npm exited 1 with ETOKENHELPER'))
+
+    const elsewhereDir = path.join(root, 'elsewhere')
+    fs.mkdirSync(elsewhereDir)
+    // a user or global file whose path the command line or the environment
+    // chose, and that lies inside the repository: `npm ci --prefix sub` makes
+    // sub/etc/npmrc the global file, a CI job writes
+    // NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc. The repository can have
+    // written either, so neither supplies a helper. (`view` stands for the
+    // command: an install of a project with no dependencies sends no request,
+    // and the config rule is the same for every command.)
+    const insideRepo = []
+    for (const [name, options] of [
+      ['prefix-sub-global-file', {
+        args: ['view', 'demo', 'version', '--prefix', 'sub'],
+        globalconfigFlag: false,
+        files: { 'sub/etc/npmrc': helperLine, 'sub/package.json': '{}' },
+      }],
+      ['env-userconfig-into-the-checkout', {
+        userconfigFlag: false,
+        env: { NPM_CONFIG_USERCONFIG: '<dir>/repo-user.npmrc' },
+      }],
+      ['env-prefix-into-the-checkout', {
+        globalconfigFlag: false,
+        env: { NPM_CONFIG_PREFIX: '<dir>/sub' },
+        files: { 'sub/etc/npmrc': helperLine },
+      }],
+      ['userconfig-flag-into-the-checkout', {
+        args: ['view', 'demo', 'version', '--userconfig', 'repo-user.npmrc'],
+        userconfigFlag: false,
+      }],
+    ]) {
+      const result = await run(name, options)
+      insideRepo.push(result)
+      expect(result, 'view still reaches the registry', !result.failed && result.requests.length > 0)
+      expect(result, 'the repository file supplies no credential', auths(result).join() === '-')
+      expect(result, 'the helper is reported as ignored, with the reason',
+        result.notices.some(l => l.includes('chosen on the command line or in the environment and lies inside the project')))
+    }
+
+    // a value that is not an existing file is never printed, whichever message it is in
+    const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
+    const pastedToken = await run('pasted-token-is-not-shown', { user: `${nerf}:tokenHelper=${pasted}\n` })
+    expect(pastedToken, 'view fails with ETOKENHELPER', pastedToken.failed && pastedToken.output.includes('ETOKENHELPER'))
+    expect(pastedToken, 'the message names the key and says the value is not shown', pastedToken.output.includes('(the value is not shown)'))
+    expect(pastedToken, 'nothing of the value is printed anywhere', !pastedToken.output.includes('4AAQSkZJRg') && !pastedToken.output.includes('AbCdEfGh'))
+    const pastedLogin = await run('pasted-token-login', { args: ['login', '--auth-type=web'], user: `${nerf}:tokenHelper=${pasted}\n` })
+    expect(pastedLogin, 'login refuses without printing it', pastedLogin.failed && pastedLogin.output.includes('(the value is not shown)') && !pastedLogin.output.includes('4AAQSkZJRg'))
+
+    // NODE_ENV and COLOR are what a parent npm set from its config, not the
+    // user's: the helper of a nested npm gets neither
+    const probe = writeHelper(root, 'probe', [
+      "process.stderr.write('probe NODE_ENV=' + process.env.NODE_ENV + ' COLOR=' + process.env.COLOR + '\\n')",
+      "process.stdout.write('helper-token\\n')",
+    ].join('\n'))
+    const probeUser = path.join(root, 'probe-user.npmrc')
+    fs.writeFileSync(probeUser, `${nerf}:tokenHelper=${probe}\n`)
+    const probed = await run('nested-node-env-and-color', {
+      args: ['run', 'child', '--omit=dev'],
+      pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --userconfig="${probeUser}" --globalconfig="${probeUser}.global" --cache="${probeUser}.cache" --loglevel=verbose` } },
+    })
+    expect(probed, 'the helper of the nested npm ran', probed.output.includes('probe NODE_ENV='))
+    expect(probed, 'and got neither the NODE_ENV nor the COLOR its parent set', probed.output.includes('probe NODE_ENV=undefined COLOR=undefined'))
 
     // what a child npm started by a script in another repository sees: the
     // parent's globalconfig in the environment, the repository's in .npmrc
@@ -369,8 +433,6 @@ const main = async () => {
     // the same through a real parent: npm runs a script that starts npm in a
     // directory with no .npmrc, which can only know that the userconfig it
     // inherits was chosen by the parent's project from the marker npm exports
-    const elsewhereDir = path.join(root, 'elsewhere')
-    fs.mkdirSync(elsewhereDir)
     const parent = await run('parent-runs-child', {
       args: ['run', 'child'],
       project: 'userconfig=<dir>/repo-user.npmrc\n',
@@ -515,7 +577,7 @@ const main = async () => {
     expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
     expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, child, parent, nodeOptions, nestedOptions, ...parity, ...children, login, logout]
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ...parity, ...children, login, logout]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)

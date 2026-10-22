@@ -75,14 +75,18 @@ jobs:
         working-directory: npm-registry-fetch
         run: node $DEPRECATIONS test/auth.js
 
+      # The patch is an mbox of two commits and goes on with `git am`. It raises
+      # the npm-registry-fetch floor in package.json to ^20.1.0, which is not
+      # published, so the dependencies are installed from the base commit's
+      # manifest first and the patch goes on afterwards.
       - name: Apply the npm-cli patch
         run: |
           git init -q npm-cli
           cd npm-cli
           git fetch -q --depth 1 https://github.com/npm/cli.git "$NPM_CLI_BASE"
           git checkout -q FETCH_HEAD
-          git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch
           node scripts/resetdeps.js
+          git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch
       - name: Test @npmcli/config
         working-directory: npm-cli
         run: node . test --ignore-scripts --workspace @npmcli/config
@@ -93,7 +97,7 @@ jobs:
           test/lib/utils/token-helper.js test/lib/npm.js
           test/lib/commands/login.js test/lib/commands/logout.js test/lib/commands/publish.js
           test/lib/commands/unpublish.js test/lib/commands/config.js test/lib/commands/profile.js
-          test/lib/commands/whoami.js test/lib/utils/oidc.js test/lib/utils/publish-config.js
+          test/lib/commands/whoami.js test/lib/utils/oidc.js test/lib/utils/publish-config.js test/lib/utils/error-message.js
       - name: Runner test with deprecations as errors
         if: env.DEPRECATIONS != ''
         working-directory: npm-cli
@@ -170,8 +174,8 @@ jobs:
             (cd $tree &&
               git fetch -q --depth 1 https://github.com/npm/cli.git "$NPM_CLI_BASE" &&
               git checkout -q FETCH_HEAD &&
-              if [ $tree = next ]; then git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch; fi &&
-              node scripts/resetdeps.js)
+              node scripts/resetdeps.js &&
+              if [ $tree = next ]; then git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch; fi)
           done
           # npm itself then runs on the prototype's npm-registry-fetch too
           git init -q npm-registry-fetch
