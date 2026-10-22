@@ -1,0 +1,8 @@
+{
+  "comment": "Scenarios of examples/providers/gitlab/scenarios that do not run against a real GitLab, and why. Every scenario is either run or listed here (the run fails otherwise), and an entry for a scenario that does not exist fails it too. `majorBelow`: the entry holds only for a GitLab whose major version is below it.",
+  "skips": {
+    "install-refresh-unavailable": { "reason": "the scenario needs the token endpoint to answer the refresh grant with HTTP 503, as when GitLab is down; a real GitLab is not made to fail on request." },
+    "rejection-delete-failed": { "reason": "the scenario needs GitLab to answer the deletion of a deploy token with HTTP 500 and delete nothing; a real GitLab is not made to fail on request." },
+    "login-unapproved": { "reason": "the scenario ends a login nobody approves by the provider's own deadline, 4 minutes 30 seconds of synthetic time that a run spends in an instant; GitLab judges the polls against its real interval (5 s) and expires the device code after 300 real seconds, so a run would take as long as the login does. The unapproved poll and the poll that comes too soon are in the probes." }
+  }
+}

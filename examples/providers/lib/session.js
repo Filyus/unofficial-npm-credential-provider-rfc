@@ -12,8 +12,9 @@ const { readJsonl } = require('./scenario.js')
 const { SENTINEL } = require('./protocol.js')
 
 // Runs the session and returns the provider's stderr. `hooks` (all optional):
-//   expected(message)        the recorded provider message, as this run must see it
-//                            (a live run swaps in the tokens a real server minted)
+//   expected(message, got)   the recorded provider message, as this run must see it
+//                            (a live run swaps in the tokens a real server minted; `got` is
+//                            what the provider answered, for a value no run can know in advance)
 //   beforeClient(message)    called before a client request is sent (async)
 //   afterAnswer(request, message)  called with each provider answer (async)
 const runSession = async (run, transcriptFile, hooks = {}) => {
@@ -61,7 +62,7 @@ const runSession = async (run, transcriptFile, hooks = {}) => {
         pending = event.message
       } else {
         const got = await next(pending ? `the answer to ${pending.kind}` : 'hello')
-        const want = hooks.expected ? hooks.expected(event.message) : event.message
+        const want = hooks.expected ? hooks.expected(event.message, got) : event.message
         assert.deepStrictEqual(got, want, `${where}\n${stderr}`)
         if (pending && hooks.afterAnswer) {
           await hooks.afterAnswer(pending, got)

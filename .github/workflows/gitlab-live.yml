@@ -1,0 +1,81 @@
+# The GitLab reference provider against a real GitLab CE, not only against its fake
+# (examples/providers/live/gitlab.js). GitLab takes about 15 minutes to start, so this
+# runs by hand (workflow_dispatch) on the pinned image, and every night on the
+# `latest` tag:
+#
+#  - pinned: a reproducible check of our code against one GitLab version; the version
+#    is the default of the `image` input, and examples/gitlab.md names it;
+#  - nightly on `latest`: catches GitLab changing under us. The run prints the GitLab
+#    version it actually got, at the start and in its last line, so that a failure says
+#    which GitLab changed.
+#
+# The instance is a throwaway on the runner: its root password is generated here and
+# is no secret. Every request the harness makes to it is to http://localhost:8929.
+name: gitlab-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'GitLab CE image to run against'
+        default: 'gitlab/gitlab-ce:19.5.1-ce.0'
+        type: string
+  schedule:
+    # after the fuzz soak
+    - cron: '30 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  gitlab-live:
+    name: provider against a real GitLab
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      # the nightly run is against `latest`; a dispatch names its image, by default the pinned one
+      GITLAB_IMAGE: ${{ github.event_name == 'schedule' && 'gitlab/gitlab-ce:latest' || inputs.image }}
+      GITLAB_URL: http://localhost:8929
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: start GitLab (${{ env.GITLAB_IMAGE }})
+        run: |
+          echo "GITLAB_ROOT_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+          . "$GITHUB_ENV"
+          # a trimmed GitLab: one Puma process, few Sidekiq threads, no monitoring
+          docker run -d --name gitlab --shm-size 256m -p 8929:8929 \
+            -e GITLAB_ROOT_PASSWORD="$GITLAB_ROOT_PASSWORD" \
+            -e GITLAB_OMNIBUS_CONFIG="external_url 'http://localhost:8929'; puma['worker_processes']=0; sidekiq['concurrency']=5; prometheus_monitoring['enable']=false; gitlab_rails['monitoring_whitelist']=['0.0.0.0/0']; gitlab_rails['usage_ping_enabled']=false; gitlab_kas['enable']=false" \
+            "$GITLAB_IMAGE"
+          docker image inspect "$GITLAB_IMAGE" --format 'image {{.Id}} {{.RepoDigests}}'
+      - name: wait for GitLab to be ready
+        run: |
+          start=$(date +%s)
+          until docker exec gitlab curl -sf 'http://localhost:8929/-/readiness?all=1' >/dev/null 2>&1; do
+            if [ $(( $(date +%s) - start )) -gt 1200 ]; then
+              echo "GitLab was not ready after 20 minutes"
+              docker logs --tail 200 gitlab
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "ready after $(( $(date +%s) - start )) s"
+          echo "GitLab version file: $(docker exec gitlab cat /opt/gitlab/embedded/service/gitlab-rails/VERSION)"
+      - name: provider against GitLab
+        env:
+          GITLAB_LIVE_TRACE: '1'
+        run: |
+          expect=""
+          case "$GITLAB_IMAGE" in
+            *:latest|*:nightly|*:rc) ;;
+            *) expect="--expect-image-tag ${GITLAB_IMAGE##*:}" ;;
+          esac
+          node examples/providers/live/gitlab.js --container gitlab $expect --image "$GITLAB_IMAGE"
+      - name: GitLab's log
+        if: failure()
+        run: |
+          docker logs --tail 100 gitlab || true
+          docker exec gitlab tail -n 150 /var/log/gitlab/gitlab-rails/production.log || true

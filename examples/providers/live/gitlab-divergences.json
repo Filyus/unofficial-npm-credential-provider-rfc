@@ -1,0 +1,4 @@
+{
+  "comment": "Differences between examples/providers/gitlab/fake.js and a real GitLab CE that are known and kept, one entry each: the exact `id` the run prints, the GitLab majors it holds for, and the reason. A difference not listed fails the run; so does an entry that no longer matches anything.",
+  "allow": []
+}
