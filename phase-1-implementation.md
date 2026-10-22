@@ -1,5 +1,7 @@
 # Phase 1 implementation
 
+> The prototype described here is the pre-split, hardened one, kept on branch `token-helper-hardened`. [Phase 1](phase-1-token-helper.md) is now Phase 1a, and the prototype is being reworked to it; what this page says about transport, redirects, the cache and error responses belongs to [Phase 1b](phase-1b-credential-hardening.md), and about filesystem-identity trust to the old rule that 1a replaces with a narrower one. Rule rows below follow the code and change when it does.
+
 How the `tokenHelper` prototype described in [Phase 1](phase-1-token-helper.md) is built and how it was checked. [Rule by rule](#rule-by-rule) maps each statement in Phase 1 to the test or source behind it, and [sources.md](sources.md) holds what the RFC says about npm, pnpm and others.
 
 ## Where the code is

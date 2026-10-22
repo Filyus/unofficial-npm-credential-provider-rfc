@@ -6,20 +6,21 @@ An independent proposal for letting npm get registry credentials from a user-con
 
 | Document | What it is |
 |---|---|
-| [Phase 1: `tokenHelper`](phase-1-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it. The motivation, and the trust rule both phases follow. Lands on its own, without Phase 2 |
+| [Phase 1a: `tokenHelper`](phase-1-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it as a stored token is sent. The motivation, and the trust rule both phases follow. Lands on its own, without 1b or Phase 2 |
+| [Phase 1b: credential hardening](phase-1b-credential-hardening.md) | How every credential travels, stored tokens, helpers and providers alike: `https:` or loopback only, transport from config a project cannot write, redirects, the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major |
 | [Phase 2: credential provider protocol](phase-2-credential-provider.md) | A versioned JSON protocol modelled on Cargo's: npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login`/`logout` delegation, the security model, prior art |
 | [Examples](examples/README.md) | How providers for real registries would answer, and where each is easy to get wrong |
 
 The old address, [rfc-credential-provider.md](rfc-credential-provider.md), says where each of its sections went.
 
-Phase 1 changes nothing for anyone who has not configured a helper, Phase 2 nothing for anyone who has not configured a provider, and both are configured only in the user's own user or global npm config.
+Phase 1a changes nothing for anyone who has not configured a helper, Phase 1b nothing until its setting is turned on, Phase 2 nothing for anyone who has not configured a provider, and both are configured only in the user's own user or global npm config.
 
 ## Evidence
 
 | Document | What it holds |
 |---|---|
 | [sources.md](sources.md) | Is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are |
-| [phase-1-implementation.md](phase-1-implementation.md) | Does the npm patch do what Phase 1 says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
+| [phase-1-implementation.md](phase-1-implementation.md) | Does the npm patch do what Phase 1a says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
 | [phase-2-conformance.md](phase-2-conformance.md) | What does the conformance material check, rule by rule, and what can only an npm client show? The artifacts, each Phase 2 rule with its test, the fuzzing history |
 | [stage-tiers-test.md](stage-tiers-test.md) | The live test of which npmjs.com tokens read `/-/stage`, and its result |
 | [poc/patches](poc/patches) | The prototype as patches against upstream npm/cli and npm-registry-fetch |
@@ -75,7 +76,7 @@ node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 
 ## Prior art
 
-- [pnpm `tokenHelper`](https://pnpm.io/settings#urltokenhelper): the Phase 1 model.
+- [pnpm `tokenHelper`](https://pnpm.io/settings#urltokenhelper): the Phase 1a model.
 - [Cargo credential provider protocol](https://doc.rust-lang.org/cargo/reference/credential-provider-protocol.html): version negotiation, JSON over stdin/stdout, cache policy, operation context, chaining.
 - [Git credential helpers](https://git-scm.com/docs/gitcredentials) and [Docker credential helpers](https://docs.docker.com/reference/cli/docker/login/#credential-stores): a decade of external credential programs.
 - [NuGet cross-platform plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-plugins) and [authentication plugins](https://learn.microsoft.com/en-us/nuget/reference/extensibility/nuget-cross-platform-authentication-plugin): the closest prior art to Phase 2.
