@@ -47,7 +47,10 @@ PINNED_SOURCE = re.compile(r"^https://github\.com/[^/]+/[^/]+/blob/[0-9a-f]{40}/
 
 
 def documents() -> list[Path]:
-    return sorted(path for path in ROOT.rglob("*.md") if not SKIP & set(path.relative_to(ROOT).parts))
+    # the tracked documents, as tools/prose.py reads them: a directory walk would
+    # also read another worktree checked out under .claude/worktrees/
+    listed = subprocess.run(["git", "ls-files", "*.md"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    return sorted(ROOT / name for name in listed.split() if not SKIP & set(Path(name).parts))
 
 
 def key(url: str) -> str:
