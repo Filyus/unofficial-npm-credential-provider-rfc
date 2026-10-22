@@ -173,7 +173,7 @@ pnpm 12, the latest release, is a Rust CLI; the TypeScript CLI is pnpm 11, which
 | When it fails | pnpm 11: an error, before any request. pnpm 12: logged, and the request goes out without `Authorization` | `ETOKENHELPER`, and no fallback to another credential |
 | Helper and `_authToken` for one registry | The helper wins; in pnpm 11 `publish` the `_authToken` wins and the helper does not run. OIDC wins over both in `publish` | The helper wins; OIDC wins over both |
 | `publish` | Runs the helper since 8.14.1 ([issue 7316](https://github.com/pnpm/pnpm/issues/7316)); pnpm 11 has a path of its own for it | Runs the helper, and counts it as being logged in |
-| Registry on `http:` | pnpm 12 sends the credential; pnpm 11 was not checked | `https:` only, and `http:` to a loopback address |
+| Registry on `http:`, or on another port | Both send the credential: the lookup key drops the scheme, and pnpm 11 falls back to the key without the port, so `//host/`'s credential also goes to `host:8080` | `https:` only, and `http:` to a loopback address; the port is part of the key, as npm's `//host[:port]/` keys have always been |
 
 The two agree on an absolute path with no spaces and no arguments that prints a one-line token, for what a request carries; around the run they differ, as the rows say. Where npm is stricter, it is for a reason particular to npm:
 
@@ -183,7 +183,7 @@ The two agree on an absolute path with no spaces and no arguments that prints a 
 - **No per-scope helpers:** one helper per registry is what Phase 1 offers; telling scopes apart is what Phase 2's request context is for.
 - **A failure ends the request:** npm stops with the helper named, as pnpm 11 does. pnpm 12 sends the request without the credential, so a registry that serves public packages to anyone answers as if no login existed, and a private one answers 401 or 404 with nothing to say why.
 - **The helper's own directory and environment:** pnpm gives the helper the project directory and everything in its environment. For npm, which exports a project's config to what it starts, that would let a repository's `.npmrc` reach the helper through `NODE_OPTIONS` or `PATH` ([How the helper runs](#how-the-helper-runs)).
-- **Only `https:`:** a helper's credential is new, so it starts stricter than a stored token ([Which requests get the credential](#which-requests-get-the-credential)); pnpm 12 also sends it to an `http:` registry.
+- **Only `https:`:** a helper's credential is new, so it starts stricter than a stored token ([Which requests get the credential](#which-requests-get-the-credential)); pnpm 11 and 12 also send it to an `http:` registry.
 
 ### Vendor CLIs
 

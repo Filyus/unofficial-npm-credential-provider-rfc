@@ -911,6 +911,10 @@
     "kind": "source",
     "cited": "2026-10-22"
   },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/registry-auth-key/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
   "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/docs/npmrc.md": {
     "kind": "source",
     "cited": "2026-10-22"
