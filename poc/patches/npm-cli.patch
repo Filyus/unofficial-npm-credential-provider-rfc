@@ -1,4 +1,4 @@
-From 8234a74ef5b1f7d00e11a0faea24a9e7760191ff Mon Sep 17 00:00:00 2001
+From 7836c748f286f1088b4554f2013d88cf0daac5f6 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -41,7 +41,7 @@ helper's credential instead of the request's own settings.
 
 Pairs with the npm-registry-fetch change that runs the helper.
 ---
- docs/lib/content/configuring-npm/npmrc.md  |  15 +-
+ docs/lib/content/configuring-npm/npmrc.md  |  25 +-
  lib/commands/config.js                     |  16 +-
  lib/commands/login.js                      |  10 +
  lib/commands/logout.js                     |  18 +
@@ -70,7 +70,7 @@ Pairs with the npm-registry-fetch change that runs the helper.
  workspaces/config/lib/set-envs.js          |   9 +
  workspaces/config/test/index.js            | 722 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  25 +
- 29 files changed, 1454 insertions(+), 21 deletions(-)
+ 29 files changed, 1464 insertions(+), 21 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
@@ -78,7 +78,7 @@ Pairs with the npm-registry-fetch change that runs the helper.
  create mode 100644 test/lib/utils/publish-config.js
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index b1e7d16..db39bed 100644
+index b1e7d16..668baac 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -87,7 +87,7 @@ This is primarily for distribution maintainers to override default configs in a
@@ -90,7 +90,7 @@ index b1e7d16..db39bed 100644
  This ensures that `npm` will never send credentials to the wrong host.
  
  The full list is:
-@@ -99,12 +99,25 @@ The full list is:
+@@ -99,12 +99,35 @@ The full list is:
   - `cafile` (path to certificate authority file)
   - `certfile` (path to certificate file)
   - `keyfile` (path to key file)
@@ -109,9 +109,19 @@ index b1e7d16..db39bed 100644
 +//npm.corp.example.com/:tokenHelper=/usr/local/bin/corp-registry-token
 +```
 +
-+The value is an absolute path with no arguments; it may contain spaces, and unlike pnpm, npm does not split it into a command and arguments. npm runs the program the first time a request to that registry needs a credential, at most once per npm process, with an empty stdin and a 60 second timeout. Its stdout is the credential: a raw token is sent as `Authorization: Bearer <token>`, and output that already starts with an auth scheme, such as `Basic …`, is used as the header value. Lines the program writes to stderr are shown as warnings. If the program fails, prints nothing, prints more than one line or characters outside printable ASCII, or times out, the request fails; npm does not fall back to another credential for that registry. When a registry has both a `tokenHelper` and a stored credential, the helper is used, so `npm login` refuses for that registry and `npm logout` explains that the setting has to be removed.
++The value is an absolute path with no arguments; it may contain spaces, and unlike pnpm, npm does not split it into a command and arguments. npm runs the program the first time a request to that registry needs a credential, at most once per npm process. Its stdout is the credential: a raw token is sent as `Authorization: Bearer <token>`, and output that already starts with an auth scheme, such as `Basic …`, is used as the header value. Lines the program writes to stderr are shown as warnings. If the program fails, prints nothing, prints more than one line or characters outside printable ASCII, or times out, the request fails; npm does not fall back to another credential for that registry. When a registry has both a `tokenHelper` and a stored credential, the helper is used, so `npm login` refuses for that registry and `npm logout` explains that the setting has to be removed.
 +
-+Because npm executes the program, `tokenHelper` is honored only from the per-user and global config files, and only when the setting that selected the file (`userconfig`, `globalconfig`, `prefix`) did not come from a project `.npmrc`, and only when the file does not lie inside a project, meaning any directory from the current one up that has a `package.json` or `node_modules`, or a `--prefix` outside a global run: `npm --prefix client` makes `client/etc/npmrc` the global config file, and a file in a checkout is the repository's whoever points npm at it. The home directory does not count as a project, and the default `~/.npmrc` and global config file stay trusted. The program starts in its own directory and does not receive `NODE_OPTIONS`, `npm_config_*` or the other variables npm sets from its config. It is ignored with a warning in a project `.npmrc`, in `publishConfig`, in the environment and on the command line. Unlike pnpm, npm does not accept an unscoped `tokenHelper` for the default registry, since a project can change which registry is the default, nor a helper per package scope (`//host/:@scope:tokenHelper`); both are ignored with a warning.
++Because npm executes the program, `tokenHelper` is honored only from the per-user and global config files, and only when the setting that selected the file (`userconfig`, `globalconfig`, `prefix`) did not come from a project `.npmrc`, and only when the file does not lie inside a project, meaning any directory from the current one up that has a `package.json` or `node_modules`, or a `--prefix` outside a global run: `npm --prefix client` makes `client/etc/npmrc` the global config file, and a file in a checkout is the repository's whoever points npm at it. The home directory does not count as a project, and the default `~/.npmrc` and global config file stay trusted. It is ignored with a warning in a project `.npmrc`, in `publishConfig`, in the environment and on the command line. Unlike pnpm, npm does not accept an unscoped `tokenHelper` for the default registry, since a project can change which registry is the default, nor a helper per package scope (`//host/:@scope:tokenHelper`); both are ignored with a warning.
++
++How npm runs the helper and uses its credential:
++
++- The helper gets an empty stdin and starts in its own directory. It has 60 seconds, and more than 1 MiB of output fails the request.
++- Variables a project can control are removed from its environment: `npm_config_*`, `NODE_OPTIONS`, `EDITOR`, `NODE_ENV`, `COLOR`, `INIT_CWD`, `NODE`, `npm_execpath`, `npm_node_execpath` and `npm_command`. When npm runs inside `npm run`, the `node_modules/.bin` directories and `node-gyp-bin` directory it added to `PATH` are removed too.
++- On Windows a `.cmd` or `.bat` helper runs through `cmd.exe`. A path containing `"` or `%` is refused.
++- The credential is sent only over `https:`, or over `http:` to `localhost`, `127.0.0.1` or `[::1]`. An `http:` request to the registry host, such as a lockfile's `resolved` URL, is sent without it and does not start the helper.
++- A request that carries the credential reads `proxy`, `https-proxy`, `noproxy`, `ca`, `cafile`, `strict-ssl` and `local-address` only from config a project cannot write: the environment, the command line, the user and global files npm trusts, and the defaults.
++- While an OIDC trusted-publishing token is in use for a registry, it is sent instead of the helper's credential.
++- The credential is hidden in the helper's stderr, which is logged as warnings, and in an error response from the registry.
 +
  ### Unsupported Custom Configuration Keys
  
