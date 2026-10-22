@@ -1,9 +1,9 @@
 'use strict'
 
-// End-to-end check of the Phase 1 `tokenHelper` prototype: a real npm, from a
+// End-to-end check of the Phase 1a `tokenHelper` prototype: a real npm, from a
 // local npm/cli checkout with the prototype npm-registry-fetch laid over its
-// bundled copy, against a local registry that records every request and the
-// Authorization header it carried.
+// bundled copy (the `getAuthorization` seam), against a local registry that
+// records every request and the Authorization header it carried.
 //
 //   node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>
 //
@@ -23,7 +23,7 @@ if (!npmCliDir || !fetchDir) {
   process.exit(2)
 }
 
-const OVERLAY = ['auth.js', 'index.js', 'token-helper.js']
+const OVERLAY = ['auth.js', 'index.js']
 const bundled = path.join(npmCliDir, 'node_modules', 'npm-registry-fetch', 'lib')
 // two runs against one checkout would each back up the other's overlay, and
 // the one restoring last would leave it in place
@@ -76,26 +76,26 @@ const overlay = () => {
 }
 
 // The helper sits in a directory whose name has a space and writes to stderr,
-// including something that looks like a credential, so quoting, stderr
-// forwarding and masking are all exercised.
-const writeHelper = (root) => {
+// including its own token, so quoting, stderr forwarding and masking are all
+// exercised. `js` is the body of the node script the helper starts.
+const HELPER_JS = [
+  "process.stderr.write('helper says hello\\n')",
+  // the helper's own token, which npm hides wherever it appears
+  "process.stderr.write('fetched helper-token from the keychain\\n')",
+  "process.stdout.write('helper-token\\n')",
+].join('\n')
+const writeHelper = (root, name = 'helper', js = HELPER_JS) => {
   const dir = path.join(root, 'token helpers')
   fs.mkdirSync(dir, { recursive: true })
-  const script = path.join(dir, 'helper.js')
-  fs.writeFileSync(script, [
-    "process.stderr.write('helper says hello\\n')",
-    "process.stderr.write('debug: Authorization: Bearer leaked-in-stderr\\n')",
-    // the helper's own token, in a form only scrub() can recognise
-    "process.stderr.write('fetched helper-token from the keychain\\n')",
-    "process.stdout.write('helper-token\\n')",
-  ].join('\n'))
+  const script = path.join(dir, `${name}.js`)
+  fs.writeFileSync(script, js)
   if (process.platform === 'win32') {
-    const helper = path.join(dir, 'helper.cmd')
+    const helper = path.join(dir, `${name}.cmd`)
     fs.writeFileSync(helper, `@"${process.execPath}" "${script}"\r\n`)
     return helper
   }
   // a shell wrapper, so a node path with spaces cannot break a shebang
-  const helper = path.join(dir, 'helper')
+  const helper = path.join(dir, name)
   // single quotes, with any single quote in a path escaped, so the shell
   // expands nothing in the paths
   const sq = s => `'${s.replaceAll("'", "'\\''")}'`
@@ -126,10 +126,9 @@ const main = async () => {
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
       res.setHeader('content-type', 'application/json')
-      // a registry that rejects the credential and quotes it back
-      if (req.url.startsWith('/echo')) {
-        res.statusCode = 401
-        return res.end(JSON.stringify({ error: `rejected: ${req.headers.authorization}` }))
+      // trusted publishing: the id token is exchanged for a token
+      if (req.url.startsWith('/-/npm/v1/oidc/token/exchange/')) {
+        return res.end(JSON.stringify({ token: 'oidc-token' }))
       }
       // a registry that sends the client somewhere else: another host name,
       // or the same host on another port
@@ -163,8 +162,7 @@ const main = async () => {
   const server = http.createServer(handle)
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   // the same registry on an address of this machine that is not a loopback
-  // one, where an http: request is not allowed to carry a helper's credential;
-  // a machine with no such address skips the checks that need it
+  // one; a machine with no such address skips the checks that need it
   const lanAddress = Object.values(os.networkInterfaces()).flat()
     .find(i => i && i.family === 'IPv4' && !i.internal)?.address
   const lan = lanAddress && http.createServer(handle)
@@ -172,8 +170,7 @@ const main = async () => {
     await new Promise(resolve => lan.listen(0, lanAddress, resolve))
   }
   // a proxy a repository's .npmrc names: it records what it is asked to
-  // forward and refuses, so nothing it sees is a secret that left npm by
-  // that route
+  // forward and refuses
   const proxySeen = []
   const proxy = http.createServer((req, res) => {
     req.resume()
@@ -194,12 +191,12 @@ const main = async () => {
   const nerf = `//127.0.0.1:${port}/`
   const helper = writeHelper(root)
   const helperLine = `${nerf}:tokenHelper=${helper}\n`
+  const npmCli = path.join(npmCliDir, 'bin', 'npm-cli.js')
 
   const run = async (name, {
     args = ['view', 'demo', 'version'], registryUrl = registry, user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {},
   }) => {
-    // the repository, and beside it the user's own files: npm does not trust
-    // a user or global config file that lies inside the project
+    // the repository, and beside it the user's own files
     const dir = path.join(root, name, 'repo')
     const home = path.join(root, name, 'home')
     fs.mkdirSync(dir, { recursive: true })
@@ -216,29 +213,31 @@ const main = async () => {
     seen.length = 0
     elsewhereSeen.length = 0
     proxySeen.length = 0
-    const { stdout, stderr, failed } = await new Promise(resolve => execFile(process.execPath, [
-      path.join(npmCliDir, 'bin', 'npm-cli.js'), ...args,
+    const { stdout, stderr, failed, code } = await new Promise(resolve => execFile(process.execPath, [
+      npmCli, ...args,
       `--registry=${registryUrl}`,
       // a --userconfig flag would outrank a project redirect, so the redirect
-      // scenario leaves it out
+      // scenarios leave it out
       ...(userconfigFlag ? [`--userconfig=${path.join(home, 'user.npmrc')}`] : []),
-      // a child npm gets this from its parent's environment instead, and a
-      // prefix chooses it when there is none
+      // a child npm gets this from its parent's environment instead
       ...(env.npm_config_globalconfig || !globalconfigFlag ? [] : [`--globalconfig=${path.join(home, 'global.npmrc')}`]),
       `--cache=${path.join(home, 'cache')}`,
       '--prefer-online',
+      // a helper that works shows its stderr at this level
+      '--loglevel=verbose',
     ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } }, (err, out, errOut) =>
-      resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err })))
+      resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
     return {
       name,
       failed,
+      code,
       output: stdout + stderr,
       stdout: stdout.trim(),
       requests: seen.map(s => `${s.method} ${s.authorization || '-'}`),
       proxy: proxySeen.map(s => `${s.method} ${s.url} ${s.authorization || '-'}`),
       elsewhere: elsewhereSeen.map(s => `${s.method} ${s.url} ${s.authorization || "-"}`),
       notices: stderr.split(/\r?\n/).filter(l =>
-        /tokenHelper|token-helper|ETOKENHELPER|Unknown|ENEEDAUTH|leaked/.test(l)),
+        /tokenHelper|token-helper|ETOKENHELPER|ENEEDAUTH|Ignoring|helper says|helper-token/.test(l)),
     }
   }
 
@@ -250,8 +249,7 @@ const main = async () => {
   const auths = r => [...new Set(r.requests.map(x => x.split(' ').slice(1).join(' ')))]
 
   // handlers first, so an interrupt during the overlay itself is covered; on
-  // Windows only Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) reach a handler,
-  // a forced termination cannot be intercepted at all
+  // Windows only Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) reach a handler
   let restore = null
   const cleanUp = () => {
     if (restore) {
@@ -283,7 +281,6 @@ const main = async () => {
     expect(user, 'view succeeds', !user.failed && user.stdout === '1.0.0')
     expect(user, 'every request carries the helper token', user.requests.length && auths(user).join() === 'Bearer helper-token')
     expect(user, 'helper stderr reaches the user', user.notices.some(l => l.includes('helper says hello')))
-    expect(user, 'a credential in stderr is masked', !user.notices.some(l => l.includes('leaked-in-stderr')))
     expect(user, 'the helper token echoed on stderr is hidden', user.notices.some(l => l.includes('fetched *** from')) &&
       !user.notices.some(l => l.includes('helper-token')))
 
@@ -298,10 +295,12 @@ const main = async () => {
     })
     expect(redirect, 'view still reaches the registry', !redirect.failed && redirect.requests.length)
     expect(redirect, 'the repository file supplies no credential', auths(redirect).join() === '-')
-    expect(redirect, 'the helper is reported as ignored', redirect.notices.some(l => l.includes('selected by project config')))
+    expect(redirect, 'the helper is reported as ignored', redirect.notices.some(l => l.includes('project config sets userconfig')))
 
     const stale = await run('helper-beats-stale-token', { user: `${helperLine}${nerf}:_authToken=stale\n` })
     expect(stale, 'the helper wins', stale.requests.length && auths(stale).join() === 'Bearer helper-token')
+    expect(stale, 'npm warns once, naming the _authToken it ignores',
+      stale.notices.filter(l => l.includes(`${nerf}:_authToken`) && l.includes('ignored')).length === 1)
 
     const publish = await run('publish-with-helper-only', { args: ['publish'], user: helperLine })
     expect(publish, 'publish does not refuse with ENEEDAUTH', !publish.notices.some(l => l.includes('ENEEDAUTH')))
@@ -316,6 +315,47 @@ const main = async () => {
     expect(publishConfig, 'no request carries the helper token', !publishConfig.requests.some(r => r.endsWith('helper-token')))
     expect(publishConfig, 'the key is reported as ignored', publishConfig.notices.some(l => l.includes('Ignoring publishConfig')))
 
+    // trusted publishing: the exchange for an OIDC token is made with the id
+    // token, and the publish that follows carries the token it returned; the
+    // helper is not used for either
+    const oidc = await run('oidc-beats-helper', {
+      args: ['publish'],
+      user: `${helperLine}${nerf}:_authToken=stored\n`,
+      env: { GITLAB_CI: 'true', NPM_ID_TOKEN: 'id-token' },
+    })
+    expect(oidc, 'the exchange carries the id token', oidc.requests.includes('POST Bearer id-token'))
+    expect(oidc, 'the PUT carries the OIDC token', oidc.requests.includes('PUT Bearer oidc-token'))
+    expect(oidc, 'no request carries the helper token', !oidc.requests.some(r => r.endsWith('helper-token')))
+
+    // a helper that fails is npm's error, with npm's own exit status, and no
+    // other credential is tried
+    const failing = writeHelper(root, 'failing', "process.stderr.write('no keychain today\\n')\nprocess.exit(3)")
+    const failed = await run('failing-helper', {
+      user: `${nerf}:tokenHelper=${failing}\n${nerf}:_authToken=stored\n`,
+    })
+    expect(failed, 'view fails with ETOKENHELPER', failed.failed && failed.output.includes('ETOKENHELPER') && failed.output.includes('exited with status 3'))
+    expect(failed, 'npm exits with its own status, 1, not the helper\'s 3', failed.code === 1)
+    expect(failed, 'the helper\'s stderr is a warning', failed.output.split(/\r?\n/).some(l => /warn token-helper no keychain today/.test(l)))
+    expect(failed, 'no request is sent, with the stored token or without', failed.requests.length === 0)
+
+    // a helper that runs npm itself: that npm sees the guard and starts no
+    // helper, so nothing loops; its request carries no credential
+    const nestedConfig = path.join(root, 'nested-user.npmrc')
+    const nested = writeHelper(root, 'nested', [
+      "const { spawnSync } = require('child_process')",
+      `const r = spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(npmCli)}, 'view', 'demo', 'version',`,
+      `  ${JSON.stringify(`--registry=${registry}`)}, ${JSON.stringify(`--userconfig=${nestedConfig}`)},`,
+      `  ${JSON.stringify(`--globalconfig=${nestedConfig}.global`)}, ${JSON.stringify(`--cache=${nestedConfig}.cache`)}],`,
+      "  { env: process.env, encoding: 'utf8', timeout: 20000 })",
+      "process.stderr.write('nested npm said ' + JSON.stringify(r.stdout.trim()) + '\\n')",
+      "process.stdout.write('helper-token\\n')",
+    ].join('\n'))
+    fs.writeFileSync(nestedConfig, `${nerf}:tokenHelper=${nested}\n`)
+    const recursion = await run('recursion-guard', { user: `${nerf}:tokenHelper=${nested}\n` })
+    expect(recursion, 'view succeeds with the helper token', !recursion.failed && recursion.requests.at(-1) === 'GET Bearer helper-token')
+    expect(recursion, 'the helper\'s own npm reached the registry without a credential', recursion.requests[0] === 'GET -')
+    expect(recursion, 'and printed the version', recursion.notices.some(l => l.includes('nested npm said "1.0.0"')))
+
     // what a child npm started by a script in another repository sees: the
     // parent's globalconfig in the environment, the repository's in .npmrc
     const child = await run('child-project-globalconfig', {
@@ -324,26 +364,25 @@ const main = async () => {
     })
     expect(child, 'view still reaches the registry', !child.failed && child.requests.length)
     expect(child, 'the repository file supplies no credential', auths(child).join() === '-')
-    expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('selected by project config')))
+    expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('project config sets userconfig')))
 
     // the same through a real parent: npm runs a script that starts npm in a
     // directory with no .npmrc, which can only know that the userconfig it
     // inherits was chosen by the parent's project from the marker npm exports
-    const elsewhere = path.join(root, 'elsewhere')
-    fs.mkdirSync(elsewhere)
-    const npmCli = path.join(npmCliDir, 'bin', 'npm-cli.js')
+    const elsewhereDir = path.join(root, 'elsewhere')
+    fs.mkdirSync(elsewhereDir)
     const parent = await run('parent-runs-child', {
       args: ['run', 'child'],
       project: 'userconfig=<dir>/repo-user.npmrc\n',
       userconfigFlag: false,
-      pkg: { scripts: { child: `cd "${elsewhere}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
+      pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
     })
     expect(parent, 'the child npm reaches the registry', !parent.failed && parent.requests.length)
     expect(parent, 'the repository file supplies no credential to it', auths(parent).join() === '-')
 
     // Other ways a repository's scripts start npm. A script that drops the
-    // marker is the repository's own code, so the rule that a file inside
-    // the project is the repository's has to hold without the marker.
+    // marker but stays in the project is still refused: the project's own
+    // .npmrc sets userconfig for the child as well.
     const childScript = (cwd, dropMarker) => [
       "const { spawnSync } = require('child_process')",
       'const env = { ...process.env }',
@@ -388,7 +427,7 @@ const main = async () => {
       ...chosenUserconfig,
       args: ['run', 'child'],
       pkg: { scripts: { child: `"${process.execPath}" child.js` } },
-      files: { 'child.js': childScript(JSON.stringify(elsewhere), true) },
+      files: { 'child.js': childScript(JSON.stringify(elsewhereDir), true) },
     })
     children.push(outside)
     // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
@@ -398,117 +437,59 @@ const main = async () => {
 
     // a repository's node-options would reach a node-based helper through
     // NODE_OPTIONS and could read the credential it prints
+    const evil = "if (/helper\\.js$/.test(process.argv[1] || '')) require('fs').writeFileSync(__dirname + '/pwned', '')\n"
     const nodeOptions = await run('project-node-options', {
       user: helperLine,
       project: 'node-options=--require=<dir>/evil.js\n',
-      files: {
-        'evil.js': "if (/helper\\.js$/.test(process.argv[1] || '')) require('fs').writeFileSync(__dirname + '/pwned', '')\n",
-      },
+      files: { 'evil.js': evil },
     })
     expect(nodeOptions, 'the helper token is still sent', nodeOptions.requests.length && auths(nodeOptions).join() === 'Bearer helper-token')
     expect(nodeOptions, 'the repository code never ran in the helper', !fs.existsSync(path.join(root, nodeOptions.name, 'repo', 'pwned')))
 
-    // `npm --prefix client` makes client/etc/npmrc the global config file
-    const prefix = await run('prefix-into-repository', {
-      args: ['--prefix', 'client', 'view', 'demo', 'version'],
-      globalconfigFlag: false,
-      files: { 'client/package.json': '{}', 'client/etc/npmrc': helperLine },
+    // the same one npm further down: a script runs npm, which finds
+    // NODE_OPTIONS already set from the parent's node-options. The user's
+    // config is named by a flag, since the child has no project of its own
+    const nestedUser = path.join(root, 'nested-node-options.npmrc')
+    fs.writeFileSync(nestedUser, helperLine)
+    const nestedOptions = await run('nested-node-options', {
+      args: ['run', 'child'],
+      project: 'node-options=--require=<dir>/evil.js\n',
+      pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --userconfig="${nestedUser}" --globalconfig="${nestedUser}.global" --cache="${nestedUser}.cache"` } },
+      files: { 'evil.js': evil },
     })
-    expect(prefix, 'view still reaches the registry', !prefix.failed && prefix.requests.length)
-    expect(prefix, 'the repository file supplies no credential', auths(prefix).join() === '-')
-    expect(prefix, 'the helper is reported as ignored', prefix.notices.some(l => l.includes('is inside the project')))
+    expect(nestedOptions, 'the child npm sends the helper token', nestedOptions.requests.at(-1) === 'GET Bearer helper-token')
+    expect(nestedOptions, 'the repository code never ran in the child\'s helper', !fs.existsSync(path.join(root, nestedOptions.name, 'repo', 'pwned')))
 
-    // The helper's token and its encodings, searched for in everything npm
-    // left behind: what it printed, its debug log and timing file, and its
-    // HTTP cache. A registry that quotes the rejected credential back in a
-    // 401 body is compared with a stored _authToken, so that what npm does
-    // with any credential is not counted against the helper.
-    const encodings = token => [token, Buffer.from(token).toString('base64'), encodeURIComponent(`Bearer ${token}`)]
-    const leaks = (result, token) => {
-      const home = path.join(root, result.name, 'home')
-      const found = new Set()
-      const search = (where, text) => {
-        for (const form of encodings(token)) {
-          if (text.includes(form)) {
-            found.add(where)
-          }
-        }
-      }
-      search('output', result.output)
-      const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
-        const file = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          walk(file)
-        } else if (entry.name !== 'user.npmrc') {
-          search(path.relative(home, file).split(path.sep).slice(0, 2).join('/'), fs.readFileSync(file, 'latin1'))
-        }
-      })
-      walk(home)
-      return [...found]
-    }
-    const silly = ['--loglevel=silly', '--timing']
-    const canaries = []
-    for (const [args, what] of [
-      [['view', 'demo', 'version', ...silly], 'view'],
-      [['publish', ...silly], 'publish'],
-      [['whoami', ...silly], 'whoami'],
-    ]) {
-      canaries.push(await run(`canary-${what}`, { args, user: helperLine }))
-    }
-    for (const canary of canaries) {
-      const found = leaks(canary, 'helper-token')
-      expect(canary, 'the helper token reached the registry', canary.requests.some(r => r.endsWith('Bearer helper-token')))
-      expect(canary, `and nowhere else: output, logs, timing, cache${found.length ? ` (found in ${found.join(', ')})` : ''}`,
-        found.length === 0)
-    }
-    const echoHelper = await run('echo-401-helper', { args: ['view', 'echo-pkg', ...silly], user: helperLine })
-    const echoToken = await run('echo-401-token', {
-      args: ['view', 'echo-pkg', ...silly], user: `${nerf}:_authToken=helper-token\n`,
-    })
-    const helperLeaks = leaks(echoHelper, 'helper-token')
-    const tokenLeaks = leaks(echoToken, 'helper-token')
-    expect(echoHelper, `a 401 that quotes the credential leaks no more than a stored token does ` +
-      `(helper: ${helperLeaks.join(', ') || 'nowhere'}; _authToken: ${tokenLeaks.join(', ') || 'nowhere'})`,
-    helperLeaks.every(where => tokenLeaks.includes(where)))
-
-    // A registry that sends npm elsewhere: whatever reaches the other host is
-    // compared with what a stored _authToken would send there. A different
-    // host name must get no credential; the same host on another port gets
-    // what a stored token gets (scheme and port are not compared).
-    const hostile = []
-    for (const [what, args, mustBeBare] of [
-      ['redirect-host', ['view', 'redirect-host', 'version'], true],
-      ['redirect-port', ['view', 'redirect-port', 'version'], false],
-      ['foreign-host', ['cache', 'add', 'foreign-host@1.0.0'], true],
-      ['foreign-port', ['cache', 'add', 'foreign-port@1.0.0'], true],
+    // A helper's credential goes where a stored token goes: redirects, a
+    // tarball on another host, a proxy a repository's .npmrc names and an
+    // http: registry on a network address. Whatever the stored token does is
+    // the control, and the helper must do exactly the same.
+    const parity = []
+    for (const [what, args] of [
+      ['redirect-host', ['view', 'redirect-host', 'version']],
+      ['redirect-port', ['view', 'redirect-port', 'version']],
+      ['foreign-host', ['cache', 'add', 'foreign-host@1.0.0']],
+      ['foreign-port', ['cache', 'add', 'foreign-port@1.0.0']],
     ]) {
       const viaHelper = await run(`${what}-helper`, { args, user: helperLine })
       const viaToken = await run(`${what}-token`, { args, user: `${nerf}:_authToken=helper-token\n` })
-      hostile.push(viaHelper, viaToken)
+      parity.push(viaHelper, viaToken)
       const sent = r => r.elsewhere.filter(line => line.endsWith('Bearer helper-token'))
       expect(viaHelper, 'the request reached the other host', viaHelper.elsewhere.length > 0)
-      expect(viaHelper, `it carries no more than a stored token would (helper: ${sent(viaHelper).length}, ` +
-        `_authToken: ${sent(viaToken).length})`, sent(viaHelper).length <= sent(viaToken).length)
-      if (mustBeBare) {
-        expect(viaHelper, 'and no credential at all', sent(viaHelper).length === 0)
-      }
+      expect(viaHelper, `it carries what a stored token would (helper: ${sent(viaHelper).length}, _authToken: ${sent(viaToken).length})`,
+        sent(viaHelper).length === sent(viaToken).length)
     }
 
-    // A repository's .npmrc names a proxy, and an http: registry on a network
-    // address: neither may receive a helper's credential. The same files with
-    // a stored token are the control: the proxy is in use, and the token goes.
     const viaProject = 'https-proxy=<proxy>\nproxy=<proxy>\nstrict-ssl=false\n'.replaceAll('<proxy>', proxyUrl)
     const proxied = await run('project-proxy-helper', { user: helperLine, project: viaProject })
     const proxiedToken = await run('project-proxy-token', {
       user: `${nerf}:_authToken=helper-token\n`, project: viaProject,
     })
     const carried = r => r.proxy.filter(line => line.includes('helper-token'))
-    expect(proxied, 'the request reaches the registry with the helper token', proxied.requests.length &&
-      auths(proxied).join() === 'Bearer helper-token' && !proxied.failed)
-    expect(proxied, 'the repository\'s proxy sees no request at all', proxied.proxy.length === 0)
-    expect(proxiedToken, 'control: a stored token goes through the repository\'s proxy, so the proxy is in use',
-      carried(proxiedToken).length > 0)
-    const results2 = [proxied, proxiedToken]
+    expect(proxiedToken, 'control: a stored token goes through the repository\'s proxy, so the proxy is in use', carried(proxiedToken).length > 0)
+    expect(proxied, 'the helper token is treated the same (1b changes this for every credential)',
+      proxied.proxy.length === proxiedToken.proxy.length)
+    parity.push(proxied, proxiedToken)
     if (lan) {
       const lanRegistry = `http://${lanAddress}:${lan.address().port}/`
       const lanNerf = `//${lanAddress}:${lan.address().port}/`
@@ -518,11 +499,9 @@ const main = async () => {
       const plainToken = await run('http-registry-token', {
         registryUrl: lanRegistry, user: `${lanNerf}:_authToken=stored-token\n`,
       })
-      expect(plain, 'view reaches the registry over http', !plain.failed && plain.requests.length)
-      expect(plain, 'no request carries a credential', auths(plain).join() === '-')
-      expect(plain, 'the helper was not run', !plain.notices.some(l => l.includes('helper says hello')))
       expect(plainToken, 'control: a stored token goes over the same http: registry', auths(plainToken).join() === 'Bearer stored-token')
-      results2.push(plain, plainToken)
+      expect(plain, 'so does the helper token (1b changes this for every credential)', auths(plain).join() === 'Bearer helper-token')
+      parity.push(plain, plainToken)
     } else {
       notes.push('no network address that is not a loopback one: the http: registry checks were skipped')
     }
@@ -532,7 +511,11 @@ const main = async () => {
     expect(login, 'nothing is sent', login.requests.length === 0)
     expect(login, 'no token is saved', fs.readFileSync(path.join(root, login.name, 'home', 'user.npmrc'), 'utf8') === helperLine)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, child, parent, nodeOptions, prefix, ...canaries, echoHelper, echoToken, ...hostile, ...children, ...results2, login]
+    const logout = await run('logout-with-helper', { args: ['logout'], user: `${helperLine}${nerf}:_authToken=stale\n` })
+    expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
+    expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
+
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, child, parent, nodeOptions, nestedOptions, ...parity, ...children, login, logout]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)

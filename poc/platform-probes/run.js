@@ -1,35 +1,39 @@
 'use strict'
 
-// Platform checks for the tokenHelper prototype, meant for CI on macOS, Linux
-// and Windows. It prints what the filesystem does (`info`) and fails on what
-// the prototype must get right whatever the filesystem does (`ok`/`FAIL`):
-// a file in the project spelled another way (letter case, Unicode form, a
-// symlinked parent, a `..\x` name) is still refused as a token helper source,
+// Platform checks for the Phase 1a tokenHelper runner, meant for CI on macOS,
+// Linux and Windows. It prints what the platform does (`info`) and fails on
+// what the runner must get right whatever the platform does (`ok`/`FAIL`):
+// helper paths that Win32 would read as another file (a trailing space or dot,
+// a slash after the name, `\\?\`, a UNC share, letter case, an 8.3 name) run
+// the file they name or run nothing, a .cmd in a directory with a name cmd.exe
+// gives a meaning to runs as itself, in its own directory, a path with `"`, `%`
+// or `!` or a directory longer than 258 characters is refused with a reason,
 // and a script whose #! interpreter is missing is reported as such.
 //
-//   node poc/platform-probes/run.js <npm-cli checkout> <npm-registry-fetch checkout>
+//   node poc/platform-probes/run.js <npm-cli checkout>
 //
-// Both checkouts must have the prototype applied. PROBE_ROOT names the
+// The checkout must have the prototype applied. PROBE_ROOT names the
 // directory the probes work in (default: the temp directory), so that they can
-// run on another volume: a FAT volume or an SMB share on Windows, where
-// device and inode numbers and path spellings behave differently.
+// run on another volume: an SMB share on Windows, where a helper is a UNC path.
 
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const [npmCliDir, fetchDir] = process.argv.slice(2).map(p => p && path.resolve(p))
-if (!npmCliDir || !fetchDir) {
-  console.error('usage: node poc/platform-probes/run.js <npm-cli checkout> <npm-registry-fetch checkout>')
+const [npmCliDir] = process.argv.slice(2).map(p => p && path.resolve(p))
+if (!npmCliDir) {
+  console.error('usage: node poc/platform-probes/run.js <npm-cli checkout>')
   process.exit(2)
 }
-const Config = require(path.join(npmCliDir, 'workspaces', 'config'))
-const { definitions, flatten, nerfDarts, shorthands } =
-  require(path.join(npmCliDir, 'workspaces', 'config', 'lib', 'definitions'))
-const getTokenHelperHeader = require(path.join(fetchDir, 'lib', 'token-helper.js'))
+const runner = require(path.join(npmCliDir, 'lib', 'utils', 'token-helper.js'))
+
+// the factory npm uses, with a stub config, for one helper; a fresh one for
+// each call, so that nothing is cached
+const getTokenHelperHeader = (helper, regKey, timeout = 15000) => runner(
+  { flat: { tokenHelpers: { [regKey]: helper } }, get: () => undefined },
+  {}, process.platform, { timeout, grace: 2000, drain: 250 })(regKey)
 
 const WIN = process.platform === 'win32'
-const KEY = '//reg.example/:tokenHelper'
 const results = []
 const info = (what, value) => results.push({ kind: 'info', what, value })
 const check = (what, ok, detail = '') => results.push({ kind: ok ? 'ok' : 'FAIL', what, value: detail })
@@ -43,77 +47,9 @@ const write = (p, content) => {
   fs.writeFileSync(p, content)
 }
 
-// ---------- what this filesystem does ----------
-
 info('probes run in', process.env.PROBE_ROOT ? `PROBE_ROOT ${base}` : `the temp directory ${base}`)
-{
-  const { dev, ino } = fs.statSync(root, { bigint: true })
-  const file = path.join(root, 'ino-probe')
-  write(file, '')
-  const same = fs.statSync(file, { bigint: true })
-  info('fs.stat on the probe root returns', `dev ${dev} ino ${ino}; a file in it: dev ${same.dev} ino ${same.ino}`)
-  info('a second file in the same directory has another inode',
-    (write(file + '2', ''), fs.statSync(file + '2', { bigint: true }).ino !== same.ino))
-}
 
-const caseProbe = path.join(root, 'CaseProbe')
-write(caseProbe, '')
-const caseInsensitive = fs.existsSync(path.join(root, 'caseprobe'))
-info('filesystem is case-insensitive', caseInsensitive)
-const caseRealpath = caseInsensitive ? path.basename(fs.realpathSync.native(path.join(root, 'CASEPROBE'))) : null
-if (caseInsensitive) {
-  info('realpath of a case variant returns', caseRealpath)
-}
-
-const nfc = 'café'
-const nfd = 'café'
-fs.mkdirSync(path.join(root, nfc))
-const nfdReachesNfc = fs.existsSync(path.join(root, nfd))
-info('an NFD spelling reaches a directory created as NFC', nfdReachesNfc)
-info('readdir returns the name as', fs.readdirSync(root).includes(nfc) ? 'NFC' : 'NFD')
-const nfdRealpath = nfdReachesNfc ? (real => (real === nfc ? 'NFC' : real === nfd ? 'NFD' : real))(
-  path.basename(fs.realpathSync.native(path.join(root, nfd)))) : null
-if (nfdReachesNfc) {
-  info('realpath of the NFD spelling returns', nfdRealpath)
-}
-
-const tmpReal = fs.realpathSync.native(base)
-info('the probe directory is reached through a link', tmpReal !== base ? `${base} -> ${tmpReal}` : false)
-const stat = p => fs.statSync(p, { bigint: true })
-info('dev:ino agree through the link', `${stat(root).ino === stat(fs.realpathSync.native(root)).ino}` +
-  ` (ino ${stat(root).ino ? 'nonzero' : 'zero'})`)
-
-// What the macOS runners showed (CI log of run 39489980343, all three macOS jobs), asserted
-// there so that a runner that changes fails here instead of leaving the documents stale.
-if (process.platform === 'darwin') {
-  check('on macOS the filesystem is case-insensitive and realpath returns the stored case',
-    caseInsensitive && caseRealpath === 'CaseProbe', `${caseInsensitive} ${caseRealpath}`)
-  check('on macOS an NFD spelling reaches an NFC directory and realpath returns NFC',
-    nfdReachesNfc && nfdRealpath === 'NFC', `${nfdReachesNfc} ${nfdRealpath}`)
-  check('on macOS the temp directory is reached through /var -> /private/var, and dev and inode agree through it',
-    os.tmpdir().startsWith('/var/') && tmpReal === `/private${os.tmpdir()}` && stat(root).ino === stat(fs.realpathSync.native(root)).ino,
-    `${os.tmpdir()} -> ${tmpReal}`)
-}
-
-// ---------- the trust rule ----------
-
-// a project with a helper file in it; home elsewhere. Each case names the
-// project's file another way and must still be refused.
-const load = async (userconfig, cwd) => {
-  const config = new Config({
-    npmPath: path.join(root, 'npm'),
-    definitions,
-    flatten,
-    nerfDarts,
-    shorthands,
-    argv: [process.execPath, 'npm', `--userconfig=${userconfig}`, `--globalconfig=${path.join(root, 'home', 'g.npmrc')}`],
-    env: { HOME: path.join(root, 'home'), USERPROFILE: path.join(root, 'home'), PATH: process.env.PATH },
-    cwd,
-    warn: false,
-  })
-  await config.load()
-  return config.get(KEY)
-}
+// ---------- the helper runtime ----------
 
 // the 8.3 spelling of an existing path, from cmd.exe's %~s modifier
 const shortName = (file) => {
@@ -122,68 +58,6 @@ const shortName = (file) => {
   const line = (out.stdout || '').trim()
   return out.status === 0 && line && line.toLowerCase() !== file.toLowerCase() ? line : null
 }
-
-const trust = async () => {
-  const helperLine = `${KEY}=${path.join(root, 'helper')}\n`
-  write(path.join(root, 'home', '.npmrc'), '')
-  write(path.join(root, 'home', 'g.npmrc'), '')
-  write(path.join(root, 'outside.npmrc'), helperLine)
-
-  const project = path.join(root, 'Project-café')
-  write(path.join(project, 'package.json'), '{}')
-  write(path.join(project, 'ci.npmrc'), helperLine)
-
-  check('control: a file outside the project is trusted',
-    await load(path.join(root, 'outside.npmrc'), project) !== undefined)
-  check('control: the project file spelled as created is refused',
-    await load(path.join(project, 'ci.npmrc'), project) === undefined)
-
-  if (caseInsensitive) {
-    const upper = path.join(root, path.basename(project).toUpperCase(), 'CI.NPMRC')
-    check('the project file in another letter case is refused', await load(upper, project) === undefined, upper)
-    const cwdUpper = path.join(root, path.basename(project).toUpperCase())
-    check('the project file seen from a cwd in another letter case is refused',
-      await load(path.join(project, 'ci.npmrc'), cwdUpper) === undefined)
-  }
-  if (nfdReachesNfc) {
-    const nfdFile = path.join(root, 'Project-café', 'ci.npmrc')
-    check('the project file through an NFD spelling is refused', await load(nfdFile, project) === undefined)
-  }
-  if (tmpReal !== base) {
-    const viaReal = path.join(fs.realpathSync.native(project), 'ci.npmrc')
-    check('the project file through the resolved temp path is refused', await load(viaReal, project) === undefined, viaReal)
-  }
-  // the user's own file, in the home directory, is trusted whatever the
-  // filesystem says about inodes (on some it says zero for every file)
-  write(path.join(root, 'home', '.npmrc'), helperLine)
-  check('control: the user\'s own ~/.npmrc is trusted',
-    await load(path.join(root, 'home', '.npmrc'), project) !== undefined)
-  if (WIN) {
-    // the verbatim spelling of the same file names the same file
-    const verbatim = `\\\\?\\${path.join(project, 'ci.npmrc')}`
-    check('the project file through a \\\\?\\ verbatim spelling is refused',
-      await load(verbatim, project) === undefined, verbatim.replace(root, '<root>'))
-    const slashes = path.join(project, 'ci.npmrc').replace(/\\/g, '/')
-    check('the project file spelled with forward slashes is refused', await load(slashes, project) === undefined)
-    // an 8.3 short name, where the volume has them (FAT always does)
-    const short = shortName(path.join(project, 'ci.npmrc'))
-    info('the 8.3 short name of the project file', short || 'none')
-    if (short && short.toLowerCase() !== path.join(project, 'ci.npmrc').toLowerCase()) {
-      check('the project file through its 8.3 short name is refused', await load(short, project) === undefined, short)
-    }
-  }
-  if (!WIN) {
-    write(path.join(project, '..\\evil', 'npmrc'), helperLine)
-    check('a project directory named ..\\evil is still the project',
-      await load(path.join(project, '..\\evil', 'npmrc'), project) === undefined)
-    // a link in the checkout to a file in the checkout
-    fs.symlinkSync(path.join(project, 'ci.npmrc'), path.join(root, 'link.npmrc'))
-    check('a link outside the project to the project file is refused',
-      await load(path.join(root, 'link.npmrc'), project) === undefined)
-  }
-}
-
-// ---------- the helper runtime ----------
 
 // A helper path that Win32 would read as another file: a trailing space or
 // dot is dropped, a slash after a file name is a directory, `\\?\` turns every
@@ -268,7 +142,7 @@ const spellings = async (short) => {
 // that directory, and run nothing else
 const windows = async () => {
   const short = s => s.split(JSON.stringify(root).slice(1, -1)).join('<root>').split(root).join('<root>')
-  const names = ['plain', 'with space', 'amp&ersand', 'caret^here', 'bang!here', 'semi;colon', 'paren(x86)',
+  const names = ['plain', 'with space', 'amp&ersand', 'caret^here', 'semi;colon', 'paren(x86)',
     'Program Files (x86)', "apostrophe's", 'comma,equals=', 'café папка 目录',
     'x&mkdir injected-marker&x', 'x^&mkdir injected-marker', 'x"&mkdir injected-marker&"x']
   for (const name of names) {
@@ -294,16 +168,27 @@ const windows = async () => {
     check(`a .cmd helper in "${name}" runs as itself, in its own directory`,
       header === 'Bearer tok-cmd' && (UNC || cwd === dir) && !injected, `${header}; cwd ${cwd === dir ? 'ok' : cwd}`)
   }
-  for (const name of ['100%done', '%TEMP%']) {
+  for (const name of ['100%done', '%TEMP%', 'bang!here']) {
     const helper = path.join(root, 'cmd-refused', name, 'helper.cmd')
     write(helper, '@echo tok\r\n')
     const outcome = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => `header ${h}`, e => e.message)
-    check(`a .cmd helper under "${name}" is refused with a reason`, outcome.includes('contains " or %'), short(outcome))
+    check(`a .cmd helper under "${name}" is refused with a reason`, outcome.includes('contains ", % or !'), short(outcome))
   }
-  await spellings(short)
+  // refused before anything is looked up, so the paths need not exist
+  const refusedAt = (helper) => getTokenHelperHeader(helper, '//refused/', 15000).then(h => `header ${h}`, e => e.message)
+  const quote = await refusedAt('C:\\tools\\a"b.cmd')
+  check('a .cmd helper with a double quote in its path is refused with a reason', quote.includes('contains ", % or !'), short(quote))
+  const longDir = await refusedAt(`C:\\${'d'.repeat(260)}\\helper.cmd`)
+  check('a helper in a directory longer than 258 characters is refused with a reason',
+    longDir.includes('longer than 258 characters') && longDir.includes('shorter path'), longDir.slice(0, 60))
   const ps1 = path.join(root, 'ps1', 'helper.ps1')
   write(ps1, 'Write-Output tok\r\n')
-  info('a .ps1 helper', await getTokenHelperHeader(ps1, '//ps1/', 15000).then(h => `header ${h}`, e => short(e.message)))
+  const ps1Outcome = await refusedAt(ps1)
+  check('a .ps1 helper is refused and a .cmd wrapper suggested', ps1Outcome.includes('.cmd wrapper'), short(ps1Outcome))
+  const js = path.join(root, 'js', 'helper.js')
+  write(js, 'console.log("tok")\n')
+  check('a .js helper is refused and a .cmd wrapper suggested', (await refusedAt(js)).includes('.cmd wrapper'))
+  await spellings(short)
 }
 
 const runtime = async () => {
@@ -348,7 +233,6 @@ const runtime = async () => {
 
 const main = async () => {
   try {
-    await trust()
     await runtime()
   } finally {
     fs.rmSync(root, { recursive: true, force: true })

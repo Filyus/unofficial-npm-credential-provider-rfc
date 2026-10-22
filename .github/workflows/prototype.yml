@@ -1,8 +1,8 @@
-# Runs the Phase 1 tokenHelper prototype on macOS, Linux and Windows: the
+# Runs the Phase 1a tokenHelper prototype on macOS, Linux and Windows: the
 # patches in poc/patches are applied to npm/cli and npm/npm-registry-fetch at
-# the commits they were made on, and then the prototype's own tests, the
-# 2048-combination config check, the end-to-end check against a local
-# registry and the platform probes run on each OS.
+# the commits they were made on, and then the prototype's own tests, the helper
+# output fuzz, the end-to-end check against a local registry and the platform
+# probes run on each OS.
 name: prototype
 
 on:
@@ -70,19 +70,10 @@ jobs:
         run: |
           npm test --ignore-scripts
           npm run eslint --ignore-scripts
-      # what a helper printed, read by the prototype and by the Python model
-      # of Phase 1, and what is logged of what it wrote to stderr
-      - name: Helper output against the model, fuzzed
-        run: |
-          PY=$(command -v python3 || command -v python)
-          cd rfc && "$PY" -m tests.fuzz_helper --prototype ../npm-registry-fetch --seconds 20 --seed "$GITHUB_RUN_NUMBER"
-      # helpers named as awkwardly as the file system allows, run for real
-      - name: Helpers with awkward names
-        run: node rfc/poc/helper-fuzz/names.js npm-registry-fetch
-      - name: token-helper tests with deprecations as errors
+      - name: npm-registry-fetch seam tests with deprecations as errors
         if: env.DEPRECATIONS != ''
         working-directory: npm-registry-fetch
-        run: node $DEPRECATIONS test/token-helper.js
+        run: node $DEPRECATIONS test/auth.js
 
       - name: Apply the npm-cli patch
         run: |
@@ -95,53 +86,36 @@ jobs:
       - name: Test @npmcli/config
         working-directory: npm-cli
         run: node . test --ignore-scripts --workspace @npmcli/config
-      - name: Test the npm-cli commands the prototype changes
+      - name: Test the npm-cli files the prototype changes
         working-directory: npm-cli
         run: >-
           node node_modules/tap/bin/run.js --no-coverage
+          test/lib/utils/token-helper.js test/lib/npm.js
           test/lib/commands/login.js test/lib/commands/logout.js test/lib/commands/publish.js
           test/lib/commands/unpublish.js test/lib/commands/config.js test/lib/commands/profile.js
-          test/lib/commands/whoami.js test/lib/utils/oidc.js test/lib/utils/error-message.js
-          test/lib/utils/publish-config.js
+          test/lib/commands/whoami.js test/lib/utils/oidc.js test/lib/utils/publish-config.js
+      - name: Runner test with deprecations as errors
+        if: env.DEPRECATIONS != ''
+        working-directory: npm-cli
+        run: node $DEPRECATIONS node_modules/tap/bin/run.js --no-coverage test/lib/utils/token-helper.js
 
-      - name: Config trust, 2048 combinations
-        run: node rfc/poc/npm-config-matrix/run.js npm-cli "$RUNNER_TEMP"
+      # what a helper printed, read by the runner and by the Python model of
+      # Phase 1, and what is logged of what it wrote to stderr
+      - name: Helper output against the model, fuzzed
+        run: |
+          PY=$(command -v python3 || command -v python)
+          cd rfc && "$PY" -m tests.fuzz_helper --prototype ../npm-cli --seconds 20 --seed "$GITHUB_RUN_NUMBER"
+      # helpers named as awkwardly as the file system allows, run for real
+      - name: Helpers with awkward names
+        run: node rfc/poc/helper-fuzz/names.js npm-cli
+
       - name: End to end against a local registry
         run: node rfc/poc/npm-e2e/run.js npm-cli npm-registry-fetch
-      - name: tokenHelper spellings from untrusted sources
-        run: node rfc/poc/npm-config-fuzz/spellings.js npm-cli npm-registry-fetch "$RUNNER_TEMP" 500 "$GITHUB_RUN_NUMBER"
       - name: Platform probes
-        run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
-      # The same probes on a volume that is not the runner's NTFS temp
-      # directory: Windows has filesystems without inode numbers (FAT) and a
-      # network share reports another identity again. The runner has admin
-      # rights; a step that cannot create its volume fails, it never skips.
-      - name: Platform probes on a FAT32 volume
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vhd = Join-Path $env:RUNNER_TEMP 'probe-fat.vhd'
-          $letter = 'P'
-          $script = Join-Path $env:RUNNER_TEMP 'probe-fat-diskpart.txt'
-          $diskpart = {
-            param($lines)
-            Set-Content -Path $script -Value $lines -Encoding ascii
-            diskpart /s $script
-            if ($LASTEXITCODE -ne 0) { throw "diskpart exited with status $LASTEXITCODE" }
-          }
-          try {
-            & $diskpart @("create vdisk file=`"$vhd`" maximum=128 type=fixed", "select vdisk file=`"$vhd`"", 'attach vdisk',
-              'create partition primary', 'format fs=fat32 quick label=PROBEFAT', "assign letter=$letter")
-            $volume = Get-Volume -DriveLetter $letter
-            if ($volume.FileSystem -ne 'FAT32') { throw "the volume ${letter}: is $($volume.FileSystem), not FAT32" }
-            Write-Host "probes run on ${letter}: $($volume.FileSystem) (label $($volume.FileSystemLabel)), a virtual disk"
-            $env:PROBE_ROOT = "${letter}:\probes"
-            $flags = @(); if ($env:DEPRECATIONS) { $flags += $env:DEPRECATIONS }
-            node @flags rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
-            if ($LASTEXITCODE -ne 0) { throw "the probes on FAT32 exited with status $LASTEXITCODE" }
-          } finally {
-            if (Test-Path $vhd) { & $diskpart @("select vdisk file=`"$vhd`"", 'detach vdisk') }
-          }
+        run: node $DEPRECATIONS rfc/poc/platform-probes/run.js npm-cli
+      # The same probes on a network share: a helper there is a UNC path,
+      # which cmd.exe cannot start in. The runner has admin rights; a step that
+      # cannot create its share fails, it never skips.
       - name: Platform probes on an SMB share
         if: runner.os == 'Windows'
         shell: pwsh
@@ -157,7 +131,7 @@ jobs:
             Write-Host "probes run on the SMB share $unc, which serves $dir on $($backing.FileSystem)"
             $env:PROBE_ROOT = "$unc\probes"
             $flags = @(); if ($env:DEPRECATIONS) { $flags += $env:DEPRECATIONS }
-            node @flags rfc/poc/platform-probes/run.js npm-cli npm-registry-fetch
+            node @flags rfc/poc/platform-probes/run.js npm-cli
             if ($LASTEXITCODE -ne 0) { throw "the probes on the SMB share exited with status $LASTEXITCODE" }
           } finally {
             if (Get-SmbShare -Name $name -ErrorAction SilentlyContinue) { Remove-SmbShare -Name $name -Force }
@@ -205,6 +179,6 @@ jobs:
             git fetch -q --depth 1 https://github.com/npm/npm-registry-fetch.git "$NPM_REGISTRY_FETCH_BASE" &&
             git checkout -q FETCH_HEAD &&
             git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-registry-fetch.patch)
-          cp npm-registry-fetch/lib/auth.js npm-registry-fetch/lib/index.js npm-registry-fetch/lib/token-helper.js next/node_modules/npm-registry-fetch/lib/
+          cp npm-registry-fetch/lib/auth.js npm-registry-fetch/lib/index.js next/node_modules/npm-registry-fetch/lib/
       - name: Every suite, base against prototype
         run: node rfc/poc/full-suites/compare.js base next

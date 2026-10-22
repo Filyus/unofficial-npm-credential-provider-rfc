@@ -42,9 +42,9 @@ A missing tool makes these tests **skip, not fail**:
 | `jsonschema` | `test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement` |
 | `cargo` or `node` | `test_differential` |
 | `node` | `test_provider_harness`, `test_provider_hostile`, `test_provider_sessions` |
-| `NPM_REGISTRY_FETCH` naming a checkout with the Phase 1 prototype ([phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
+| `NPM_CLI` naming a checkout with the Phase 1a prototype ([phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
 
-With `REQUIRE_TOOLS=1` ([tests/tools_required.py](tests/tools_required.py)) a missing tool fails the run instead. The `conformance` and `fuzz` workflows set it; a plain run does not. The one exception is `PrototypeTests` in `test_helper_differential`, which skips without `NPM_REGISTRY_FETCH` either way; the `prototype` workflow runs that comparison through `tests.fuzz_helper`. `python -m unittest discover -v` shows every skip and its reason: a run with skips has not run those checks.
+With `REQUIRE_TOOLS=1` ([tests/tools_required.py](tests/tools_required.py)) a missing tool fails the run instead. The `conformance` and `fuzz` workflows set it; a plain run does not. The one exception is `RunnerTests` in `test_helper_differential`, which skips without `NPM_CLI` either way; the `prototype` workflow runs that comparison through `tests.fuzz_helper`. `python -m unittest discover -v` shows every skip and its reason: a run with skips has not run those checks.
 
 ```sh
 python tools/generate_from_policy.py --check
@@ -68,7 +68,7 @@ cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz
 cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
 ```
 
-End-to-end check of the Phase 1 prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks):
+End-to-end check of the Phase 1a prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks):
 
 ```sh
 node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>

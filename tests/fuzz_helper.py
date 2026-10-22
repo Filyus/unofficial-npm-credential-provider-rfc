@@ -1,28 +1,28 @@
-"""Fuzz what the Phase 1 prototype makes of what a token helper printed.
+"""Fuzz what the Phase 1a runner makes of what a token helper printed.
 
-    python -m tests.fuzz_helper --prototype ../npm-registry-fetch [--seconds 60] [--seed N]
+    python -m tests.fuzz_helper --prototype ../npm-cli [--seconds 60] [--seed N]
 
 A helper's stdout is the credential and its stderr is shown to the user, so
-two things are checked against the Python model and against what Phase 1 says:
+three things are checked against the Python model and against what Phase 1a
+says. The runner is npm/cli's lib/utils/token-helper.js, driven through the
+factory npm uses with a stub config (poc/helper-fuzz/bridge.js), with only the
+process replaced:
 
-- `header`: the Authorization value the prototype (lib/token-helper.js
-  `toHeader`) makes of the output is the one the model
-  (`token_helper_header`) makes of it, or both refuse it, and a refusal
-  quotes none of the output;
-- `log`: what the prototype logs of stderr (`scrub`, then lines, control
-  characters out, `mask`: poc/helper-fuzz/bridge.js runs them in that order)
-  holds no control character, never the helper's token, whole or in the
-  pieces after its scheme, nor that token as JSON writes it, and, for output
-  the prototype refused, none of its long runs of printable characters;
-- `setting`: whether the prototype takes a `tokenHelper` value (`refusal`) is
-  what the model (`check_token_helper_config`) says of it, on a tree of real
-  files: an absolute path, one with arguments, one that is not there. On
-  Windows only the values with no whitespace are compared, since whether a
-  path with whitespace in it is there depends on how Win32, Python and libuv
-  each normalize a name; Linux and macOS compare them all.
+- `header`: the Authorization value the runner makes of the output is the one
+  the model (`token_helper_header`) makes of it, or both refuse it, and a
+  refusal quotes none of the output;
+- `log`: what the runner logs of stderr holds no control character and never
+  the helper's exact token, whole or without its scheme, wherever it is in a
+  line;
+- `setting`: whether the runner takes a `tokenHelper` value is what the model
+  (`check_token_helper_config`) says of it, on a tree of real files: an
+  absolute path, one with arguments, one that is not there. On Windows only
+  the values with no whitespace are compared, since whether a path with
+  whitespace in it is there depends on how Win32, Python and libuv each
+  normalize a name; Linux and macOS compare them all.
 
-What it does not look for is in "Limits" in
-phase-1-implementation.md: a credential that is encoded on purpose.
+What it does not look for is in "Limits" in phase-1-implementation.md: a
+credential that is encoded on purpose.
 
 Needs `node`. Exit status 1 if anything was found.
 """
@@ -178,15 +178,11 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
             found.append({"kind": "refusal quotes the output", "case": case, "prototype": header})
         shown = "\n".join(log["lines"])
         secrets = {case.token, case.bare}
-        # a refused output never appears whole in stderr, so its long runs are hidden
-        if expected is None:
-            cleaned = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", " ", case.token)
-            secrets |= {run for run in re.split(r"[^\x21-\x7e]+", cleaned) if len(run) >= 8}
         # what the text around a hidden credential is, with the credential as ***:
         # a short credential may be part of an ordinary word next to it, as `er *`
         # is of `Bearer ***`, and that is no leak
         around = case.stderr.decode("utf-8", "replace")
-        for hidden in sorted({form for secret in secrets if secret for form in {secret} | forms(secret)}, key=len, reverse=True):
+        for hidden in sorted({secret for secret in secrets if secret}, key=len, reverse=True):
             around = around.replace(hidden, "***")
         for secret in sorted(secrets):
             # a credential is what can be typed and seen: one with a control, a
@@ -196,7 +192,7 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
             # to, a decoding artifact and not something typed
             if not secret or not secret.isprintable() or "\ufffd" in secret or secret in "***":
                 continue
-            for form in {secret} | forms(secret):
+            for form in (secret,):
                 if form and form in shown and form not in around:
                     found.append({"kind": "secret in the log", "case": case, "secret": secret, "form": form, "log": log["lines"]})
                     break
@@ -284,7 +280,7 @@ def judge_paths(prototype: Path, values: list[str]) -> list[dict]:
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prototype", type=Path, required=True, help="the npm-registry-fetch checkout with the prototype")
+    parser.add_argument("--prototype", type=Path, required=True, help="the npm-cli checkout with the prototype")
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--batch", type=int, default=2000)

@@ -38,7 +38,7 @@ const corpus = {
   js: () => fs.readdirSync(path.join(rfc, 'examples', 'providers'))
     .filter(name => name.endsWith('.test.js')).map(name => read(path.join(rfc, 'examples', 'providers', name))).join('\n'),
   rs: () => sources(path.join(rfc, 'poc', 'rust', 'crates'), '.rs'),
-  fetch: () => read(path.join(fetchDir, 'test', 'token-helper.js')),
+  fetch: () => read(path.join(fetchDir, 'test', 'auth.js')),
   config: () => tree(path.join(npmCliDir, 'workspaces', 'config', 'test')),
   cli: () => tree(path.join(npmCliDir, 'test', 'lib')),
   e2e: () => read(path.join(rfc, 'poc', 'npm-e2e', 'run.js')),

@@ -1,7 +1,7 @@
 # RFC draft: `tokenHelper` for npm (Phase 1a)
 
 > Status: Draft
-> Revision: 30 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md))
+> Revision: 31 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 31 follows the reworked prototype)
 > Date: 2026-10-22
 
 > Phase 1a of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. [Phase 1b](phase-1b-credential-hardening.md) hardens how every credential travels, and [Phase 2](phase-2-credential-provider.md), a credential provider protocol, is a separate document.
@@ -112,10 +112,10 @@ The runner lives in npm/cli, on `@npmcli/promise-spawn`; npm-registry-fetch hold
 
 - **Value.** An absolute path with no arguments, which may contain spaces (`C:\Program Files\…`). Anything else fails with `ETOKENHELPER` and a message that says what to do ([Output and failures](#output-and-failures)). `${VAR}` in the value expands, and an unescaped `#` or `;` ends it (write `\#`, as in a path under `C#`), as in any npm config value.
 - **Key.** A key whose registry part does not end in `/` (`//host:tokenHelper`, as pnpm's docs show it) never matches a request, so it is ignored with a warning naming `//host/:tokenHelper`.
-- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does, and `@npmcli/promise-spawn` does the quoting for `cmd.exe`; a path containing `"` or `%` is refused there, since `cmd.exe` would reinterpret it. Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
+- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does, and `@npmcli/promise-spawn` does the quoting for `cmd.exe`; a path containing `"`, `%` or `!` is refused there, since `cmd.exe` would reinterpret it (`%` even inside quotes, `!` where delayed expansion is on), and so is a helper in a directory whose path is longer than 258 characters, where `cmd.exe` cannot start a program. Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
 - **Working directory.** The helper's own directory, never npm's, which is usually the repository: on Windows a command started by bare name (the `node` in a cmd-shim) is looked up in the current directory first.
 - **Input.** None: stdin is closed at once, so a helper that reads it gets end of input.
-- **Limits.** 1 MiB of output, and 60 seconds: `@npmcli/promise-spawn` has no timeout, so the runner owns it and sends SIGTERM at 60 seconds and SIGKILL 2 seconds later, ending the whole process tree on Windows. Elsewhere only the helper process is signalled.
+- **Limits.** 1 MiB of output, and 60 seconds: `@npmcli/promise-spawn` has no timeout, so the runner owns it and sends SIGTERM at 60 seconds and SIGKILL 2 seconds later, ending the whole process tree on Windows. Elsewhere only the helper process is signalled. After the helper exits, npm reads its output for at most 250 ms more and then stops waiting, so a background process it left holding stdout does not keep npm waiting until the deadline.
 - **Recursion.** npm sets a variable for the helper; an npm that the helper itself runs sees it and starts no helper, so a wrapper that calls `npm` cannot loop.
 
 #### Environment
@@ -123,6 +123,7 @@ The runner lives in npm/cli, on `@npmcli/promise-spawn`; npm-registry-fetch hold
 The helper gets npm's environment without what npm set from a project's config or about itself:
 
 - Removed: what npm exported from its own config. That is every `npm_config_*` variable, and four others, each set only from the config key named: `NODE_OPTIONS` from `node-options`, `EDITOR` from `editor`, `NODE_ENV` (set to `production` when the resulting `omit` list holds `dev`, whether from `omit`, `only` or `production`) and `COLOR` from `color`. Where npm overwrote a value the user had in the environment it started with, the helper gets that value back; where there was none, the variable is absent. A project's `.npmrc` reaches a child this way, and `node-options` alone would let a repository load code into a node-based helper and read the credential it prints.
+- An npm that a script started (a script that runs `npm publish`) finds `NODE_OPTIONS` and `EDITOR` already set from its parent's config, which the parent exported as `npm_config_node_options` and `npm_config_editor`: a value equal to that is npm's too, and absent for the helper.
 - Where npm does this ([npm/cli at 12.2.1](sources.md#external-facts)): `set-envs.js` writes the `npm_config_*` variables and sets `EDITOR` and `NODE_OPTIONS` from the `editor` and `node-options` config; `definitions.js` sets `NODE_ENV` while resolving `omit`, and `lib/npm.js` sets `COLOR`, both on npm's own process environment, so the runner records the user's values when npm starts.
 - `PATH` loses the directories npm put in front of it for a script: each `node_modules/.bin` from the package up to the root, and the `node-gyp-bin` directory. A `node_modules/.bin` the user put on `PATH` elsewhere stays.
 
@@ -148,13 +149,13 @@ npm trims the output, including a leading byte order mark such as Windows PowerS
 
 | Condition | Result |
 |---|---|
-| Non-zero exit, or a spawn error | `ETOKENHELPER`, carrying the `exitCode` and `signal`; a missing `#!` interpreter is named |
+| Non-zero exit, or a spawn error | `ETOKENHELPER`, carrying the helper's status as `helperExitCode` and the `signal`; a missing `#!` interpreter is named |
 | Empty output | `ETOKENHELPER` |
 | Not a valid header value (a second line, a control character other than tab, or a non-ASCII character) | `ETOKENHELPER`, without quoting the output: the HTTP layer's own error would print the credential |
 | More than 1 MiB of output | `ETOKENHELPER`; the helper is killed |
 | Running longer than 60 seconds | `ETOKENHELPER`; the helper is killed |
 
-Every failure names the helper, and npm does not fall back to another credential for that registry. A failure is also logged as a warning with the helper's stderr. Killing a helper on POSIX signals the helper process only, so a helper script should `exec` the command that does the work.
+Every failure names the helper, and npm does not fall back to another credential for that registry. The status is `helperExitCode`, not `exitCode`, because npm's exit handler would take `exitCode` for its own: npm exits as for any of its errors. A failure is also logged as a warning with the helper's stderr. Killing a helper on POSIX signals the helper process only, so a helper script should `exec` the command that does the work.
 
 A message that can be acted on says how:
 
@@ -182,7 +183,7 @@ A helper's credential is treated as a stored `_authToken` for the same registry 
 
 | Situation | Behaviour |
 |---|---|
-| A helper and a stored token for the same registry | The helper is used; npm warns once per registry, naming the `_authToken` it ignores |
+| A helper and a stored token for the same registry key | The helper is used; npm warns once per registry, naming the `_authToken` it ignores. A token stored under a longer key than the helper's, such as the path of a package's registry, is the more specific credential and wins |
 | OIDC trusted publishing in use | The OIDC token wins over both |
 | `publish`, `whoami`, `get-identity` (which `access list packages` also uses to check for a login) | A configured helper counts as being logged in |
 | `logout` | Says why it cannot act: the helper setting has to be removed, and a stored token is named, not revoked, since revoking would send the helper's credential |
@@ -204,7 +205,7 @@ pnpm 12, the latest release, is a Rust CLI; the TypeScript CLI is pnpm 11, which
 | `//<registry>/:@scope:tokenHelper` | Parsed by both: the helper serves that scope's packages (the docs show the form for `_authToken` only) | Ignored with a warning naming the per-registry key |
 | Key in project `.npmrc` | Error in both, unless the user's file has the same value; the environment form is dropped | Ignored with a warning |
 | Output | Install: `trimEnd()`, then a leading scheme (`Bearer …`, `Basic …`) is kept and anything else gets `Bearer`. Publish: pnpm 11 trims both ends, strips `Bearer` and always sends `Bearer`, so `Basic …` goes out as `Bearer Basic …`; pnpm 12 maps as for install | Trimmed at both ends, BOM removed, refused if not a valid header value; the same mapping on every request |
-| Windows `.cmd` | Through `cmd.exe` in all three paths: pnpm 11 install (Node's `shell` option), pnpm 11 publish (execa), pnpm 12 (`cmd /C`) | Through `cmd.exe`; `"` and `%` refused. pnpm's parser refuses them in every value |
+| Windows `.cmd` | Through `cmd.exe` in all three paths: pnpm 11 install (Node's `shell` option), pnpm 11 publish (execa), pnpm 12 (`cmd /C`) | Through `cmd.exe`; `"`, `%` and `!` refused, and a directory path over 258 characters. pnpm's parser refuses `"` and `%` in every value |
 | Directory, environment, stdin | The directory pnpm runs in (the project's) and its whole environment; stdin closed | The helper's own directory; the environment without `npm_config_*` and the script `PATH` entries; stdin closed |
 | Time limit | 60 s, then the helper is killed, in pnpm 12 and in pnpm 11 install; pnpm 11 publish has none | 60 s, then SIGTERM and SIGKILL 2 s later; the whole process tree on Windows |
 | Output size and stderr | No limit set by pnpm (pnpm 12 reads to the end); stderr is dropped, except in pnpm 11 publish, which shows it as warnings | 1 MiB, then `ETOKENHELPER`; stderr shown as warnings with the exact token masked when the helper fails, at `verbose` when it succeeds |
@@ -260,7 +261,7 @@ This section is informative: it describes one way to meet the requirements above
 - **The runner in npm/cli.** A module in `lib/utils` on `@npmcli/promise-spawn` implements [How the helper runs](#how-the-helper-runs): the checks on the value, the directory, environment and `PATH`, the recursion guard, the time and size limits, the mapping of output to a header, the masking of stderr and the error messages. It keeps one promise per registry per process, and npm passes it to the library as `getAuthorization`.
 - **Config.** `@npmcli/config` gains the per-registry `tokenHelper` key, filtered by source as [Trust](#trust) requires. The key is read from trusted files only, and a `//<registry>/:tokenHelper` key among the options a caller passes to the library does nothing: tools other than npm (npm-check-updates among them) merge every `.npmrc` key they read, a project's included, into those options.
 - **Commands.** `publish`, `whoami` and `get-identity` count a helper as a login; `logout` and `profile enable-2fa` say why they cannot act; `config set` refuses the key in project config. The OIDC exchange in `oidc.js` is changed as little as makes it win over a helper.
-- **Prototype.** [phase-1-implementation.md](phase-1-implementation.md) describes the earlier, hardened prototype, the checks it went through and what each statement in this document maps to. The prototype is being reworked to this split; its checks carry over where they cover the runner and the trust rule, and [sources.md](sources.md) holds what it says about npm, pnpm and others.
+- **Prototype.** [phase-1-implementation.md](phase-1-implementation.md) describes the prototype, the checks it went through and what each statement in this document maps to; the earlier, hardened prototype is on the branches named there. [sources.md](sources.md) holds what the RFC says about npm, pnpm and others.
 
 | Setting | Where | Default | Description |
 |---|---|---|---|

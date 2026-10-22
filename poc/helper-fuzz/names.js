@@ -1,14 +1,15 @@
 'use strict'
 // Runs real helpers whose names are as awkward as the file system lets them
-// be, through the Phase 1 prototype, on the platform this runs on.
+// be, through the Phase 1a runner, on the platform this runs on.
 //
-//   node poc/helper-fuzz/names.js <npm-registry-fetch checkout>
+//   node poc/helper-fuzz/names.js <npm-cli checkout>
 //
 // On Windows a .cmd or .bat helper goes through cmd.exe, which reads the
 // command line itself: a name with & ^ ( ) ! , ; = ' or spaces must still be
 // the one file that is run, a name that smuggles in a second command
 // (`a & mkdir CANARY & b`) must run nothing else, and a name with `%` is
-// refused, since cmd.exe expands it even inside quotes. Elsewhere the helper
+// refused, since cmd.exe expands it even inside quotes, and so is one with `"`
+// or `!`. Elsewhere the helper
 // is executed directly with no shell, so a name with $ ` ; & | ' " * ? [ a
 // newline or a leading dash is only a name. Each helper prints its own token;
 // the result must be `Bearer <token>`, a refusal that says why, or, for a
@@ -19,7 +20,13 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
-const getTokenHelperHeader = require(path.resolve(process.argv[2], 'lib', 'token-helper.js'))
+const runner = require(path.resolve(process.argv[2], 'lib', 'utils', 'token-helper.js'))
+
+// the factory npm uses, with a stub config, for one helper: a fresh one for
+// each call, so that nothing is cached
+const getTokenHelperHeader = (helper, regKey, timeout) => runner(
+  { flat: { tokenHelpers: { [regKey]: helper } }, get: () => undefined },
+  {}, process.platform, { timeout, grace: 2000, drain: 250 })(regKey)
 
 const windows = process.platform === 'win32'
 const NAMES = windows
@@ -69,7 +76,7 @@ const main = async () => {
             results.skipped += 1
             continue
           }
-          const expectRefused = windows && /["%]/.test(helper)
+          const expectRefused = windows && /["%!]/.test(helper)
           try {
             const header = await getTokenHelperHeader(helper, `//names/${count}/`, 20000)
             if (expectRefused) {
