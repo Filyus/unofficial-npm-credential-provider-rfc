@@ -1,4 +1,4 @@
-From ec2c6a52369b886e9aa0a0b32a0ba1b447be1d6b Mon Sep 17 00:00:00 2001
+From fc05b2756656255d71c3be9761be753b56f592c6 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 15:14:12 +0500
 Subject: [PATCH] feat: add tokenHelper, a program that prints a registry token
@@ -54,7 +54,7 @@ updated.
  lib/commands/profile.js                    |   9 +
  lib/commands/publish.js                    |   7 +-
  lib/commands/unpublish.js                  |   4 +-
- lib/npm.js                                 |  11 +
+ lib/npm.js                                 |  12 +
  lib/utils/get-identity.js                  |   2 +-
  lib/utils/oidc.js                          |  10 +
  lib/utils/publish-config.js                |  24 +
@@ -78,10 +78,10 @@ updated.
  workspaces/config/lib/set-envs.js          |   9 +
  workspaces/config/test/index.js            | 175 ++++++
  workspaces/config/test/set-envs.js         |  25 +
- 31 files changed, 1745 insertions(+), 7 deletions(-)
+ 31 files changed, 1746 insertions(+), 7 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
- create mode 100644 test/fixtures/token-helper/helper
+ create mode 100755 test/fixtures/token-helper/helper
  create mode 100644 test/fixtures/token-helper/helper.cmd
  create mode 100644 test/fixtures/token-helper/index.js
  create mode 100644 test/lib/utils/publish-config.js
@@ -326,22 +326,23 @@ index fc390a2..626785a 100644
          this.npm.config.checkUnknown('publishConfig', key)
        }
 diff --git a/lib/npm.js b/lib/npm.js
-index 5c42dbe..e7f2ee1 100644
+index 5c42dbe..da2735c 100644
 --- a/lib/npm.js
 +++ b/lib/npm.js
-@@ -41,6 +41,11 @@ class Npm {
-   #display = null
-   #logFile = new LogFile()
-   #timers = new Timers()
+@@ -411,6 +411,12 @@ class Npm {
+     return this.#command?.name
+   }
+ 
 +  // The environment npm was started with, before npm.load() sets NODE_ENV and
 +  // COLOR and config.setEnvs() sets EDITOR and NODE_OPTIONS from config: a
 +  // token helper gets those four back as the user had them.
 +  #startEnv = { ...process.env }
 +  #getAuthorization = null
- 
-   // All these options are only used by tests in order to make testing more closely resemble real world usage.
-   // For now, npm has no programmatic API so it is ok to add stuff here, but we should not rely on it more than necessary.
-@@ -418,6 +423,12 @@ class Npm {
++
+   get flatOptions () {
+     const { flat } = this.config
+     flat.nodeVersion = process.version
+@@ -418,6 +424,12 @@ class Npm {
      if (this.command) {
        flat.npmCommand = this.command
      }
@@ -869,7 +870,7 @@ index 0000000..e1042db
 +module.exports.DRAIN = DRAIN
 +module.exports.withoutScriptPaths = withoutScriptPaths
 diff --git a/test/fixtures/token-helper/helper b/test/fixtures/token-helper/helper
-new file mode 100644
+new file mode 100755
 index 0000000..cb69010
 --- /dev/null
 +++ b/test/fixtures/token-helper/helper
