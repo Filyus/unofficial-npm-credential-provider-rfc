@@ -267,14 +267,22 @@ puts 'RESULT:' + JSON.generate({ id: token.id })`,
         const again = await call(url, 'POST', '/oauth/authorize_device', { form, headers })
         log(`setup: device authorization, ${label}: HTTP ${again.status} ${again.text.slice(0, 200)}`)
       }
-      const logged = spawnSync('docker', ['exec', container, 'sh', '-c', "grep authorize_device /var/log/gitlab/gitlab-rails/production_json.log | tail -n 2; grep -i -A8 'device' /var/log/gitlab/gitlab-rails/production.log | tail -n 40; grep -i 'device\\|AccessDenied' /var/log/gitlab/gitlab-rails/exceptions_json.log | tail -n 3"], { encoding: 'utf8' })
-      log(`setup: GitLab's log about it:\n${logged.stdout}`)
+      const logged = spawnSync('docker', ['exec', container, 'sh', '-c', "ls /var/log/gitlab/gitlab-rails/; grep -h authorize_device /var/log/gitlab/gitlab-rails/*.log | cut -c1-700 | tail -n 3; grep -h -i 'AccessDenied\\|access_denied' /var/log/gitlab/gitlab-rails/*.log | cut -c1-500 | tail -n 5"], { encoding: 'utf8' })
+      log(`setup: GitLab's log about it:\n${logged.stdout}${logged.stderr}`)
       const diagnosis = rails(
         container,
         `out = {}
-out[:flag] = (Feature.enabled?(:oauth2_device_grant_flow) rescue $!.message)
 out[:flows] = (Doorkeeper.configuration.grant_flows rescue $!.message)
-out[:app] = (Doorkeeper::Application.find_by(uid: '${instance.clientId}').attributes.slice('uid', 'scopes', 'confidential', 'redirect_uri') rescue $!.message)
+out[:org] = (Organizations::Organization.default_organization&.id rescue $!.message)
+app = Doorkeeper::Application.find_by(uid: '${instance.clientId}')
+out[:app] = app.attributes.except('secret', 'uid')
+out[:grant] = (begin
+  g = Doorkeeper::DeviceAuthorizationGrant::DeviceGrant.new(application_id: app.id, scopes: 'api', expires_in: 300, user_code: 'ABCD-EFGH')
+  g.valid?
+  g.errors.full_messages
+rescue => e
+  e.message
+end)
 puts 'RESULT:' + JSON.generate(out)`,
       )
       log(`setup: diagnosis: ${JSON.stringify(diagnosis)}`)
@@ -364,10 +372,10 @@ const pooledPair = async (instance, username) => {
       instance.container,
       `app = Doorkeeper::Application.find_by(uid: '${instance.clientId}')
 out = {}
-{ 'maint' => 40, 'dev' => 4 }.each do |name, count|
+{ 'maint' => 20, 'dev' => 3 }.each do |name, count|
   user = User.find_by_username(name)
   out[name] = (1..count).map do
-    t = Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: user.id, scopes: 'api', expires_in: 7200, use_refresh_token: true)
+    t = Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: user.id, scopes: 'api', expires_in: 7200, use_refresh_token: true, organization_id: Organizations::Organization.default_organization.id)
     { access: t.plaintext_token, refresh: t.plaintext_refresh_token }
   end
 end
@@ -406,7 +414,16 @@ pipeline = Ci::Pipeline.new(project: project, ref: ref, sha: sha, source: :push,
 pipeline.save!(validate: false)
 stage = Ci::Stage.new(project: project, pipeline: pipeline, name: 'test', position: 0, partition_id: pipeline.partition_id)
 stage.save!(validate: false)
-build = Ci::Build.new(project: project, pipeline: pipeline, user: user, name: 'live', ref: ref, stage_id: stage.id, stage_idx: 0, status: 'running', options: { script: ['true'] }, partition_id: pipeline.partition_id)
+attrs = { project: project, pipeline: pipeline, user: user, name: 'live', ref: ref, stage_id: stage.id, stage_idx: 0, status: 'running', partition_id: pipeline.partition_id }
+build = nil
+10.times do
+  begin
+    build = Ci::Build.new(attrs)
+    break
+  rescue ActiveModel::UnknownAttributeError => e
+    attrs.delete(e.attribute.to_sym)
+  end
+end
 build.save!(validate: false)
 puts 'RESULT:' + JSON.generate({ token: build.token, id: build.id })`,
   )
