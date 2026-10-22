@@ -49,7 +49,7 @@ The `token-helper` branches are not published; the prototype is the two patches 
 ```sh
 git config --global core.autocrlf false
 git config --global core.longpaths true      # Windows only
-NPM_CLI_BASE=83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b
+NPM_CLI_BASE=ae98c62586b6fea44114f72e249e246a2981de70
 NPM_REGISTRY_FETCH_BASE=6b4159a2519ce5aab26cc4dd8d4596a0b47781d2
 
 # npm-registry-fetch at its base commit, with the patch applied

@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 env:
-  NPM_CLI_BASE: 83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b
+  NPM_CLI_BASE: ae98c62586b6fea44114f72e249e246a2981de70
   NPM_REGISTRY_FETCH_BASE: 6b4159a2519ce5aab26cc4dd8d4596a0b47781d2
 
 jobs:
