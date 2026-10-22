@@ -222,5 +222,62 @@ class LiveVerdaccioRunTests(unittest.TestCase):
                 self.assertIn(version, readme)
 
 
+class LiveGitlabRunTests(unittest.TestCase):
+    """The lists the live run against a real GitLab is made of (examples/providers/live), the
+    page that says which scenarios run there, and the workflow that starts it: what is skipped
+    is named with a reason, what is allowed to differ has one, and the page, the README and the
+    workflow say the same about the version and about when it runs."""
+
+    LIVE = EXAMPLES / "providers" / "live"
+    PAGE = (EXAMPLES / "gitlab.md").read_text(encoding="utf-8")
+    README = (EXAMPLES / "providers" / "README.md").read_text(encoding="utf-8")
+    WORKFLOW = (ROOT / ".github" / "workflows" / "gitlab-live.yml").read_text(encoding="utf-8")
+
+    def skips(self) -> dict:
+        return json.loads((self.LIVE / "gitlab-skips.json").read_text(encoding="utf-8"))["skips"]
+
+    def test_every_skip_names_a_scenario_and_says_why(self) -> None:
+        scenarios = {path.stem for path in (EXAMPLES / "providers" / "gitlab" / "scenarios").glob("*.json")}
+        for name, entry in self.skips().items():
+            with self.subTest(scenario=name):
+                self.assertIn(name, scenarios)
+                self.assertTrue(entry["reason"].strip())
+                self.assertLessEqual(set(entry) - {"reason", "majorBelow"}, set())
+                self.assertIsInstance(entry.get("majorBelow", 0), int)
+
+    def test_every_allowed_divergence_is_unique_and_has_a_reason(self) -> None:
+        allow = json.loads((self.LIVE / "gitlab-divergences.json").read_text(encoding="utf-8"))["allow"]
+        ids = [entry["id"] for entry in allow]
+        self.assertEqual(len(ids), len(set(ids)))
+        for entry in allow:
+            with self.subTest(id=entry["id"]):
+                self.assertTrue(entry["reason"].strip())
+                self.assertTrue(entry["versions"] and all(re.fullmatch(r"\d+", major) for major in entry["versions"]))
+                self.assertRegex(entry["id"], r" :: ")
+
+    def test_the_page_lists_exactly_the_skipped_scenarios(self) -> None:
+        section = self.PAGE.split("## Against a real GitLab", 1)[1].split("\n## ", 1)[0]
+        listed = set(re.findall(r"\[([a-z-]+)\]\(gitlab/\1\.jsonl\)", section))
+        self.assertEqual(listed, set(self.skips()), "the page's list of scenarios that do not run against a real GitLab is the skips file's")
+
+    def test_the_workflow_pins_the_version_the_page_and_readme_name(self) -> None:
+        pinned = re.findall(r"'gitlab/gitlab-ce:([^']+)'", self.WORKFLOW)
+        self.assertIn("latest", pinned, "the nightly run is against the `latest` tag")
+        tags = {tag for tag in pinned if tag != "latest"}
+        self.assertEqual(len(tags), 1, "the dispatch input's default and the fallback name one pinned tag")
+        (tag,) = tags
+        self.assertRegex(tag, r"^\d+\.\d+\.\d+-ce\.\d+$", "an exact tag, not a moving one")
+        version = tag.split("-")[0]
+        self.assertIn(version, self.PAGE)
+        self.assertIn(version, self.README)
+
+    def test_the_workflow_runs_on_dispatch_and_nightly_only(self) -> None:
+        triggers = self.WORKFLOW.split("\njobs:", 1)[0]
+        self.assertIn("workflow_dispatch:", triggers)
+        self.assertIn("schedule:", triggers)
+        self.assertRegex(triggers, r"cron: '30 3 \* \* \*'")
+        self.assertNotRegex(re.sub(r"(?m)^\s*#.*$", "", triggers), r"(?m)^\s*push:", "no push trigger on the version that lands")
+
+
 if __name__ == "__main__":
     unittest.main()

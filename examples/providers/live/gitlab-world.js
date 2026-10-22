@@ -248,6 +248,27 @@ puts 'RESULT:' + JSON.generate({ id: token.id })`,
     must('application', api('POST', '/applications', { body: { name: 'npm-credential-provider-gitlab', redirect_uri: 'http://localhost/callback', scopes: 'api', confidential: false } })),
   )
   instance.clientId = app.application_id
+  // the device authorization grant sits behind a feature flag on some versions: turned on
+  // through the API (`POST /features`), the way an administrator does, and said either way
+  await step('device grant feature flag', async () => {
+    const flag = await api('POST', '/features/oauth2_device_grant_flow', { body: { value: 'true' } })
+    log(`setup: feature oauth2_device_grant_flow: HTTP ${flag.status} ${flag.text.slice(0, 200)}`)
+  }, { optional: true })
+  await step('device authorization works', async () => {
+    const res = await call(url, 'POST', '/oauth/authorize_device', { form: { client_id: instance.clientId, scope: 'api' } })
+    log(`setup: device authorization: HTTP ${res.status} ${res.text.slice(0, 300)}`)
+    if (res.status !== 200) {
+      const diagnosis = rails(
+        container,
+        `out = {}
+out[:flag] = (Feature.enabled?(:oauth2_device_grant_flow) rescue $!.message)
+out[:flows] = (Doorkeeper.configuration.grant_flows rescue $!.message)
+out[:app] = (Doorkeeper::Application.find_by(uid: '${instance.clientId}').attributes.slice('uid', 'scopes', 'confidential', 'redirect_uri') rescue $!.message)
+puts 'RESULT:' + JSON.generate(out)`,
+      )
+      log(`setup: diagnosis: ${JSON.stringify(diagnosis)}`)
+    }
+  }, { optional: true })
   await step('the package @acme/widgets 2.4.0', () => publish(instance, instance.projects.widgets.id, '@acme/widgets', '2.4.0', admin))
   return instance
 }
@@ -338,7 +359,8 @@ const jobToken = (instance, projectId) =>
 user = User.find_by_username('maint')
 ref = project.default_branch
 sha = project.repository.commit(ref).sha
-pipeline = Ci::Pipeline.new(project: project, ref: ref, sha: sha, source: :push, user: user, status: 'running')
+partition = (Ci::Partition.current.id rescue nil) || 100
+pipeline = Ci::Pipeline.new(project: project, ref: ref, sha: sha, source: :push, user: user, status: 'running', partition_id: partition)
 pipeline.save!(validate: false)
 build = Ci::Build.new(project: project, pipeline: pipeline, user: user, name: 'live', ref: ref, stage: 'test', stage_idx: 0, status: 'running', options: { script: ['true'] }, partition_id: pipeline.partition_id)
 build.save!(validate: false)
