@@ -132,6 +132,7 @@ class Web {
 // be done is said with the page's text, since the forms are read from the HTML.
 const approveDevice = async (web, device) => {
   let page = await web.fetch(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`)
+  let pressed = 0
   for (let step = 0; step < 6; step += 1) {
     const forms = formsOf(page.html)
     trace(`device page ${step}: ${page.url} HTTP ${page.status} "${titleOf(page.html)}" forms ${JSON.stringify(forms.map((form) => ({ action: form.action, fields: form.fields.map((f) => f.name), buttons: form.buttons.map((b) => b.text || b.name) })))}`)
@@ -144,8 +145,9 @@ const approveDevice = async (web, device) => {
         fields[button.name] = button.value ?? ''
       }
       page = await web.fetch(confirm.action, { form: fields })
-      trace(`device page after authorizing: ${page.url} HTTP ${page.status} "${titleOf(page.html)}": ${textOf(page.html).slice(0, 200)}`)
-      return page
+      trace(`device page after pressing Authorize: ${page.url} HTTP ${page.status} "${titleOf(page.html)}": ${textOf(page.html).slice(0, 300)}`)
+      pressed += 1
+      continue
     }
     if (typing) {
       const fields = Object.fromEntries(typing.fields.map((field) => [field.name, field.value]))
@@ -155,6 +157,10 @@ const approveDevice = async (web, device) => {
       continue
     }
     break
+  }
+  // the pages say nothing a script can read of an approval; the token endpoint does
+  if (pressed > 0) {
+    return page
   }
   throw new Error(`could not approve the device code: at ${page.url} (HTTP ${page.status}, "${titleOf(page.html)}"): ${textOf(page.html).slice(0, 400)}`)
 }

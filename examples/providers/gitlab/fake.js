@@ -186,6 +186,7 @@ const createFake = (state) => {
           device_code: 'device-code',
           user_code: 'ABCD-1234',
           verification_uri: 'https://gitlab.example.com/oauth/device',
+          verification_uri_complete: 'https://gitlab.example.com/oauth/device?user_code=ABCD-1234',
           expires_in: oauth.deviceExpiresIn ?? 300,
           interval: oauth.interval ?? 0,
         },

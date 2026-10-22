@@ -17,6 +17,8 @@ const { SENTINEL } = require('./protocol.js')
 //                            what the provider answered, for a value no run can know in advance)
 //   beforeClient(message)    called before a client request is sent (async)
 //   afterAnswer(request, message)  called with each provider answer (async)
+//   answerTimeoutMs          how long the provider may take to answer (10 s; a live run, whose
+//                            server has waits of its own, gives more)
 const runSession = async (run, transcriptFile, hooks = {}) => {
   const { label } = run
   let child = null
@@ -39,7 +41,7 @@ const runSession = async (run, transcriptFile, hooks = {}) => {
       const { value, done } = await Promise.race([
         lines.next(),
         new Promise((resolve, reject) => {
-          timer = setTimeout(() => reject(new Error(`${label}: no answer within 10 s, waiting for ${what}\n${stderr}`)), 10000)
+          timer = setTimeout(() => reject(new Error(`${label}: no answer within ${(hooks.answerTimeoutMs || 10000) / 1000} s, waiting for ${what}\n${stderr}`)), hooks.answerTimeoutMs || 10000)
         }),
       ]).finally(() => clearTimeout(timer))
       assert.ok(!done, `${label}: provider closed stdout before ${what}\n${stderr}`)

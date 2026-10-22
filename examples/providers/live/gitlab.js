@@ -367,7 +367,7 @@ const realRun = async ({ instance, transcript, scenario, log }) => {
       if (record.route === '/oauth/token' && record.body?.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
         const entry = polled.get(record.body.device_code)
         if (entry) {
-          entry.until = Date.now() + (entry.interval + 1) * 1000
+          entry.until = Date.now() + entry.interval * 1000 + 300
           // the person approves after the first poll has been told to wait
           if (approves && record.json?.error === 'authorization_pending' && !entry.approved) {
             entry.approved = true
@@ -417,6 +417,7 @@ const realRun = async ({ instance, transcript, scenario, log }) => {
           : null,
       })
       const stderr = await runSession(run, transcriptFile, {
+        answerTimeoutMs: 60000,
         expected: (message) => {
           let out = deepMap(message, toReal)
           if (out.Ok?.auth) {
