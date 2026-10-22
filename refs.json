@@ -831,36 +831,134 @@
     "sha256": "e62547f475836bddc5c55af25be999dd06f9501c4016bfee6c007e49782fea17",
     "file": ".refs/github.com/orgs_community_discussions_63811.txt"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm/crates/network/src/token_helper.rs": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm-workspace.yaml": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/getNetworkConfigs.ts": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/README.md": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/parseCreds.ts": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/config/src/auth_sources.rs": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/config/reader/src/rescopeUnscopedCreds.ts": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/config/src/npmrc_auth/credential_keys.rs": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/docs/npmrc.md": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/config/src/npmrc_auth/credentials.rs": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/blob/07ab9fa881733154670f803fb4aa96dfd97e6cd9/pnpm11/network/auth-header/src/getAuthHeadersFromConfig.ts": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/network/src/auth.rs": {
     "kind": "source",
-    "cited": "2026-10-21"
+    "cited": "2026-10-22"
   },
-  "https://github.com/pnpm/pnpm/issues/12759": {
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/network/src/auth/lookup.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/network/src/auth/url.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/network/src/requests.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/network/src/token_helper.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/publish/src/execute_token_helper.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/publish/src/lib.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm/crates/publish/src/publish_packed_pkg.rs": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/getConfig/tokenHelper.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/getNetworkConfigs.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/loadNpmrcFiles.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/localConfig.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/parseCreds.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/config/reader/src/rescopeUnscopedCreds.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/docs/npmrc.md": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/installing/client/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/network/auth-header/src/getAuthHeadersFromConfig.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/network/auth-header/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/releasing/commands/src/publish/executeTokenHelper.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/releasing/commands/src/publish/publishPackedPkg.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm11/resolving/default-resolver/src/index.ts": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/pnpm/pnpm/issues/7316": {
     "kind": "discussion",
-    "cited": "2026-10-15",
-    "fetched": "2026-10-20",
-    "sha256": "3b3b7857708d89f80f1252fb3996a6c30372074b61ee7e6a1dcbb4def2780284",
-    "file": ".refs/github.com/pnpm_pnpm_issues_12759.txt"
+    "cited": "2026-10-22",
+    "fetched": "2026-10-22",
+    "sha256": "4bfb3084d26e606afd3b5a65436b16658de5ebc5c58aabf02292d738dcc597ac",
+    "file": ".refs/github.com/pnpm_pnpm_issues_7316.txt"
+  },
+  "https://github.com/pnpm/pnpm/pull/7443": {
+    "kind": "discussion",
+    "cited": "2026-10-22",
+    "fetched": "2026-10-22",
+    "sha256": "ad145e74abf73b3a7f71cd445ca27df489c7bc4d1ab40aabf136fbb8ca779ff6",
+    "file": ".refs/github.com/pnpm_pnpm_pull_7443.txt"
+  },
+  "https://github.com/pnpm/pnpm/releases/tag/v8.14.1": {
+    "kind": "page",
+    "cited": "2026-10-22",
+    "fetched": "2026-10-22",
+    "sha256": "25d5107735a6f027c28aba037beb47c7e18e3311ad95f3526b457ddaac739529",
+    "file": ".refs/github.com/pnpm_pnpm_releases_tag_v8.14.1.txt"
   },
   "https://github.com/raineorshine/npm-check-updates/blob/161014ec672069303ce6595a4b8663f1245c0db9/src/package-managers/npm.ts": {
     "kind": "source",

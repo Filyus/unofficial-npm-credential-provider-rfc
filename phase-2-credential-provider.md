@@ -764,7 +764,7 @@ This section is informative: it describes one way to meet the requirements above
 | **Cache control** | None | None | None | `never`/`session`/`expires` | None in the protocol (operation claims cached 30 days) | `expiresAt` | Cargo's three + `granularity` + `operationIndependent` |
 | **Rejection signal** | `erase` | `erase` | None | Challenge headers | `isRetry` on the next request | None | `erase` + one retry with status and challenges |
 | **Chaining** | Yes | No | No | Yes (`url-not-supported` and `not-found` pass; `cargo:token` is a chain entry) | Yes (plugins in priority order, asked only after a 401 or 403; not-applicable passes; credentials in `nuget.config` are sent first) | No | Yes (`url-not-supported` and `not-found` pass; `npm:token` is a chain entry) |
-| **Process reuse** | No | No | Once per registry per run | Allowed by the protocol; Cargo starts one per request | Yes; shut down after 1 minute idle | One per cache miss | One per npm command |
+| **Process reuse** | No | No | pnpm 12: once per registry and scope per run, at the first request; pnpm 11: at each client setup, for every registry | Allowed by the protocol; Cargo starts one per request | Yes; shut down after 1 minute idle | One per cache miss | One per npm command |
 | **Discovery** | `git-credential-*` | `docker-credential-*` | Explicit | Explicit | `~/.nuget/plugins`, `NUGET_PLUGIN_PATHS`, and since 6.13 `nuget-plugin-*` on `PATH` | Explicit | Explicit; configured names resolved in npm-managed global bin directories |
 | **Production-tested** | Yes | Yes | Yes | Yes | Yes | No | No |
 

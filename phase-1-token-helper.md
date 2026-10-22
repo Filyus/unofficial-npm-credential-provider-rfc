@@ -43,7 +43,7 @@ npm still saves the two-hour token as `_authToken` in the user `~/.npmrc`, so ev
 
 ### npm is behind its neighbours
 
-pnpm ships `tokenHelper` in both its TypeScript CLI and its Rust rewrite. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm:
+pnpm ships `tokenHelper` in pnpm 12, its Rust CLI, and in pnpm 11, the TypeScript CLI it still maintains. Cargo has a versioned credential-provider protocol, Git and Docker have had credential helpers for a decade, NuGet has cross-platform authentication plugins, and pip delegates to keyring. In npm:
 
 - The request for the same thing, [npm/cli#8141](https://github.com/npm/cli/issues/8141), had 43 👍 and no comments on 2026-10-22, and the `Priority 1` label was added on 2026-10-01.
 - A `~/.npmrc` written for pnpm's `tokenHelper` gives npm no credentials at all, and npm 12 reports the key as unknown on every command ("Unknown user config … This will stop working in the next major version of npm"), an error under `strict-npmrc`. A configuration shared with pnpm is on a path to breaking npm outright.
@@ -71,7 +71,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 
 ### The setting
 
-`tokenHelper` turns a helper's output into a header the way pnpm does, so a helper at an absolute path that prints a one-line token serves both package managers. The configuration is pnpm's per-registry form:
+`tokenHelper` turns a helper's output into a header the way pnpm does for a read request, so a helper at an absolute path that prints a one-line token serves both package managers ([the differences around the run](#compared-with-pnpm)). The configuration is pnpm's per-registry form:
 
 ```ini
 # ~/.npmrc or global npmrc only
@@ -98,7 +98,7 @@ Only in a user or global file that is the user's own. npm loads project config b
 
 Anywhere else the key is ignored with a warning. pnpm instead fails on the key in project config; npm warns and carries on, as it does for other settings it ignores.
 
-An unscoped `tokenHelper=` in a user or global file is ignored with a warning that names the line to write instead: `//<registry>/:tokenHelper=<value>` for the `registry=` the same file sets, which is also where pnpm 11.4 pins it, so the rewritten line behaves the same in pnpm. When the file sets no `registry=`, the warning asks for the registry the helper serves, since pnpm would send this helper's token to registry.npmjs.org. npm does not rewrite the file itself: `npm config fix` repairs only what makes every command fail, and it scopes keys to the registry in effect, which a project `.npmrc` can choose.
+An unscoped `tokenHelper=` in a user or global file is ignored with a warning that names the line to write instead: `//<registry>/:tokenHelper=<value>` for the `registry=` the same file sets, which is also where pnpm 12 pins it, so the rewritten line behaves the same in pnpm 12, and starts working in pnpm 11, which ignores the unscoped form. When the file sets no `registry=`, the warning asks for the registry the helper serves, since pnpm 12 would send this helper's token to registry.npmjs.org. npm does not rewrite the file itself: `npm config fix` repairs only what makes every command fail, and it scopes keys to the registry in effect, which a project `.npmrc` can choose.
 
 ### How the helper runs
 
@@ -155,22 +155,35 @@ Every failure names the helper, and npm does not fall back to another credential
 
 ### Compared with pnpm
 
+pnpm 12, the latest release, is a Rust CLI; the TypeScript CLI is pnpm 11, which pnpm still maintains. The table names the one it means where they differ, and [sources.md](sources.md#external-facts) has the source line and the local run behind each cell.
+
 | | pnpm | npm (this RFC) |
 |---|---|---|
 | Value | Documented as an absolute path with no arguments; the parser splits on whitespace with no quoting, refusing `$`, `%`, `"`, `'` and a backtick, so it also runs a bare name from `PATH` and cannot express a path that contains a space | One absolute path, spaces allowed, no arguments |
-| Unscoped `tokenHelper=` | Deprecated since 11.4: pinned at load to the `registry=` of the same file, or to registry.npmjs.org if the file names none, with a warning; to be removed in a future major ([pnpm 11.4](https://pnpm.io/blog/releases/11.4)) | Ignored with a warning naming the scoped line to write; not fatal under `strict-npmrc`; `npm config set` refuses it |
-| Key without a slash before the colon (`//host:tokenHelper`, as pnpm's docs show) | Accepted; the slash is added | Ignored with a warning naming `//host/:tokenHelper` |
-| `//<registry>/:@scope:tokenHelper` | Parsed (per-scope credentials, 11.7) | Ignored with a warning naming the per-registry key |
-| Key in project `.npmrc` | Error | Ignored with a warning |
-| Output | `trimEnd()`, then passed on | Trimmed at both ends, BOM removed, refused if not a valid header value |
-| Windows `.cmd` | Through `cmd.exe` | Through `cmd.exe`; `"` and `%` refused |
+| Unscoped `tokenHelper=` | pnpm 12 pins it at load to the `registry=` of the same file, or to registry.npmjs.org if the file names none, with a deprecation warning ([pnpm 11.4](https://pnpm.io/blog/releases/11.4)); pnpm 11 ignores it without a warning | Ignored with a warning naming the scoped line to write; not fatal under `strict-npmrc`; `npm config set` refuses it |
+| Key without a slash before the colon (`//host:tokenHelper`, as pnpm's docs show) | Accepted by both; the slash is added | Ignored with a warning naming `//host/:tokenHelper` |
+| `//<registry>/:@scope:tokenHelper` | Parsed by both: the helper serves that scope's packages (the docs show the form for `_authToken` only) | Ignored with a warning naming the per-registry key |
+| Key in project `.npmrc` | Error in both, unless the user's file has the same value; the environment form is dropped | Ignored with a warning |
+| Output | Install: `trimEnd()`, then a leading scheme (`Bearer …`, `Basic …`) is kept and anything else gets `Bearer`. Publish: pnpm 11 trims both ends, strips `Bearer` and always sends `Bearer`, so `Basic …` goes out as `Bearer Basic …`; pnpm 12 maps as for install | Trimmed at both ends, BOM removed, refused if not a valid header value; the same mapping on every request |
+| Windows `.cmd` | Through `cmd.exe` in all three paths: pnpm 11 install (Node's `shell` option), pnpm 11 publish (execa), pnpm 12 (`cmd /C`) | Through `cmd.exe` (`/d /v:off /s /c`); `"` and `%` refused. pnpm's parser refuses them in every value |
+| Directory, environment, stdin | The directory pnpm runs in (the project's) and its whole environment; stdin closed | The helper's own directory; the environment without what npm sets from project config and the script `PATH` entries; stdin closed |
+| Time limit | 60 s, then the helper is killed, in pnpm 12 and in pnpm 11 install; pnpm 11 publish has none | 60 s, SIGTERM, SIGKILL after 2 s; the whole process tree on Windows |
+| Output size and stderr | No limit set by pnpm (pnpm 12 reads to the end); stderr is dropped, except in pnpm 11 publish, which shows it as warnings | 1 MiB on each stream, then `ETOKENHELPER`; stderr shown as cleaned warnings |
+| When it runs | pnpm 12: at the first matching request, once per registry and scope key per process. pnpm 11 install: when the client is set up, for every registry with a helper, and again at each setup. pnpm 11 publish: at each publish | At the first request to that registry, once per registry and helper per process; a failure is cached too |
+| When it fails | pnpm 11: an error, before any request. pnpm 12: logged, and the request goes out without `Authorization` | `ETOKENHELPER`, and no fallback to another credential |
+| Helper and `_authToken` for one registry | The helper wins; in pnpm 11 `publish` the `_authToken` wins and the helper does not run. OIDC wins over both in `publish` | The helper wins; OIDC wins over both |
+| `publish` | Runs the helper since 8.14.1 ([issue 7316](https://github.com/pnpm/pnpm/issues/7316)); pnpm 11 has a path of its own for it | Runs the helper, and counts it as being logged in |
+| Registry on `http:` | pnpm 12 sends the credential; pnpm 11 was not checked | `https:` only, and `http:` to a loopback address |
 
-The two agree on an absolute path with no spaces and no arguments that prints a one-line token. Where npm is stricter, it is for a reason particular to npm:
+The two agree on an absolute path with no spaces and no arguments that prints a one-line token, for what a request carries; around the run they differ, as the rows say. Where npm is stricter, it is for a reason particular to npm:
 
-- **No unscoped form:** a project `.npmrc` may set `registry=`, so "the default registry" is partly chosen by the repository, and the helper's credential would follow it to another host. This is why npm 9 made an unscoped `_authToken` an error. pnpm 11.4 closes the same hole by pinning the key to the registry declared in the same file, but falls back to registry.npmjs.org when the file declares none, which sends a corporate helper's token to the public registry, and pnpm has deprecated the form. The scoped key works in both.
+- **No unscoped form:** a project `.npmrc` may set `registry=`, so "the default registry" is partly chosen by the repository, and the helper's credential would follow it to another host. This is why npm 9 made an unscoped `_authToken` an error. pnpm 12 closes the same hole by pinning the key to the registry declared in the same file, but falls back to registry.npmjs.org when the file declares none, which sends a corporate helper's token to the public registry, and pnpm has deprecated the form; pnpm 11 ignores it. The scoped key works in all of them.
 - **No bare names, ever:** a bare name would be looked up on a `PATH` that npm extends with the project's `node_modules/.bin` when it runs inside a script, which would let a dependency choose the helper.
 - **No arguments:** pnpm documents the value as an absolute path with no arguments, so this costs no documented pnpm setup; a command that needs arguments goes in a two-line script, or in Phase 2's `credentialProvider`, whose value is an argument list.
 - **No per-scope helpers:** one helper per registry is what Phase 1 offers; telling scopes apart is what Phase 2's request context is for.
+- **A failure ends the request:** npm stops with the helper named, as pnpm 11 does. pnpm 12 sends the request without the credential, so a registry that serves public packages to anyone answers as if no login existed, and a private one answers 401 or 404 with nothing to say why.
+- **The helper's own directory and environment:** pnpm gives the helper the project directory and everything in its environment. For npm, which exports a project's config to what it starts, that would let a repository's `.npmrc` reach the helper through `NODE_OPTIONS` or `PATH` ([How the helper runs](#how-the-helper-runs)).
+- **Only `https:`:** a helper's credential is new, so it starts stricter than a stored token ([Which requests get the credential](#which-requests-get-the-credential)); pnpm 12 also sends it to an `http:` registry.
 
 ### Vendor CLIs
 
