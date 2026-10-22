@@ -245,47 +245,23 @@ puts 'RESULT:' + JSON.generate({ id: token.id })`,
     }
   }
   const app = await step('OAuth application', () =>
-    must('application', api('POST', '/applications', { body: { name: 'npm-credential-provider-gitlab', redirect_uri: 'http://localhost/callback', scopes: 'api', confidential: false } })),
+    must('application', api('POST', '/applications', { body: { name: 'npm-credential-provider-gitlab', redirect_uri: 'http://localhost/callback', scopes: 'api', confidential: false, device_code_enabled: true } })),
   )
   instance.clientId = app.application_id
-  // the device authorization grant sits behind a feature flag on some versions: turned on
-  // through the API (`POST /features`), the way an administrator does, and said either way
-  await step('device grant feature flag', async () => {
-    const flag = await api('POST', '/features/oauth2_device_grant_flow', { body: { value: 'true' } })
-    log(`setup: feature oauth2_device_grant_flow: HTTP ${flag.status} ${flag.text.slice(0, 200)}`)
-  }, { optional: true })
+  // the device authorization grant is a setting of the application (`device_code_enabled`, off for
+  // an application the API creates, whatever the request says); an administrator turns it on in the
+  // application's settings, which is the Rails console here, and it is said whether it was needed
   await step('device authorization works', async () => {
-    const res = await call(url, 'POST', '/oauth/authorize_device', { form: { client_id: instance.clientId, scope: 'api' } })
-    log(`setup: device authorization: HTTP ${res.status} ${res.text.slice(0, 300)}`)
+    const ask = () => call(url, 'POST', '/oauth/authorize_device', { form: { client_id: instance.clientId, scope: 'api' } })
+    let res = await ask()
+    log(`setup: device authorization of an application the API made: HTTP ${res.status} ${res.text.slice(0, 160)}`)
     if (res.status !== 200) {
-      for (const [label, form, headers] of [
-        ['no scope', { client_id: instance.clientId }],
-        ['read_user', { client_id: instance.clientId, scope: 'read_user' }],
-        ['accepting JSON', { client_id: instance.clientId, scope: 'api' }, { accept: 'application/json' }],
-        ['a client that does not exist', { client_id: 'nope', scope: 'api' }],
-      ]) {
-        const again = await call(url, 'POST', '/oauth/authorize_device', { form, headers })
-        log(`setup: device authorization, ${label}: HTTP ${again.status} ${again.text.slice(0, 200)}`)
-      }
-      const logged = spawnSync('docker', ['exec', container, 'sh', '-c', "ls /var/log/gitlab/gitlab-rails/; grep -h authorize_device /var/log/gitlab/gitlab-rails/*.log | cut -c1-700 | tail -n 3; grep -h -i 'AccessDenied\\|access_denied' /var/log/gitlab/gitlab-rails/*.log | cut -c1-500 | tail -n 5"], { encoding: 'utf8' })
-      log(`setup: GitLab's log about it:\n${logged.stdout}${logged.stderr}`)
-      const diagnosis = rails(
-        container,
-        `out = {}
-out[:flows] = (Doorkeeper.configuration.grant_flows rescue $!.message)
-out[:org] = (Organizations::Organization.default_organization&.id rescue $!.message)
-app = Doorkeeper::Application.find_by(uid: '${instance.clientId}')
-out[:app] = app.attributes.except('secret', 'uid')
-out[:grant] = (begin
-  g = Doorkeeper::DeviceAuthorizationGrant::DeviceGrant.new(application_id: app.id, scopes: 'api', expires_in: 300, user_code: 'ABCD-EFGH')
-  g.valid?
-  g.errors.full_messages
-rescue => e
-  e.message
-end)
-puts 'RESULT:' + JSON.generate(out)`,
-      )
-      log(`setup: diagnosis: ${JSON.stringify(diagnosis)}`)
+      rails(container, `app = Doorkeeper::Application.find_by(uid: '${instance.clientId}')\napp.update!(device_code_enabled: true)\nputs 'RESULT:' + JSON.generate({ device_code_enabled: app.reload.device_code_enabled })`)
+      res = await ask()
+      log(`setup: device authorization after device_code_enabled was turned on in the console: HTTP ${res.status} ${res.text.slice(0, 200)}`)
+    }
+    if (res.status !== 200) {
+      throw new Error('the device authorization grant is not available')
     }
   }, { optional: true })
   await step('the package @acme/widgets 2.4.0', () => publish(instance, instance.projects.widgets.id, '@acme/widgets', '2.4.0', admin))

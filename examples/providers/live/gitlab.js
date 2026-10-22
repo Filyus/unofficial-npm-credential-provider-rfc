@@ -92,9 +92,11 @@ const normalise = ({ src, method, route, authorization, body, status, headers, j
     body: bodyShape(body),
     answer: {
       status,
-      'www-authenticate': headers['www-authenticate'] || null,
+      // the challenge without its prose (`error_description`, a sentence of GitLab's)
+      'www-authenticate': headers['www-authenticate'] ? headers['www-authenticate'].replace(/,\s*error_description="[^"]*"/, '') : null,
       'npm-notice': headers['npm-notice'] || null,
-      vary: headers.vary || null,
+      // `Accept-Encoding` is added by the compression of a large body, not by the endpoint
+      vary: headers.vary ? headers.vary.split(',').map((name) => name.trim()).filter((name) => name.toLowerCase() !== 'accept-encoding').join(', ') || null : null,
       'cache-control': headers['cache-control'] || null,
       'content-type': mediaType(headers['content-type']),
       keys: keysOf(json),
@@ -504,7 +506,8 @@ const realRun = async ({ instance, transcript, scenario, log }) => {
         for (const record of createdOnes()) {
           const kept = (live.json || []).find((token) => token.id === record.json.id)
           if (kept) {
-            assert.equal(kept.expires_at, record.body.expires_at, `${run.label}: expiry GitLab kept for deploy token ${kept.id}`)
+            // sent as a date, listed as midnight UTC of it
+            assert.equal(String(kept.expires_at).slice(0, 10), record.body.expires_at, `${run.label}: expiry GitLab kept for deploy token ${kept.id}`)
           }
         }
       }
@@ -556,7 +559,7 @@ const PROBE_FAKE_STATE = () => ({
   oauth: { refreshToken: 'probe-refresh', accessToken: 'probe-access', next: [], interval: 5, pending: 1 },
   access: { 'probe-dev-access': { level: 30 } },
   jobToken: 'probe-job-token',
-  tokens: ['probe-created-1', 'probe-created-2'],
+  tokens: ['probe-created-1', 'probe-created-2', 'probe-created-3', 'probe-created-4', 'probe-created-5', 'probe-created-6'],
   nextId: 4,
   deployTokens: [
     { id: 1, token: 'probe-read-deploy', scopes: ['read_package_registry'], expires_at: '2099-01-01' },
@@ -595,7 +598,7 @@ const PROBES = [
   // the OAuth endpoints
   ['oauth, refresh, a token GitLab does not know', 'POST', '/oauth/token', null, { form: () => ({ client_id: '{client}', grant_type: 'refresh_token', refresh_token: 'garbage-refresh' }) }],
   ['oauth, refresh, an unknown client', 'POST', '/oauth/token', null, { form: () => ({ client_id: 'no-such-client', grant_type: 'refresh_token', refresh_token: 'garbage-refresh' }) }],
-  ['oauth, a grant type GitLab does not offer', 'POST', '/oauth/token', null, { form: () => ({ client_id: '{client}', grant_type: 'client_credentials' }) }],
+  ['oauth, a grant type nobody has', 'POST', '/oauth/token', null, { form: () => ({ client_id: '{client}', grant_type: 'no_such_grant' }) }],
   ['oauth, device authorization, an unknown client', 'POST', '/oauth/authorize_device', null, { form: () => ({ client_id: 'no-such-client', scope: 'api' }) }],
   ['oauth, device authorization, a scope the application lacks', 'POST', '/oauth/authorize_device', null, { form: () => ({ client_id: '{client}', scope: 'read_user' }) }],
   ['oauth, device authorization', 'POST', '/oauth/authorize_device', null, { form: () => ({ client_id: '{client}', scope: 'api' }) }],
@@ -622,12 +625,18 @@ const PROBES = [
   ['packument, the group registry, the administrator', 'GET', '/api/v4/groups/{g}/-/packages/npm/@acme%2fwidgets', 'admin'],
   ['packument, the instance registry, a project read deploy token', 'GET', '/api/v4/packages/npm/@acme%2fwidgets', 'read'],
   ['packument, the instance registry, the administrator', 'GET', '/api/v4/packages/npm/@acme%2fwidgets', 'admin'],
+  ['packument, the group registry, a read deploy token of another project', 'GET', '/api/v4/groups/{g}/-/packages/npm/@acme%2fwidgets', 'other-read'],
+  ['packument, the instance registry, a read deploy token of another project', 'GET', '/api/v4/packages/npm/@acme%2fwidgets', 'other-read'],
+  ['packument, the group registry, no credential', 'GET', '/api/v4/groups/{g}/-/packages/npm/@acme%2fwidgets', null],
+  ['packument, the group registry, a package that is not there', 'GET', '/api/v4/groups/{g}/-/packages/npm/@acme%2fmissing', 'read'],
   // the project registry, write
   ['publish, no credential', 'PUT', PACKUMENT, null, PUBLISH('2.5.0')],
   ['publish, a read deploy token', 'PUT', PACKUMENT, 'read', PUBLISH('2.5.0')],
   ['publish, a write deploy token', 'PUT', PACKUMENT, 'write', PUBLISH('2.5.0')],
   ['publish, the same version again', 'PUT', PACKUMENT, 'write', PUBLISH('2.5.0')],
   ['publish, a CI job token', 'PUT', PACKUMENT, 'job', PUBLISH('2.5.1')],
+  ['publish, the maintainer\'s OAuth token', 'PUT', PACKUMENT, 'oauth', PUBLISH('2.5.3')],
+  ['publish, the developer\'s OAuth token', 'PUT', PACKUMENT, 'dev-oauth', PUBLISH('2.5.4')],
   ['publish, a name outside the root group', 'PUT', '/api/v4/projects/{p}/packages/npm/@other%2fwidgets', 'write', () => packument('@other/widgets', '1.0.0')],
   ['publish, a write deploy token of another project', 'PUT', PACKUMENT, 'other-read', PUBLISH('2.5.2')],
   ['packument, after the publish', 'GET', PACKUMENT, 'read'],
@@ -709,7 +718,8 @@ const runProbes = async ({ instance, log }) => {
     // the deploy token a probe makes is the fourth, as in the fake
     for (const probe of PROBES) {
       if (probe[2].includes('{dt:4}')) {
-        const created = proxy.records.filter((record) => record.method === 'POST' && /\/deploy_tokens$/.test(record.route) && record.status === 201 && record.json.scopes.includes('read_package_registry')).pop()
+        // the first token a probe made, as the fake's fourth
+        const created = proxy.records.find((record) => record.method === 'POST' && /\/deploy_tokens$/.test(record.route) && record.status === 201)
         dtIds.set(4, created?.json.id)
       }
       if (probe[2].includes('{dt:4}') && !dtIds.get(4)) {
