@@ -1,4 +1,4 @@
-From 77ee9db5e2034587dc5c06a5eecc9dcbd3e94d73 Mon Sep 17 00:00:00 2001
+From 8234a74ef5b1f7d00e11a0faea24a9e7760191ff Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 15 Oct 2026 02:35:57 +0500
 Subject: [PATCH] feat(config): accept tokenHelper from user and global config
@@ -39,8 +39,7 @@ builtin, environment, command line, and the user and global files the trust
 rules accept), which npm-registry-fetch uses for a request that carries a
 helper's credential instead of the request's own settings.
 
-Pairs with the npm-registry-fetch prototype that runs the helper. Prototype
-for the credential provider RFC discussed in npm/rfcs#850.
+Pairs with the npm-registry-fetch change that runs the helper.
 ---
  docs/lib/content/configuring-npm/npmrc.md  |  15 +-
  lib/commands/config.js                     |  16 +-
