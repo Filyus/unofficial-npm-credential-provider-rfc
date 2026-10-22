@@ -776,6 +776,18 @@
     "kind": "source",
     "cited": "2026-10-21"
   },
+  "https://github.com/npm/cli/blob/ae98c62586b6fea44114f72e249e246a2981de70/lib/npm.js": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/npm/cli/blob/ae98c62586b6fea44114f72e249e246a2981de70/workspaces/config/lib/definitions/definitions.js": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
+  "https://github.com/npm/cli/blob/ae98c62586b6fea44114f72e249e246a2981de70/workspaces/config/lib/set-envs.js": {
+    "kind": "source",
+    "cited": "2026-10-22"
+  },
   "https://github.com/npm/cli/issues/8141": {
     "kind": "discussion",
     "cited": "2026-10-04",

@@ -25,11 +25,11 @@ It ships as one opt-in setting in a minor release, `strict-credentials`, and is 
 [Phase 1a](phase-1-token-helper.md) treats a helper's credential as a stored token on purpose: a helper held to a stricter rule than the token it replaces would be the one credential that cannot reach an `http:` registry, and the question belongs to every credential. The weaknesses below are today's behaviour for a stored `_authToken`. A helper or provider inherits them until this proposal lands.
 
 - **A project chooses the route.** A request carrying a credential takes `proxy`, `https-proxy`, `noproxy`, `ca`, `cafile`, `strict-ssl` and `local-address` from any config layer, a repository's `.npmrc` among them. That `.npmrc` can send the credential through its own proxy, or past a certificate it chose.
-- **A child npm reads the project's config as its environment.** When npm starts a script, it exports its resolved config, project values included, as `npm_config_*` variables. A child npm reads them as its environment layer, which ranks above every file, so a transport setting the parent took from the repository reaches the child as if the user had set it, and a rule applied only to files is bypassed by `npm run`.
+- **A child npm reads the project's config as its environment.** When npm starts a script, it exports its resolved config, project values included, as `npm_config_*` variables ([sources.md](sources.md#external-facts)). A child npm reads them as its environment layer, which ranks above every file, so a transport setting the parent took from the repository reaches the child as if the user had set it, and a rule applied only to files is bypassed by `npm run`.
 - **`http:` and redirects.** A stored token's key carries no scheme, so a lockfile `resolved` URL over `http:` on the registry's host carries the token. A redirect on the same host name can change the port.
 - **The cache index.** make-fetch-happen writes to its cache index every request header a response names in `Vary`, `Authorization` included ([sources.md](sources.md#external-facts)).
 - **Error responses.** A registry that echoes the request in a non-2xx body puts the credential into npm's error, the debug log and CI output.
-- **The user and global file can be moved.** A project `.npmrc` can set `userconfig`, `globalconfig` or `prefix`, so a repository file loads in the place of the user's.
+- **The user and global file can be moved.** A project `.npmrc` can set `userconfig`, `globalconfig` or `prefix` (the global file lives under it), so a repository file loads in the place of the user's.
 
 ## Detailed Explanation
 
@@ -69,9 +69,11 @@ What this does not do is hide a credential from a registry that is meant to rece
 
 ### Project config cannot choose the user or global file
 
-A project `.npmrc` cannot set `userconfig`, `globalconfig` or `prefix`. In a minor release with `strict-credentials` false, npm warns and still applies the value; with it true, and in the next major by default, npm refuses the setting with an error naming the file and the line.
+A project `.npmrc` cannot set `userconfig` or `globalconfig`. In a minor release with `strict-credentials` false, npm warns and still applies the value; with it true, and in the next major by default, npm refuses the setting with an error naming the file and the line.
 
-This is what lets [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-be-set) stay as narrow as it is: with the project unable to name a user or global file, "who chose this file" needs no further provenance code, and a helper or provider configured there can only be the user's.
+A project-set `prefix` is not refused: it still applies to installs, which is what a repository that sets `prefix` relies on. npm does not use it to locate the global config file, which is found only from the user's, environment, command-line or built-in `prefix`. The global file therefore cannot move into the repository, and `prefix` alone moves nothing the credential rules depend on.
+
+This is what lets [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-be-set) stay as narrow as it is: with the project unable to name a user or global file, "who chose this file" needs no further provenance code, and a helper or provider configured there can only be the user's. The `prefix` condition of that rule then holds by construction.
 
 ## Threat model
 
@@ -83,7 +85,7 @@ This is what lets [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-b
 | A registry or tarball host | Redirects to another port of the same host | Followed with the credential | Followed without it |
 | A host on the path | Sends `Vary: Authorization` | The credential is in the cache index | Never written there once make-fetch-happen changes |
 | A registry | Echoes the request in an error | The credential reaches the log | Removed from the error |
-| A repository's `.npmrc` | Sets `userconfig`, `globalconfig` or `prefix` | A repository file loads as the user's | Refused |
+| A repository's `.npmrc` | Sets `userconfig`, `globalconfig` or `prefix` | A repository file loads as the user's | `userconfig` and `globalconfig` refused; a project `prefix` no longer locates the global file |
 
 Out of scope, as in [Phase 1a](phase-1-token-helper.md#scope): code that already runs as the user, and a registry the user chose that is itself hostile.
 
@@ -95,7 +97,7 @@ Out of scope, as in [Phase 1a](phase-1-token-helper.md#scope): code that already
 
 **Why a marker and not a different export.** Not exporting transport keys to a child would break scripts that rely on the proxy settings reaching a child npm. A marker keeps what the user set and drops only what a project set.
 
-**Refusing project-set `userconfig`, `globalconfig` and `prefix`** instead of detecting where a file lies: detection needs filesystem identity, which differs between filesystems, and can be gotten past by a spelling. A refusal has no spelling to get past.
+**Refusing project-set `userconfig` and `globalconfig`, and ignoring a project `prefix` for the global file's location,** instead of detecting where a file lies: detection needs filesystem identity, which differs between filesystems, and can be gotten past by a spelling. A refusal has no spelling to get past. A project `prefix` is kept for installs because refusing it would break repositories that use it for that, while the one thing it could do to a credential, move the global file, is cut off.
 
 ## Prior implementation
 
@@ -106,7 +108,7 @@ Much of this was prototyped for the helper alone on the branch `token-helper-har
 | Release | Ships | Done when |
 |---|---|---|
 | A minor | `strict-credentials`, default `false`; a default-level warning wherever it would change behaviour; the make-fetch-happen change proposed upstream | A user can set it and see what it would change |
-| The next major | `strict-credentials` is `true` by default; a project `.npmrc` setting `userconfig`, `globalconfig` or `prefix` is an error | No credential travels outside the rules above unless the user turned them off |
+| The next major | `strict-credentials` is `true` by default; a project `.npmrc` setting `userconfig` or `globalconfig` is an error | No credential travels outside the rules above unless the user turned them off |
 
 ## Compatibility
 
@@ -115,7 +117,8 @@ Who breaks when `strict-credentials` is on:
 | Who | What stops working | Mitigation |
 |---|---|---|
 | An `_authToken` for an `http:` registry that is not loopback | The request goes out without the token and the registry answers 401 | Serve the registry over `https:`, or tunnel it to a loopback address |
-| A project that selects a config file with `userconfig`, `globalconfig` or `prefix` in its `.npmrc` | The setting is refused | Pass the option on the command line or in the environment, where the user, not the repository, sets it |
+| A project that selects a config file with `userconfig` or `globalconfig` in its `.npmrc` | The setting is refused | Pass the option on the command line or in the environment, where the user, not the repository, sets it |
+| A project whose `.npmrc` sets `prefix` and expects a global config file under it | The global file is looked up under the user's prefix | Set `globalconfig` on the command line or in the environment |
 | A project whose `.npmrc` sets a proxy or CA that registry traffic needs | A credentialed request ignores it | Put the setting in the user or global file, or in the environment |
 | A redirect to another port of the registry host | The target gets no credential | Configure the registry's real address |
 

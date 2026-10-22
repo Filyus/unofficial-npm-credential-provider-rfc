@@ -112,17 +112,18 @@ The runner lives in npm/cli, on `@npmcli/promise-spawn`; npm-registry-fetch hold
 
 - **Value.** An absolute path with no arguments, which may contain spaces (`C:\Program Files\…`). Anything else fails with `ETOKENHELPER` and a message that says what to do ([Output and failures](#output-and-failures)). `${VAR}` in the value expands, and an unescaped `#` or `;` ends it (write `\#`, as in a path under `C#`), as in any npm config value.
 - **Key.** A key whose registry part does not end in `/` (`//host:tokenHelper`, as pnpm's docs show it) never matches a request, so it is ignored with a warning naming `//host/:tokenHelper`.
-- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does; a path containing `"` or `%` is refused there, since `cmd.exe` would reinterpret it. Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
+- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does, and `@npmcli/promise-spawn` does the quoting for `cmd.exe`; a path containing `"` or `%` is refused there, since `cmd.exe` would reinterpret it. Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
 - **Working directory.** The helper's own directory, never npm's, which is usually the repository: on Windows a command started by bare name (the `node` in a cmd-shim) is looked up in the current directory first.
 - **Input.** None: stdin is closed at once, so a helper that reads it gets end of input.
-- **Limits.** 60 seconds, then the helper is killed (its whole process tree on Windows), and 1 MiB of output.
+- **Limits.** 1 MiB of output, and 60 seconds: `@npmcli/promise-spawn` has no timeout, so the runner owns it and sends SIGTERM at 60 seconds and SIGKILL 2 seconds later, ending the whole process tree on Windows. Elsewhere only the helper process is signalled.
 - **Recursion.** npm sets a variable for the helper; an npm that the helper itself runs sees it and starts no helper, so a wrapper that calls `npm` cannot loop.
 
 #### Environment
 
 The helper gets npm's environment without what npm set from a project's config or about itself:
 
-- Removed: every `npm_config_*` variable, which is how npm exports config, a project's included, to what it starts. `NODE_OPTIONS` is removed only when npm set it from the `node-options` setting; a value the user had in the environment is restored. Otherwise `node-options` alone would let a repository's `.npmrc` load code into a node-based helper and read the credential it prints.
+- Removed: what npm exported from its own config. That is every `npm_config_*` variable, and four others, each set only from the config key named: `NODE_OPTIONS` from `node-options`, `EDITOR` from `editor`, `NODE_ENV` (set to `production` when the resulting `omit` list holds `dev`, whether from `omit`, `only` or `production`) and `COLOR` from `color`. Where npm overwrote a value the user had in the environment it started with, the helper gets that value back; where there was none, the variable is absent. A project's `.npmrc` reaches a child this way, and `node-options` alone would let a repository load code into a node-based helper and read the credential it prints.
+- Where npm does this ([npm/cli at 12.2.1](sources.md#external-facts)): `set-envs.js` writes the `npm_config_*` variables and sets `EDITOR` and `NODE_OPTIONS` from the `editor` and `node-options` config; `definitions.js` sets `NODE_ENV` while resolving `omit`, and `lib/npm.js` sets `COLOR`, both on npm's own process environment, so the runner records the user's values when npm starts.
 - `PATH` loses the directories npm put in front of it for a script: each `node_modules/.bin` from the package up to the root, and the `node-gyp-bin` directory. A `node_modules/.bin` the user put on `PATH` elsewhere stays.
 
 Why the path matters: a helper script calls its tools by name, and a dependency's bin is linked into `node_modules/.bin` even when its install scripts never ran (npm 12's default, or `--ignore-scripts`). Without this, `npm run release` calling `npm publish` would hand the credential to a dependency's `aws`, code the user had declined to run.
