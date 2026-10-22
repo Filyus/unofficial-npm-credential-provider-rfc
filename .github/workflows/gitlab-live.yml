@@ -23,6 +23,9 @@ on:
   schedule:
     # after the fuzz soak
     - cron: '30 3 * * *'
+  # TEMPORARY, while the workflow is not on the default branch and so cannot be dispatched
+  push:
+    branches: [gitlab-live]
 
 permissions:
   contents: read
@@ -34,7 +37,7 @@ jobs:
     timeout-minutes: 40
     env:
       # the nightly run is against `latest`; a dispatch names its image, by default the pinned one
-      GITLAB_IMAGE: ${{ github.event_name == 'schedule' && 'gitlab/gitlab-ce:latest' || inputs.image }}
+      GITLAB_IMAGE: ${{ github.event_name == 'schedule' && 'gitlab/gitlab-ce:latest' || inputs.image || 'gitlab/gitlab-ce:19.5.1-ce.0' }}
       GITLAB_URL: http://localhost:8929
     steps:
       - uses: actions/checkout@v7
