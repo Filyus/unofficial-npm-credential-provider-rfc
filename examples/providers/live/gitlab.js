@@ -83,7 +83,7 @@ const normalise = ({ src, method, route, authorization, body, status, headers, j
   }
   const [pathOnly, query] = route.split('?')
   const named = pathOnly
-    .replace(/\/(projects|groups)\/(\d+)/g, (all, kind, id) => `/${kind}/{${names.get(id) || 'unknown'}}`)
+    .replace(/\/(projects|groups)\/(\d+)/g, (all, kind, id) => `/${kind}/{${names.get(`${kind}:${id}`) || 'unknown'}}`)
     .replace(/\/deploy_tokens\/(\d+)$/, (all, id) => `/deploy_tokens/{${dts.get(id) || 'dt?'}}`)
   return {
     src,
@@ -275,7 +275,7 @@ const runFake = async (transcript, scenario) => {
     for (const id of (scenario.state?.deployTokens || []).map((deploy) => deploy.id)) {
       roles.dts.set(String(id), `dt${id}`)
     }
-    const names = new Map(Object.entries(PROJECTS))
+    const names = new Map(Object.entries(PROJECTS).map(([id, name]) => [`projects:${id}`, name]))
     return records().map((record) => {
       const exchange = normalise(record, { names, dts: roles.dts, role: roles.role })
       roles.learn(record)
@@ -534,7 +534,7 @@ const realRun = async ({ instance, transcript, scenario, log }) => {
       for (const [fake, id] of deployIds) {
         roles.dts.set(String(id), `dt${fake}`)
       }
-      const names = new Map(Object.entries(ids).map(([number, id]) => [id, PROJECTS[number]]))
+      const names = new Map(Object.entries(ids).map(([number, id]) => [`projects:${id}`, PROJECTS[number]]))
       return proxy.records.map((record) => {
         const exchange = normalise({ ...record, authorization: record.headers.authorization, headers: record.answered }, { names, dts: roles.dts, role: roles.role })
         roles.learn(record)
@@ -692,7 +692,7 @@ const runProbes = async ({ instance, log }) => {
     for (const id of [1, 2, 3]) {
       roles.dts.set(String(id), `dt${id}`)
     }
-    const names = new Map([['42', 'widgets'], ['43', 'other'], ['7', 'group']])
+    const names = new Map([['projects:42', 'widgets'], ['projects:43', 'other'], ['groups:7', 'group']])
     fakeSide = exchanges.map(({ request, answer }) => {
       const record = { src: 'npm', method: request.method, route: request.path, authorization: request.headers.authorization, body: request.body, status: answer.status, headers: { ...(answer.json === undefined ? {} : { 'content-type': 'application/json' }), ...(answer.headers || {}) }, json: answer.json }
       const exchange = normalise(record, { names, dts: roles.dts, role: roles.role })
@@ -732,7 +732,7 @@ const runProbes = async ({ instance, log }) => {
     for (const [fake2, real] of dtIds) {
       roles.dts.set(String(real), `dt${fake2}`)
     }
-    const names = new Map([[ids.p, 'widgets'], [ids.o, 'other'], [ids.g, 'group']])
+    const names = new Map([[`projects:${ids.p}`, 'widgets'], [`projects:${ids.o}`, 'other'], [`groups:${ids.g}`, 'group']])
     const realSide = proxy.records.map((record) => {
       const exchange = normalise({ ...record, authorization: record.headers.authorization, headers: record.answered }, { names, dts: roles.dts, role: roles.role })
       roles.learn(record)

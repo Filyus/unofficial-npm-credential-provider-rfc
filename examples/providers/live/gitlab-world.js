@@ -127,40 +127,29 @@ class Web {
   }
 }
 
-// The person who has the code: opens the verification page, types the user code, and
-// presses the button that authorizes. What is on each page is traced, and what could not
-// be done is said with the page's text, since the forms are read from the HTML.
+// The person who has the code: opens the verification page (GitLab's own link, with the code
+// in it), presses Authorize there, and presses Confirm on the page that asks whether to give
+// the application the access it names. What is on each page is traced, and what could not be
+// done is said with the page's text, since the forms are read from the HTML.
 const approveDevice = async (web, device) => {
   let page = await web.fetch(device.verification_uri_complete || `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`)
-  let pressed = 0
-  for (let step = 0; step < 6; step += 1) {
+  for (let step = 0; step < 4; step += 1) {
     const forms = formsOf(page.html)
     trace(`device page ${step}: ${page.url} HTTP ${page.status} "${titleOf(page.html)}" forms ${JSON.stringify(forms.map((form) => ({ action: form.action, fields: form.fields.map((f) => f.name), buttons: form.buttons.map((b) => b.text || b.name) })))}`)
-    const confirm = forms.find((form) => form.buttons.some((button) => /authori[sz]e/i.test(`${button.text} ${button.value || ''}`)) && !form.fields.some((field) => field.name === '_method' && field.value === 'delete'))
-    const typing = forms.find((form) => form.fields.some((field) => /user_code/.test(field.name)))
-    if (confirm) {
-      const fields = Object.fromEntries(confirm.fields.map((field) => [field.name, field.value]))
-      const button = confirm.buttons.find((candidate) => /authori[sz]e/i.test(`${candidate.text} ${candidate.value || ''}`))
-      if (button.name) {
-        fields[button.name] = button.value ?? ''
-      }
-      page = await web.fetch(confirm.action, { form: fields })
-      trace(`device page after pressing Authorize: ${page.url} HTTP ${page.status} "${titleOf(page.html)}": ${textOf(page.html).slice(0, 300)}`)
-      pressed += 1
-      continue
+    const form = forms.find((candidate) => candidate.fields.some((field) => /user_code/.test(field.name)) && candidate.buttons.length)
+    if (!form) {
+      break
     }
-    if (typing) {
-      const fields = Object.fromEntries(typing.fields.map((field) => [field.name, field.value]))
-      const name = typing.fields.find((field) => /user_code/.test(field.name)).name
-      fields[name] = device.user_code
-      page = await web.fetch(typing.action || page.url, { form: fields })
-      continue
+    const fields = Object.fromEntries(form.fields.map((field) => [field.name, field.value]))
+    const button = form.buttons[0]
+    if (button.name) {
+      fields[button.name] = button.value ?? ''
     }
-    break
-  }
-  // the pages say nothing a script can read of an approval; the token endpoint does
-  if (pressed > 0) {
-    return page
+    page = await web.fetch(form.action || page.url, { form: fields })
+    // the second button, "Confirm", is the one that gives the access
+    if (/confirm/i.test(button.text)) {
+      return page
+    }
   }
   throw new Error(`could not approve the device code: at ${page.url} (HTTP ${page.status}, "${titleOf(page.html)}"): ${textOf(page.html).slice(0, 400)}`)
 }
