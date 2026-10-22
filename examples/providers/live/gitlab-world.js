@@ -258,6 +258,17 @@ puts 'RESULT:' + JSON.generate({ id: token.id })`,
     const res = await call(url, 'POST', '/oauth/authorize_device', { form: { client_id: instance.clientId, scope: 'api' } })
     log(`setup: device authorization: HTTP ${res.status} ${res.text.slice(0, 300)}`)
     if (res.status !== 200) {
+      for (const [label, form, headers] of [
+        ['no scope', { client_id: instance.clientId }],
+        ['read_user', { client_id: instance.clientId, scope: 'read_user' }],
+        ['accepting JSON', { client_id: instance.clientId, scope: 'api' }, { accept: 'application/json' }],
+        ['a client that does not exist', { client_id: 'nope', scope: 'api' }],
+      ]) {
+        const again = await call(url, 'POST', '/oauth/authorize_device', { form, headers })
+        log(`setup: device authorization, ${label}: HTTP ${again.status} ${again.text.slice(0, 200)}`)
+      }
+      const logged = spawnSync('docker', ['exec', container, 'sh', '-c', "grep authorize_device /var/log/gitlab/gitlab-rails/production_json.log | tail -n 2; grep -i -A8 'device' /var/log/gitlab/gitlab-rails/production.log | tail -n 40; grep -i 'device\\|AccessDenied' /var/log/gitlab/gitlab-rails/exceptions_json.log | tail -n 3"], { encoding: 'utf8' })
+      log(`setup: GitLab's log about it:\n${logged.stdout}`)
       const diagnosis = rails(
         container,
         `out = {}
@@ -320,7 +331,12 @@ const webFor = async (instance, username) => {
 const oauthPair = async (instance, username) => {
   const device = await call(instance.url, 'POST', '/oauth/authorize_device', { form: { client_id: instance.clientId, scope: 'api' } })
   if (device.status !== 200 || !device.json?.device_code) {
-    throw new Error(`device authorization: HTTP ${device.status} ${device.text.slice(0, 300)}`)
+    if (instance.deviceGrantWorks === false || process.env.GITLAB_LIVE_POOL === '1') {
+      return pooledPair(instance, username)
+    }
+    instance.deviceGrantWorks = false
+    console.log(`the device authorization grant is refused (HTTP ${device.status} ${device.text.slice(0, 200)}): OAuth tokens come from the Rails console instead`)
+    return pooledPair(instance, username)
   }
   await approveDevice(await webFor(instance, username), device.json)
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -339,6 +355,32 @@ const oauthPair = async (instance, username) => {
 
 // the person approves a device code the provider showed
 const approve = async (instance, username, device) => approveDevice(await webFor(instance, username), device)
+
+// OAuth tokens made by Doorkeeper in the Rails console, for an instance whose device grant
+// cannot be used: a pool of them, made in one call since each call takes half a minute.
+const pooledPair = async (instance, username) => {
+  if (!instance.pool) {
+    const made = rails(
+      instance.container,
+      `app = Doorkeeper::Application.find_by(uid: '${instance.clientId}')
+out = {}
+{ 'maint' => 40, 'dev' => 4 }.each do |name, count|
+  user = User.find_by_username(name)
+  out[name] = (1..count).map do
+    t = Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: user.id, scopes: 'api', expires_in: 7200, use_refresh_token: true)
+    { access: t.plaintext_token, refresh: t.plaintext_refresh_token }
+  end
+end
+puts 'RESULT:' + JSON.generate(out)`,
+    )
+    instance.pool = made
+  }
+  const pair = instance.pool[username].shift()
+  if (!pair) {
+    throw new Error(`the pool of OAuth tokens for ${username} is empty`)
+  }
+  return { access: pair.access, refresh: pair.refresh, expiresIn: 7200 }
+}
 
 const revokeOauth = (instance, token) => call(instance.url, 'POST', '/oauth/revoke', { form: { client_id: instance.clientId, token } })
 
@@ -362,7 +404,9 @@ sha = project.repository.commit(ref).sha
 partition = (Ci::Partition.current.id rescue nil) || 100
 pipeline = Ci::Pipeline.new(project: project, ref: ref, sha: sha, source: :push, user: user, status: 'running', partition_id: partition)
 pipeline.save!(validate: false)
-build = Ci::Build.new(project: project, pipeline: pipeline, user: user, name: 'live', ref: ref, stage: 'test', stage_idx: 0, status: 'running', options: { script: ['true'] }, partition_id: pipeline.partition_id)
+stage = Ci::Stage.new(project: project, pipeline: pipeline, name: 'test', position: 0, partition_id: pipeline.partition_id)
+stage.save!(validate: false)
+build = Ci::Build.new(project: project, pipeline: pipeline, user: user, name: 'live', ref: ref, stage_id: stage.id, stage_idx: 0, status: 'running', options: { script: ['true'] }, partition_id: pipeline.partition_id)
 build.save!(validate: false)
 puts 'RESULT:' + JSON.generate({ token: build.token, id: build.id })`,
   )
