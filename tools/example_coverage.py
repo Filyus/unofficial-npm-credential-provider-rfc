@@ -3,10 +3,12 @@
 The matrix is computed from what the transcripts hold (the request kinds, the
 operations, the retries, the errors), never from file names, and written to
 examples/COVERAGE.md. examples/coverage.json says what every empty cell is:
-"n/a: reason" (the registry has no such situation, as far as the reason says),
-"by design: reason" (the registry has it, and the reference provider chooses not
-to show it; the reason is required), or "task N: what" (the task that will fill
-it). tests/test_examples.py fails when a cell is empty and unexplained, when
+"n/a: reason" (the registry has no such situation, which the reason shows from a
+source that says so), "unknown: reason" (the registry's documentation does not
+say, so nothing is claimed either way; an absence in the documentation is never
+"n/a"), "by design: reason" (the registry has it, and the reference provider
+chooses not to show it; the reason is required), or "task N: what" (the task
+that will fill it). tests/test_examples.py fails when a cell is empty and unexplained, when
 an explanation is left on a cell that has since been filled, and when the page
 differs from what this computes.
 """
@@ -126,9 +128,11 @@ def explanations() -> dict[str, dict[str, str]]:
 
 
 def mark(note: str) -> str:
-    """The cell for an explained gap: `n/a`, `by design`, or the task."""
+    """The cell for an explained gap: `n/a`, `unknown`, `by design`, or the task."""
     if note.startswith("n/a:"):
         return "n/a"
+    if note.startswith("unknown:"):
+        return "unknown"
     if note.startswith("by design:"):
         return "by design"
     return note.split(":")[0] if note else "?"
@@ -144,11 +148,12 @@ def render() -> str:
         "",
         "- `●` a transcript the reference provider produces against its fake API.",
         "- `○` a transcript only, written by hand because the registry has no reference provider (first row).",
-        "- `n/a` the registry has no such situation, as far as the reason under \"Why a cell is empty\" says; some reasons rest on an absence in the documentation, and say so.",
+        "- `n/a` the registry has no such situation, as the source named under \"Why a cell is empty\" says.",
+        "- `unknown` the registry's documentation does not say whether it has the situation; the reason says what was read. Nothing is claimed either way: not checked, not absent.",
         "- `by design` the registry has the situation and the reference provider chooses not to handle it that way, for the reason given there.",
         "- `task N` not done yet: a gap, not a claim, planned under that number in the maintainer's own tracker (not in this repository).",
         "",
-        "A cell is `n/a`, `by design` or `task N` only because [coverage.json](coverage.json) says so, and "
+        "A cell is `n/a`, `unknown`, `by design` or `task N` only because [coverage.json](coverage.json) says so, and "
         "`tests/test_examples.py` fails when a cell is empty without it.",
         "",
         "| Situation | " + " | ".join(names) + " |",

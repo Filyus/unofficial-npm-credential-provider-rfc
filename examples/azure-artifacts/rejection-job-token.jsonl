@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","operation":"read","command":"install","interactive":false}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-job-token-1"},"cache":"session","operationIndependent":true,"granularity":"registry"}}}
 {"from":"client","message":{"v":1,"kind":"erase","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","operation":"read","granularity":"registry"}}

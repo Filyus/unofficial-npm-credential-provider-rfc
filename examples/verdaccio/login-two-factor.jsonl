@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.example.test/verdaccio/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.example.test/verdaccio/","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"login"}}}
 {"from":"client","event":"close"}

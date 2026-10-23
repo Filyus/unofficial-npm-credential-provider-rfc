@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://registry.npmjs.org/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"stage","command":"stage","interactive":false}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-stage-only-token"},"cache":"session","operationIndependent":false,"granularity":"package"}}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"stage","command":"stage","interactive":false,"retry":true,"httpStatus":403}}

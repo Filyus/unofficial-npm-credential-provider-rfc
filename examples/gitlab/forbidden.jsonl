@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-deploy-token"},"cache":"expires","expiresAt":1792198800,"operationIndependent":false,"granularity":"scope"}}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":403}}

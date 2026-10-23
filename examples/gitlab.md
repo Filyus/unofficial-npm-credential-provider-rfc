@@ -12,6 +12,10 @@ A hypothetical `npm-credential-provider-gitlab` for the npm package registry of 
 
 Publishing uses the project endpoint. Installing can use any of the three, and the URL needs its trailing slash, since omitting it can cause a 403. An install from the instance endpoint requires a scoped name whose scope is the lowercase root group of the project that holds the package. This provider matches project URLs only (`/api/v4/projects/`) and answers `url-not-supported` for the others, and for the `http:` form of the host, in `get`, `erase`, `login` and `logout` alike (no transcript shows it, because npm never sends such a request: the conformance harness does, to every provider and every kind).
 
+**Why not the group and instance endpoints.** The credential this provider hands out is a deploy token minted for one project (`POST /projects/:id/deploy_tokens`), and a group or instance URL does not name a project.
+
+Serving them would mean choosing the project from the package's scope, which only GitLab's own resolution does, or minting something broader than a per-project read token. Neither is the smaller correct change, so the provider declines them, and the RFC's examples configure a project's registry: a per-registry key at `/api/v4/projects/<id>/packages/npm/`, or the global chain with the project in the repository's `@scope:registry`. A user who installs from a group or instance endpoint puts a per-registry list that holds just `npm:token` on that URL, which also puts the stored credential there on purpose ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)).
+
 **Credentials.** The documented ones ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)):
 
 | Kind | Scope or role | Lifetime |
@@ -75,12 +79,12 @@ The project `.npmrc` carries no token: a `_authToken` there would be a standing 
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://gitlab.example.com/api/v4/projects/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://gitlab.example.com/api/v4/projects/"]}
 ```
 
 - `"v":[1]` is the only version this provider speaks.
 - `registries` lists one entry, the `/api/v4/projects/` path on the instance. It matches at a segment boundary, so it covers every project URL, and npm never asks the provider about npmjs.com or any other host, nor about a group or instance URL on this host ([Registry matching](../phase-2-credential-provider.md#registry-matching)). The scheme is `https:`, so an `http:` form of the host is not served.
-- `login` and `logout` because the provider runs the OAuth flow and keeps the refresh token; `erase` because it deletes the deploy tokens it minted when one is rejected; it uses `httpStatus` on a retry without announcing anything, since npm sends the retry fields to every provider. Capabilities are advisory ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
+- `login` and `logout` because the provider runs the OAuth flow and keeps the refresh token. On `erase`, which npm always sends, it deletes the deploy token it minted when one is rejected. It uses `httpStatus` on a retry without announcing anything, since npm sends the retry fields to every provider. Capabilities are advisory ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
 
 ## Install
 

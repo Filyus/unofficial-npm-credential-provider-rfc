@@ -3,11 +3,12 @@
 
 - `●` a transcript the reference provider produces against its fake API.
 - `○` a transcript only, written by hand because the registry has no reference provider (first row).
-- `n/a` the registry has no such situation, as far as the reason under "Why a cell is empty" says; some reasons rest on an absence in the documentation, and say so.
+- `n/a` the registry has no such situation, as the source named under "Why a cell is empty" says.
+- `unknown` the registry's documentation does not say whether it has the situation; the reason says what was read. Nothing is claimed either way: not checked, not absent.
 - `by design` the registry has the situation and the reference provider chooses not to handle it that way, for the reason given there.
 - `task N` not done yet: a gap, not a claim, planned under that number in the maintainer's own tracker (not in this repository).
 
-A cell is `n/a`, `by design` or `task N` only because [coverage.json](coverage.json) says so, and `tests/test_examples.py` fails when a cell is empty without it.
+A cell is `n/a`, `unknown`, `by design` or `task N` only because [coverage.json](coverage.json) says so, and `tests/test_examples.py` fails when a cell is empty without it.
 
 | Situation | npmjs | GitLab | SSO gateway | GitHub | Google AR | JFrog | Azure | AWS | Verdaccio |
 |---|---|---|---|---|---|---|---|---|---|
@@ -21,7 +22,7 @@ A cell is `n/a`, `by design` or `task N` only because [coverage.json](coverage.j
 | 401-erase | by design | ● | ● | by design | ● | ● | ● | ● | by design |
 | 401-dead | ● | ● | ● | ● | ● | ● | ● | ● | ● |
 | 403-retry | ● | ● | ● | ● | ● | ● | ● | ● | ● |
-| stage | ● | n/a | n/a | n/a | n/a | n/a | n/a | n/a | ● |
+| stage | ● | unknown | n/a | unknown | unknown | unknown | unknown | unknown | ● |
 | unsupported | by design | ● | ● | ● | ● | ● | ● | ● | ● |
 | other-write | ● | ● | ● | ● | ● | ● | ● | ● | ● |
 | login-refused | ● | ● | ● | ● | ● | ● | ● | ● | ● |
@@ -50,13 +51,13 @@ A cell is `n/a`, `by design` or `task N` only because [coverage.json](coverage.j
 - npmjs, ci-publish: by design: the page (CI) says a provider should not build a CI publish path on a bypass-2FA token, and trusted publishing is held by npm, not by a provider, so the reference provider answers no interactive-false publish; this is the provider's choice, not a statement that npmjs.com has no such request
 - npmjs, unsupported: by design: the reference provider maps every operation of the protocol to an endpoint it documents for npmjs.com, so it never answers `operation-not-supported`; a provider that declines an operation would
 - npmjs, 401-erase: by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one
-- GitLab, stage: n/a: GitLab's npm registry page documents no staging or approval step (an absence in the docs, not a documented refusal); a publish is live at once (the page, Staging)
+- GitLab, stage: unknown: GitLab's npm registry page documents no staging or approval step (an absence in the docs, not a documented refusal); a publish is live at once (the page, Staging)
 - SSO gateway, stage: n/a: the gateway has no staging, no tokens, no teams and no trust endpoints (the page, Publish)
-- GitHub, stage: n/a: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)
+- GitHub, stage: unknown: the GitHub Packages npm page never mentions staging and the staged-publishing documents found describe npmjs.com only (an absence in the docs, rechecked 2026-10-20, not verified either way)
 - GitHub, 401-erase: by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one
-- Google AR, stage: n/a: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)
+- Google AR, stage: unknown: the pages read for the example describe no staging model (an absence in the pages, not a documented refusal)
 - Google AR, not-found: by design: the docs read do not say whether the registry hides a repository from an identity that cannot see it; the reference provider's `not-found` would mean nothing stored, which it does not answer, and hello `registries` stops npm asking for unconfigured registries (the page, Rejection)
-- JFrog, stage: n/a: no Artifactory page read describes staged publishing for npm, and the page itself marks the list of unsupported operations unverified, from memory (an absence, not a documented refusal); stage-unsupported.jsonl shows the reference provider's answer
-- Azure, stage: n/a: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)
-- AWS, stage: n/a: the CodeArtifact npm pages list no `/-/stage` endpoints; the page reads that as an inference from the absence in AWS's list, not an AWS statement, and the provider answers the stage operations with `operation-not-supported`
+- JFrog, stage: unknown: no Artifactory page read describes staged publishing for npm, and the page itself marks the list of unsupported operations unverified, from memory (an absence, not a documented refusal); stage-unsupported.jsonl shows the reference provider's answer
+- Azure, stage: unknown: no Azure Artifacts page read describes staged publishing (an absence in the docs, not proof the endpoints do not exist)
+- AWS, stage: unknown: the CodeArtifact npm pages list no `/-/stage` endpoints; the page reads that as an inference from the absence in AWS's list, not an AWS statement, and the provider answers the stage operations with `operation-not-supported`
 - Verdaccio, 401-erase: by design: the reference provider hands out the stored token itself, so after a rejection it holds no other credential to release and the retry can only be `other` (Phase 2, retry rules); another provider that mints or refreshes a credential would show this exchange, and the 401-dead row shows the stored-token one

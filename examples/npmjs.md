@@ -59,12 +59,12 @@ Because the chain is asked about every registry, this provider lists `registries
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://registry.npmjs.org/"]}
 ```
 
 - `v`: only version 1.
 - `login`, `logout`: the provider runs npm's web login itself and revokes a session token on logout.
-- `erase`: without it npm sends no erase, and a rejected token is never reported to the provider.
+- `erase` is no capability: npm sends it on every rejection, so a rejected token is always reported to the provider.
 - The provider reads `retry` and `httpStatus`, to tell a 401 from a 403, and announces nothing for them: npm sends them to every provider.
 - It reads no `authChallenges`: npmjs.com sent no `WWW-Authenticate` on any `/-/stage` read in the live test, and npm handles the `otp` and `ipaddress` challenges itself ([erase table](../phase-2-credential-provider.md#erase-a-credential-was-rejected)), so the field would carry nothing the provider uses.
 - `registries`: the `https:` form only. npm then answers `url-not-supported` for the `http:` form on its own, and sends the provider nothing about any other registry, whether the provider is in a global chain or a per-registry list. A provider still answers it itself, from `registry` alone, in `get`, `erase`, `login` and `logout` (no transcript shows it, because npm never sends such a request: the conformance harness does, to every provider and every kind).
@@ -258,7 +258,7 @@ An `npm ci` in the same job asks for `read` as in [install.jsonl](npmjs/install.
   - Answering `Ok` with it sends a dead token (a token the registry does not know got 200 on public reads when probed on 2026-10-21, see [401](#rejection), so a public read may still succeed with it), and for a private package the retry cannot succeed. `not-found` fails because no provider answers `Ok`, and under a per-registry list `url-not-supported` fails too.
   - `url-not-supported` does not help either. The RFC has a provider decide it "from `registry` alone", and npm remembers it for the command (so a later publish loses the provider). On a host the hello lists, registry.npmjs.org here, the request then fails: the implicit `npm:token`, which would send it anonymously when nothing is stored, is not reached ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). It would be reached only if the hello listed no `registries`, and then the provider would be asked about every registry.
   - Two options: allow an explicit anonymous answer, or say that `url-not-supported` may reflect the provider's state for the registry (nothing usable stored) and not only its URL, and that npm's memory of it is then limited to reads. The second option weakens the guarantee that makes the memory sound.
-  - **Not in the RFC:** an anonymous fall-through would turn a visible provider failure into an anonymous request; legacy fallback fixes the outcome by design.
+  - **In the RFC, as a limit:** [Legacy fallback](../phase-2-credential-provider.md#legacy-fallback) states it with its reason (an anonymous answer would let a broken provider turn authenticated requests anonymous, so a private package looks missing instead of failing loudly) and the condition that would widen it. Meanwhile this provider answers `other`, with a message telling the user to log in ([session-expired.jsonl](npmjs/session-expired.jsonl)).
 - **A 403 does not say why** ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)).
   - The retry carries `httpStatus` and `authChallenges`, not the body or npm's error code. A publish 403 on npmjs.com is `E_STAGE_REQUIRED` for a stage-only token ([API](https://api-docs.npmjs.com/)) and may be a permission refusal otherwise.
   - A provider knows which token it handed out, so it can refuse to widen from a stage-only one; it cannot tell the two causes apart when it handed out a token that is not stage-only, and then widens on a 403 that a package setting caused, which the RFC allows under the write policy.

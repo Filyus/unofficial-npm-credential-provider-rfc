@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}}
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"GitHub reported that the sign-in was cancelled in the browser (access_denied). Run npm login again to start a new one."}}}
 {"from":"client","event":"close"}

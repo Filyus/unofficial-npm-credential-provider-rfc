@@ -73,12 +73,12 @@ It also needs `--config <file>`, which holds its store and where it keeps what i
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.example.test/verdaccio/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.example.test/verdaccio/"]}
 ```
 
 - `v`: the protocol version.
 - `login`, `logout`: the provider logs in with a password and removes its tokens at logout.
-- `erase`: it keeps in-memory copies and wants to be told when one is rejected.
+- `erase`, which npm always sends: it keeps in-memory copies and drops one when told it was rejected.
 - It reads `retry` and `httpStatus`, which it needs to tell a read-only refusal from a revoked token, and announces nothing for them: npm sends them to every provider.
 - It reads no `authChallenges`. Every Verdaccio 401 that is not an OTP demand carries a bare `WWW-Authenticate: Bearer`, with no realm or error code ([final.ts](https://github.com/verdaccio/verdaccio/blob/8857b15ac2d33969b3aea8f3e77cd5020161228f/packages/middleware/src/middlewares/final.ts)), so the challenges tell it nothing (observed on 7.0.0-next-7.31, 2026-10-22; 6.10.6 sends `Basic, Bearer`, which tells it as little). npm sends them anyway and the provider ignores them ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
 - `registries`: the configured base, with its scheme. npm then sends the provider nothing about another registry, and a request for the `http:` form of this one is answered `url-not-supported` by npm itself.
@@ -334,11 +334,11 @@ Where the two servers differ from each other, the fake follows 6.10.6 and the di
   - The retry request carries only the status, so the provider needs a probe of its own.
   - Two ways out: the retry could carry the registry's error text (as `authChallenges` carries the challenge), or the RFC could say that a provider may probe and answer `other` when the probe shows the credential dead.
   - **In the RFC:** the retry names the context, not the reason; a provider that needs the reason checks against the `registry` the request names, and one with nothing else to release answers `other`.
-- **The web-login source's same-origin rule** ([Future possibilities](../phase-2-credential-provider.md#a-built-in-web-login-source)). It polls the done URL "only on the origin it posted to".
-  - Verdaccio builds the login and done URLs from the request's protocol and hostname and the server's local listening port ([login.ts](https://github.com/verdaccio/verdaccio/blob/c499c4e2436470d6ff2468a15b7a8a6c26af0c7d/packages/api/src/v1/login.ts)), so behind a TLS proxy the done URL is `https://host:4873/...`, another origin, and the rule would refuse every proxied Verdaccio.
-  - Failing closed is the safe side; relaxing the rule to the same host would accept a port the registry chose. The RFC could name this as a known cost.
-  - A web login on Verdaccio also yields only a full-power, irrevocable token, so the future source's presence rule for non-`read` operations does not help for `read`.
-  - **Not in the RFC:** Future possibilities is non-normative and fails closed on purpose; the cost for this registry is recorded here.
+- **A web-login provider's same-origin rule.** The RFC has no built-in web-login source ([Why no built-in web-login source?](../phase-2-credential-provider.md#why-no-built-in-web-login-source)); a provider that runs the registry's web login should poll the done URL only on the origin it posted to.
+  - Verdaccio builds the login and done URLs from the request's protocol and hostname and the server's local listening port ([login.ts](https://github.com/verdaccio/verdaccio/blob/c499c4e2436470d6ff2468a15b7a8a6c26af0c7d/packages/api/src/v1/login.ts)), so behind a TLS proxy the done URL is `https://host:4873/...`, another origin, and the rule would refuse every proxied Verdaccio, unless the provider is told the origin to expect.
+  - Failing closed is the safe side; relaxing the rule to the same host would accept a port the registry chose.
+  - A web login on Verdaccio also yields only a full-power, irrevocable token, so a presence rule for non-`read` operations does not help for `read`.
+  - **Not in the RFC:** the rule belongs to a provider, which the RFC does not write; the cost for this registry is recorded here.
 
 Four points that look like gaps are answered by the RFC as it stands:
 

@@ -78,12 +78,12 @@ Of the endpoint paths and fields it uses, the revoke call and the desktop flow's
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["erase","login","logout"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}
 ```
 
 - `v`: protocol version 1.
 - `registries`: the two repositories from its config, exactly. Entries are prefixes with no wildcard for a host such as `*-npm.pkg.dev` ([Registry matching](../phase-2-credential-provider.md#registry-matching)), so a provider that serves "all of Artifact Registry" would have to list a prefix for every location it supports, and update the list when Google adds one. Under a per-registry key the field is not needed; it is a second check, so that npm sends nothing about any other registry to this provider.
-- `erase`: it drops its cached token when told a token was rejected, and, like every kind, answers `url-not-supported` for a registry that is not in its configuration (no transcript shows it: the fuzz sessions take their registries from the transcripts, and one for a registry the provider does not serve would be treated as served); the RFC has that decided from `registry` alone, before the kind or the operation.
+- `erase`, which npm always sends: it drops its cached token when told a token was rejected, and, like every kind, answers `url-not-supported` for a registry that is not in its configuration (no transcript shows it: the fuzz sessions take their registries from the transcripts, and one for a registry the provider does not serve would be treated as served); the RFC has that decided from `registry` alone, before the kind or the operation.
 - `login`, `logout`: it owns a private gcloud configuration directory (`CLOUDSDK_CONFIG`) in which `npm login` signs in, so neither touches the user's machine-wide gcloud or ADC login. A provider that only borrows ambient credentials leaves both out.
 - It reads `retry` and `httpStatus` on a retry and announces nothing for them, since npm sends them to every provider. It reads no `authChallenges`: a request with no credentials got `Www-Authenticate: Basic realm="https://us-central1-npm.pkg.dev"` with its 401 (probe below), a challenge that names neither `otp` nor `ipaddress`, and what an expired token gets was not probed, so the provider never reads `authChallenges`.
 

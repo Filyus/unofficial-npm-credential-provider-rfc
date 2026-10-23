@@ -32,7 +32,7 @@
 const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext } = require('../lib/context.js')
 
-const CAPABILITIES = ['login', 'logout', 'erase']
+const CAPABILITIES = ['login', 'logout']
 const READS = new Set(['read', 'stage-read'])
 const WRITES = new Set(['stage', 'publish', 'stage-reject', 'deprecate', 'dist-tag', 'unpublish', 'owner'])
 const TIERS = ['read', 'full']

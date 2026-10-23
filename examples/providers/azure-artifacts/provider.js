@@ -608,7 +608,7 @@ const start = (args) => {
   }
 
   return {
-    hello: { v: [1], capabilities: ['login', 'logout', 'erase'], registries: prefixes },
+    hello: { v: [1], capabilities: ['login', 'logout'], registries: prefixes },
     handlers: { get, erase, login, logout },
   }
 }

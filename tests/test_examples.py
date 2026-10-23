@@ -114,13 +114,14 @@ class TranscriptSchemaTests(unittest.TestCase):
                     self.assertEqual([e.message for e in errors], [])
 
 
-EXPLANATION = r"^(n/a: .{10,}|by design: .{10,}|task \d+: .{5,})$"
+EXPLANATION = r"^(n/a: .{10,}|unknown: .{10,}|by design: .{10,}|task \d+: .{5,})$"
 
 
 class CoverageTests(unittest.TestCase):
     """examples/COVERAGE.md says which situations the examples show, computed
     from the transcripts. A gap is allowed only when examples/coverage.json says
-    why (`n/a: reason`: the registry has no such situation; `by design: reason`:
+    why (`n/a: reason`: the registry has no such situation; `unknown: reason`: the
+    documentation does not say, which is not the same as no; `by design: reason`:
     the reference provider chooses not to show it) or which task fills it
     (`task N: what`), and an explanation may not outlive the gap it explained,
     so the page cannot differ from the files in either direction."""
@@ -134,7 +135,7 @@ class CoverageTests(unittest.TestCase):
                     if cell:
                         self.assertIsNone(note, "the cell is filled; delete its explanation from coverage.json")
                     else:
-                        self.assertIsNotNone(note, "an empty cell needs `n/a: reason`, `by design: reason` or `task N: what` in coverage.json")
+                        self.assertIsNotNone(note, "an empty cell needs `n/a: reason`, `unknown: reason`, `by design: reason` or `task N: what` in coverage.json")
                         self.assertRegex(note, EXPLANATION)
         for registry in table:
             note = notes.get(registry, {}).get("provider")
@@ -149,12 +150,13 @@ class CoverageTests(unittest.TestCase):
                 self.assertTrue(feature in coverage.FEATURES or feature == "provider", f"{registry}: no such situation")
 
     def test_both_kinds_of_reason_are_accepted_and_a_bare_one_is_not(self) -> None:
-        for good in ("n/a: the registry has no such endpoint", "by design: the provider hands out the stored token", "task 12: write it"):
+        for good in ("n/a: the registry has no such endpoint", "unknown: the page does not say", "by design: the provider hands out the stored token", "task 12: write it"):
             self.assertRegex(good, EXPLANATION)
-        for bad in ("by design", "by design: short", "n/a", "design: the provider does not", "n/a:the registry has none"):
+        for bad in ("by design", "by design: short", "n/a", "design: the provider does not", "n/a:the registry has none", "unknown", "unknown: short"):
             self.assertNotRegex(bad, EXPLANATION)
         self.assertEqual(coverage.mark("n/a: the registry has no endpoint"), "n/a")
         self.assertEqual(coverage.mark("by design: the provider chooses so"), "by design")
+        self.assertEqual(coverage.mark("unknown: the pages say nothing of it"), "unknown")
         self.assertEqual(coverage.mark("task 7: fill it"), "task 7")
         self.assertEqual(coverage.mark(""), "?")
 

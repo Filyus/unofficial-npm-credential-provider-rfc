@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}}
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-work-read-token"},"cache":"session","operationIndependent":false,"granularity":"scope"}}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@octocat","package":"hello-world","operation":"read","command":"install","interactive":true}}

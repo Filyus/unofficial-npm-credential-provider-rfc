@@ -50,12 +50,12 @@ No token carries a repository or an operation. What it can do is what its user c
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}
 ```
 
 - `v`: protocol version 1 only.
 - `login`, `logout`: the provider runs the CLI web login and deletes its stored login.
-- `erase`: it drops the token it minted when npm says Artifactory rejected it.
+- `erase`, which npm always sends: it drops the token it minted when npm says Artifactory rejected it.
 - It reads `httpStatus` on a retry to tell a 401 from a 403, and announces nothing for it, since npm sends the retry fields to every provider. It reads no `authChallenges`: Artifactory's challenge is `Basic realm="Artifactory Realm"` even when a Bearer token was sent (unverified, from memory), so nothing in it would change what the provider does. In particular it is no reason to send Basic.
 - `registries`: the npm API prefix. It covers all npm repositories at a segment boundary and nothing else, so npm sends the provider nothing about other hosts. It is an `https:` entry; it does not cover the `http:` form.
 

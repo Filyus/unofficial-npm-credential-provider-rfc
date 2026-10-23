@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://pkgs.dev.azure.com/contoso/","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"login"}}}
 {"from":"client","event":"close"}

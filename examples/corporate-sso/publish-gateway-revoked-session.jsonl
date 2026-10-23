@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.corp.example.com/","scope":"@corp","package":"ui-kit","version":"2.4.1","operation":"publish","command":"publish","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"The corporate SSO session has expired. Run 'npm login --registry https://npm.corp.example.com/' in a terminal."}}}
 {"from":"client","event":"close"}

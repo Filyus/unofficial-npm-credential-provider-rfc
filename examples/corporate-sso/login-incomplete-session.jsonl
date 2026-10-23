@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.corp.example.com/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"The identity provider approved the sign-in but did not send a complete session; nothing was stored."}}}
 {"from":"client","event":"close"}

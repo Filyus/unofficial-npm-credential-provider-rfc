@@ -29,7 +29,7 @@ const crypto = require('node:crypto')
 const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext, plain } = require('../lib/context.js')
 
-const CAPABILITIES = ['login', 'logout', 'erase']
+const CAPABILITIES = ['login', 'logout']
 const API_PREFIX = '/artifactory/api/npm/'
 // the lifetime of every token this provider mints, always sent: the platform's
 // default may be an hour or a year

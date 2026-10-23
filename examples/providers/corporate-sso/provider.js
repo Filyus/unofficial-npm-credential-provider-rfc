@@ -19,7 +19,7 @@ const { serve, ok, err, log } = require('../lib/protocol.js')
 const { loadContext, plain } = require('../lib/context.js')
 
 const REGISTRIES = ['https://npm.corp.example.com/', 'https://npm-eu.corp.example.com/']
-const CAPABILITIES = ['login', 'logout', 'erase']
+const CAPABILITIES = ['login', 'logout']
 const CLIENT_ID = 'corp-npm-credential-provider'
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code'
 const STEP_UP_SECONDS = 5 * 60

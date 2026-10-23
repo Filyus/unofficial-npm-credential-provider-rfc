@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://acme.jfrog.io/artifactory/api/npm/","scope":"@acme","package":"widgets","operation":"read","command":"ci","interactive":false}}
 {"from":"provider","message":{"Err":{"kind":"not-found","message":"No OIDC provider is configured and no login is stored"}}}
 {"from":"client","event":"close"}

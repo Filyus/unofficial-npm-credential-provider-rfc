@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}}
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"There is no terminal to show the sign-in on; run npm login from a terminal."}}}
 {"from":"client","event":"close"}

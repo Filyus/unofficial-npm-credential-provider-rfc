@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://registry.npmjs.org/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://registry.npmjs.org/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"The registry asked for 100000 seconds before the next poll, longer than this login has left."}}}
 {"from":"client","event":"close"}

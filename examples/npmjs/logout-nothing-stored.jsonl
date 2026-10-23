@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://registry.npmjs.org/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://registry.npmjs.org/"]}}
 {"from":"client","message":{"v":1,"kind":"logout","registry":"https://registry.npmjs.org/"}}
 {"from":"provider","message":{"Err":{"kind":"not-found"}}}
 {"from":"client","event":"close"}

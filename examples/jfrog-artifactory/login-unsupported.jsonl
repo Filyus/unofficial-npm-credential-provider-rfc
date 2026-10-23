@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://acme.jfrog.io/artifactory/api/npm/"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://acme.jfrog.io/artifactory/api/npm/","interactive":true}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"This Artifactory did not start a web login (7.64.0 or later has it). Run npm login with an identity token from the Artifactory UI."}}}
 {"from":"client","event":"close"}

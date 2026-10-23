@@ -70,10 +70,10 @@ The per-registry form is the better default. It keeps the provider from starting
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}
 ```
 
-- `capabilities`: `erase` because the provider drops tokens it minted and must be told which one was rejected; `login` and `logout` because it runs the Entra sign-in and clears it. Without `erase` npm may skip it.
+- `capabilities`: `login` and `logout` because it runs the Entra sign-in and clears it. On `erase`, which npm always sends, it drops the token it minted and was told was rejected.
 - `registries` lists one prefix per organization and host, never the bare `https://pkgs.dev.azure.com/`. An Entra token is valid in every organization of the tenant, so a project that chose `https://pkgs.dev.azure.com/other-org/...` as its registry would otherwise get a token for an organization the user never named. With the field, npm sends the provider nothing about other organizations.
 - The entries are compared byte for byte and carry a scheme, so each is written as the user's config writes it. A server-side case-insensitive match (recalled, not verified) does not help: `/Contoso/` is a different path to npm. The reference provider keeps the path in the casing of `--org` and writes the legacy host in lowercase, the way npm compares hosts, whatever the casing of `--org` ([install-mixed-case-org.jsonl](azure-artifacts/install-mixed-case-org.jsonl)); the job token's organization is compared without regard to case, since a URL parser lowercases that host.
 

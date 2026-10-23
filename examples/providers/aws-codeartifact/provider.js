@@ -492,7 +492,7 @@ const start = (args) => {
   }
 
   return {
-    hello: { v: [1], capabilities: ['login', 'logout', 'erase'], registries },
+    hello: { v: [1], capabilities: ['login', 'logout'], registries },
     handlers: { get, erase, login, logout },
   }
 }

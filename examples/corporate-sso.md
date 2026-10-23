@@ -70,11 +70,11 @@ The chain ends with the implicit `npm:token`, which a company host never reaches
 ## Hello
 
 ```json
-{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}
+{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.corp.example.com/","https://npm-eu.corp.example.com/"]}
 ```
 
 - `v`: protocol version 1.
-- `capabilities`: `login` and `logout` because the provider runs the device flow and revokes the session; `erase` so npm tells it when the gateway rejected a token (it drops its cached access token, not the refresh token). The provider reads `httpStatus` on a retry to tell a 401 from a 403; it announces nothing for that, since npm sends the retry fields to every provider. Capabilities are advisory.
+- `capabilities`: `login` and `logout` because the provider runs the device flow and revokes the session. When the gateway rejects a token npm sends `erase`, and the provider drops its cached access token, not the refresh token. The provider reads `httpStatus` on a retry to tell a 401 from a 403; it announces nothing for that, since npm sends the retry fields to every provider. Capabilities are advisory.
 - `registries`: both company hosts, with the `https:` scheme and the trailing slash. npm does the matching, so the provider is asked for these two and no others, and an `http:` URL on the same host gets no credential from it.
 
 ## Install

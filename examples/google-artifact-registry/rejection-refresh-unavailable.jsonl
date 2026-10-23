@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["erase","login","logout"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://us-central1-npm.pkg.dev/acme-prod/npm-all/","https://us-central1-npm.pkg.dev/acme-prod/npm-private/"]}}
 {"from":"client","message":{"v":1,"kind":"erase","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","granularity":"registry"}}
 {"from":"provider","message":{"Ok":{"kind":"erase"}}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://us-central1-npm.pkg.dev/acme-prod/npm-all/","scope":"@acme","package":"web-ui","operation":"read","command":"install","interactive":false,"retry":true,"httpStatus":401}}

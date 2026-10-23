@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}}
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true,"token":"example-unknown-token"}}
 {"from":"provider","message":{"Err":{"kind":"other","message":"GitHub did not accept the token (HTTP 401). Nothing was stored."}}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true,"token":"example-no-read-token"}}

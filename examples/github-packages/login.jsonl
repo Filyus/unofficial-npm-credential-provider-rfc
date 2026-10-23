@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}}
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"login"}}}
 {"from":"client","message":{"v":1,"kind":"login","registry":"https://npm.pkg.github.com/","interactive":true,"token":"example-pasted-token"}}

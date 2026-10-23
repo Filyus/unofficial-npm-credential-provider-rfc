@@ -92,13 +92,13 @@ GitHub's GHES page prints the token key with a double slash, `//npm.HOSTNAME//:_
 ## Hello
 
 ```json
-{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout","erase"]}
+{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}
 ```
 
 - `v`: protocol version 1.
 - `registries`: the one github.com host. npm matches requests against it itself and sends the provider nothing about other registries. On GHES the entry is the instance's registry URL, built from `--host` and the provider's own `subdomainIsolation` setting (on unless set to `false`): `https://npm.HOSTNAME/` or `https://HOSTNAME/_registry/npm/`, never the bare `https://HOSTNAME/`, which is the web UI and API host. List both forms only if the instance really serves both.
 - `login`, `logout`: the provider stores a pasted token or runs its own device flow, and removes both on logout.
-- `erase`: the provider wants to hear about rejections. It cannot replace a stored token, and the stored token is the credential it hands out, so it keeps it and answers `Ok`; the retry that follows checks the token and answers `other` either way, since the provider has no other credential it would release for that request ([Rejection](#rejection)).
+- `erase` is no capability: npm sends it on every rejection. The provider cannot replace a stored token, and the stored token is the credential it hands out, so it keeps it and answers `Ok`; the retry that follows checks the token and answers `other` either way, since the provider has no other credential it would release for that request ([Rejection](#rejection)).
 - The provider reads `retry` and `httpStatus` without announcing anything: npm sends them to every provider.
 - It reads no `authChallenges`: GitHub sends no `WWW-Authenticate` header on a 401 (probed anonymously on 2026-10-17: an existing package without a token gave a 401 with a JSON body and no such header), so there is nothing to read.
 

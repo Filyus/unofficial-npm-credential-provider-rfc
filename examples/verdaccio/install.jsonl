@@ -1,4 +1,4 @@
-{"from":"provider","message":{"v":[1],"capabilities":["login","logout","erase"],"registries":["https://npm.example.test/verdaccio/"]}}
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://npm.example.test/verdaccio/"]}}
 {"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.example.test/verdaccio/","scope":"@acme","package":"widget","operation":"read","command":"install","interactive":true}}
 {"from":"provider","message":{"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-read-token"},"cache":"session","granularity":"registry","operationIndependent":false}}}
 {"from":"client","event":"close"}
