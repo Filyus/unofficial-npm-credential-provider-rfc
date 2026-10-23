@@ -324,6 +324,16 @@ const main = async () => {
     expect(redirect, 'the repository file supplies no credential', auths(redirect).join() === '-')
     expect(redirect, 'the helper is reported as ignored', redirect.notices.some(l => l.includes('project config sets userconfig')))
 
+    // a project `prefix=` chooses the global file and nothing else: the user's
+    // file keeps its helper, and its own route setting is not the project's
+    const prefixed = await run('project-prefix-leaves-the-user-file', {
+      user: `${helperLine}strict-ssl=false\n`,
+      project: 'prefix=<dir>/prefix\n',
+    })
+    expect(prefixed, 'view succeeds', !prefixed.failed && prefixed.stdout === '1.0.0')
+    expect(prefixed, 'the helper in the user file supplies the credential', prefixed.requests.length && auths(prefixed).join() === 'Bearer helper-token')
+    expect(prefixed, 'the user file is not reported as ignored', !prefixed.notices.some(l => l.includes('project config sets')))
+
     const stale = await run('helper-beats-stale-token', { user: `${helperLine}${nerf}:_authToken=stale\n` })
     expect(stale, 'the helper wins', stale.requests.length && auths(stale).join() === 'Bearer helper-token')
     expect(stale, 'npm warns once, naming the _authToken it ignores',
@@ -528,7 +538,7 @@ const main = async () => {
     })
     expect(child, 'view still reaches the registry', !child.failed && child.requests.length)
     expect(child, 'the repository file supplies no credential', auths(child).join() === '-')
-    expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('project config sets userconfig')))
+    expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('project config sets globalconfig')))
 
     // the same through a real parent: npm runs a script that starts npm in a
     // directory with no .npmrc. The userconfig it inherits is an environment

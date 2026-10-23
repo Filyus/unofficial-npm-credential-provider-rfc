@@ -1,8 +1,8 @@
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index 0db7840..2f1c793 100644
+index fe705c2..317c947 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
-@@ -185,6 +185,7 @@ So it is when `proxy` or `https-proxy` does and the request is over plain `http:
+@@ -184,6 +184,7 @@ So it is when `proxy` or `https-proxy` does and the request is over plain `http:
  The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
  The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
  Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
@@ -107,7 +107,7 @@ index ffafd42..118f114 100644
  module.exports = publishConfigOverrides
 +module.exports.refuseProjectRoute = refuseProjectRoute
 diff --git a/test/lib/commands/publish.js b/test/lib/commands/publish.js
-index 88258fc..0410f7f 100644
+index 812ac21..0410f7f 100644
 --- a/test/lib/commands/publish.js
 +++ b/test/lib/commands/publish.js
 @@ -2143,33 +2143,6 @@ t.test('publishConfig route settings reach the tokenHelper check', async t => {
@@ -116,11 +116,11 @@ index 88258fc..0410f7f 100644
  
 -  t.test('a CA', async t => {
 -    const packageJson = { ...pkgJson, publishConfig: { ca: 'project-ca' } }
--    const { npm, registry } = await loadNpmWithRegistry(t, {
+-    const { npm } = await loadNpmWithRegistry(t, {
+-      config: { force: true, 'dry-run': true },
 -      homeDir,
 -      prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
 -    })
--    registry.publish(pkg, { packageJson })
 -    await npm.exec('publish', [])
 -    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
 -      code: 'ETOKENHELPER',
@@ -130,11 +130,11 @@ index 88258fc..0410f7f 100644
 -
 -  t.test('strict-ssl false', async t => {
 -    const packageJson = { ...pkgJson, publishConfig: { 'strict-ssl': false } }
--    const { npm, registry } = await loadNpmWithRegistry(t, {
+-    const { npm } = await loadNpmWithRegistry(t, {
+-      config: { force: true, 'dry-run': true },
 -      homeDir,
 -      prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
 -    })
--    registry.publish(pkg, { packageJson })
 -    await npm.exec('publish', [])
 -    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
 -      message: /"strict-ssl" comes from the publishConfig of package\.json/,
@@ -166,10 +166,10 @@ index 88258fc..0410f7f 100644
 +  }
 +})
 diff --git a/test/lib/commands/unpublish.js b/test/lib/commands/unpublish.js
-index cfec069..b5ac4f6 100644
+index 6966b52..b5ac4f6 100644
 --- a/test/lib/commands/unpublish.js
 +++ b/test/lib/commands/unpublish.js
-@@ -681,27 +681,21 @@ t.test('publishConfig cannot supply a tokenHelper', async t => {
+@@ -681,26 +681,21 @@ t.test('publishConfig cannot supply a tokenHelper', async t => {
    ])
  })
  
@@ -178,8 +178,12 @@ index cfec069..b5ac4f6 100644
    const helper = require('../../fixtures/token-helper')
 -  const regKey = '//registry.npmjs.org/'
    const { npm } = await loadMockNpm(t, {
-     config: { force: true },
+-    config: { force: true, 'dry-run': true },
+-    // no request is made: whether the installed npm-registry-fetch asks for
+-    // the credential (and would refuse it) is not what is under test here
+-    mocks: { pacote: { packument: async () => ({ versions: {} }) } },
 -    homeDir: { '.npmrc': `${regKey}:tokenHelper=${helper}\n` },
++    config: { force: true },
 +    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
      prefixDir: {
        'package.json': JSON.stringify({
@@ -190,10 +194,6 @@ index cfec069..b5ac4f6 100644
        }, null, 2),
      },
    })
--  const registry = new MockRegistry({ tap: t, registry: npm.config.get('registry') })
--  const manifest = registry.manifest({ name: pkg })
--  await registry.package({ manifest, query: { write: true }, times: 2 })
--  registry.unpublish({ manifest })
 -  await npm.exec('unpublish', [])
 -  await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: 'https://registry.npmjs.org/pkg' }), {
 +  await t.rejects(npm.exec('unpublish', []), {

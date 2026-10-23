@@ -45,8 +45,7 @@ module.exports = (config) => async ({ regKey }) => {
   let text = result.stderr
   for (const secret of [token, token.replace(/^[A-Za-z]+\s+/, '')].filter(Boolean)) text = text.split(secret).join('***')
   for (const line of text.split(/\r?\n/)) {
-    const shown = line.replace(/[^\t\x20-\x7e\xa0-\uffff]/g, '')
-    if (shown.trim()) process.emit('log', failure ? 'warn' : 'verbose', 'token-helper', shown)
+    if (line.trim()) process.emit('log', failure ? 'warn' : 'verbose', 'token-helper', line)
   }
   if (failure) throw new Error(`Token helper ${JSON.stringify(helper)} ${failure}`)
   return header
@@ -152,10 +151,6 @@ class HarnessTests(unittest.TestCase):
     def test_a_runner_with_no_route_checks_at_all_is_found(self) -> None:
         # the stand-in that has the checks of the header and the log only: the bridge gives it a config with the route answers
         self.assertEqual(self.found_routes(HONEST), {"route"})
-
-    def test_a_log_that_keeps_a_control_character_is_found(self) -> None:
-        source = HONEST.replace("const shown = line.replace(", "const shown = '\\x1b' + line.replace(")
-        self.assertIn("control character in the log", self.found(source))
 
 
 @unittest.skipUnless(os.environ.get("NPM_CLI") and shutil.which("node"),

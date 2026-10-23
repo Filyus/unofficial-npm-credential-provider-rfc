@@ -1,0 +1,59 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 2c5c166..0db7840 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -125,7 +125,7 @@ For example, for AWS CodeArtifact, on Linux and macOS (`chmod +x` it):
+ exec aws codeartifact get-authorization-token --domain my-domain --domain-owner 111122223333 --query authorizationToken --output text
+ ```
+ 
+-and on Windows, where a `.cmd` file is run through `cmd.exe` (a directory path longer than 258 characters is refused) and a `.ps1` or `.js` file needs a `.cmd` wrapper that starts it:
++and on Windows, where a `.cmd` file is run through `cmd.exe` (a path containing `"`, `%` or `!` is refused, and so is a directory path longer than 258 characters) and a `.ps1` or `.js` file needs a `.cmd` wrapper that starts it:
+ 
+ ```bat
+ @echo off
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index a902f13..3f1208e 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -98,6 +98,10 @@ const refusal = (helper, platform) => {
+       return `is in a directory whose path is longer than ${MAX_WIN_CWD} characters, ` +
+         'where Windows cannot start a program: move it to a shorter path'
+     }
++    if (/\.(cmd|bat)$/i.test(helper) && /["%!]/.test(helper)) {
++      return 'cannot be run through cmd.exe because its path contains ", % or !, which cmd.exe ' +
++        'would reinterpret: give the path of a .cmd wrapper in a directory without them'
++    }
+   }
+   if (!/\s/.test(helper)) {
+     return null
+@@ -212,7 +216,9 @@ const shown = (stderr, stdout) => {
+ // cmd.exe on Windows, which is how pnpm runs them too, and
+ // @npmcli/promise-spawn quotes for it. `/s` makes cmd.exe strip one pair of
+ // outer quotes from the command line, so the path is wrapped in two pairs.
+-// Everything else is started directly, never through a shell.
++// Everything else is started directly, never through a shell. A path with `"`
++// or `%` was refused already: cmd.exe expands %VAR% even inside quotes, and a
++// `"` ends the quoting.
+ const command = (helper, platform) => platform === 'win32' && /\.(cmd|bat)$/i.test(helper)
+   ? { file: `""${helper}""`, shell: process.env.ComSpec || 'cmd.exe' }
+   : { file: helper, shell: false }
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index 947bf34..ba32aa7 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -220,9 +220,14 @@ t.test('values that are not an absolute path with no arguments say what to do',
+   await refused(`${absolute('missing')} --domain x`, /was not found/, HOST)
+   await refused('C:\\tools\\token.ps1', /\.ps1 or \.js file.*use a \.cmd wrapper/, 'win32')
+   await refused('C:\\tools\\token.JS', /use a \.cmd wrapper/, 'win32')
++  await refused('C:\\tools\\a"b.cmd', /cannot be run through cmd.exe because its path contains ", % or !/, 'win32')
++  await refused('C:\\tools\\%PATH%.bat', /contains ", % or !.*\.cmd wrapper in a directory without them/, 'win32')
++  await refused('C:\\tools\\hello!.cmd', /contains ", % or !/, 'win32')
+   await refused(`C:\\${'d'.repeat(260)}\\token.cmd`, /longer than 258 characters.*move it to a shorter path/, 'win32')
+ 
+-  t.test('a long path is fine where Windows is not involved', async t => {
++  t.test('an exclamation mark or a long path is fine where cmd.exe is not involved', async t => {
++    const bang = setup(t, printing('tok'), { helper: 'C:\\tools\\hello!.exe', platform: 'win32' })
++    t.equal(await bang.getAuthorization({ regKey: REG }), 'Bearer tok')
+     const posix = setup(t, printing('tok'), { helper: `/${'d'.repeat(300)}/token`, platform: 'linux' })
+     t.equal(await posix.getAuthorization({ regKey: REG }), 'Bearer tok')
+   })

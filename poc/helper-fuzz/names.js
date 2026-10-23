@@ -6,14 +6,14 @@
 //
 // On Windows a .cmd or .bat helper goes through cmd.exe, which reads the
 // command line itself: a name with & ^ ( ) ! , ; = ' or spaces must still be
-// the one file that is run, a name that smuggles in a second command
-// (`a & mkdir CANARY & b`) must run nothing else, and a name with `%` is
-// refused, since cmd.exe expands it even inside quotes, and so is one with `"`
-// or `!`. Elsewhere the helper
+// the one file that is run, and a name that smuggles in a second command
+// (`a & mkdir CANARY & b`) must run nothing else. No name with `%` is tried:
+// cmd.exe expands it even inside quotes, and the path of a helper is the
+// user's own (poc/retired/cmd-path-characters.patch). Elsewhere the helper
 // is executed directly with no shell, so a name with $ ` ; & | ' " * ? [ a
 // newline or a leading dash is only a name. Each helper prints its own token;
-// the result must be `Bearer <token>`, a refusal that says why, or, for a
-// name the file system would not take, nothing at all.
+// the result must be `Bearer <token>` or, for a name the file system would not
+// take, nothing at all.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -33,8 +33,7 @@ const NAMES = windows
   ? ['plain', 'with space', "single'quote", 'amp&ersand', 'caret^', 'paren(thesis)', 'bang!', 'comma,', 'semi;colon',
     'eq=eq', 'at@', 'plus+', 'brackets[x]{y}', 'tilde~', '#hash', 'ünï©ødé', '😀', 'two  spaces', ' leading',
     'a & mkdir CANARY & b', 'a && mkdir CANARY && b', "x' & mkdir CANARY & 'y", '(a) & (mkdir CANARY)', '^&', '&',
-    'a ^& mkdir CANARY', 'a ) & mkdir CANARY & (b', '!x! & mkdir CANARY', 'a , mkdir CANARY',
-    'percent%name', '%PATH%', '100%']
+    'a ^& mkdir CANARY', 'a ) & mkdir CANARY & (b', '!x! & mkdir CANARY', 'a , mkdir CANARY']
   : ['plain', 'with space', "quote'single", 'quote"double', 'dollar$HOME', 'back`tick`', 'semi;colon', 'amp&ersand',
     'pipe|name', 'paren(thesis)', 'glob*?[x]', 'tab\there', 'new\nline', '-leading-dash', '~tilde', '#hash', '!bang',
     'ünï©ødé', '😀', 'back\\slash', '%percent', '=eq', 'two  spaces', ' leading', 'trailing ', '.hidden',
@@ -44,7 +43,7 @@ const EXTENSIONS = windows ? ['.cmd', '.bat'] : ['']
 // the directory the helper is in has an awkward name too: its path is part of
 // the command line
 const DIRECTORIES = windows
-  ? ['plain', 'dir with space', 'dir & mkdir CANARY & x', 'dir(paren)', "dir'quote", 'dir%USERNAME%']
+  ? ['plain', 'dir with space', 'dir & mkdir CANARY & x', 'dir(paren)', "dir'quote"]
   : ['plain', 'dir with space', "dir ; mkdir CANARY ; '", 'dir\nnewline', 'dir$(mkdir CANARY)']
 
 const content = (token) => (windows ? `@echo off\r\necho ${token}\r\n` : `#!/bin/sh\nprintf '%s' '${token}'\n`)
@@ -53,7 +52,7 @@ const canaries = (root) => fs.readdirSync(root, { recursive: true }).filter((ent
 
 const main = async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'helper-names-'))
-  const results = { ran: 0, refused: 0, skipped: 0 }
+  const results = { ran: 0, skipped: 0 }
   const problems = []
   try {
     let count = 0
@@ -76,22 +75,15 @@ const main = async () => {
             results.skipped += 1
             continue
           }
-          const expectRefused = windows && /["%!]/.test(helper)
           try {
             const header = await getTokenHelperHeader(helper, `//names/${count}/`, 20000)
-            if (expectRefused) {
-              problems.push(`${label}: run although cmd.exe would expand it`)
-            } else if (header !== `Bearer ${token}`) {
+            if (header !== `Bearer ${token}`) {
               problems.push(`${label}: printed ${JSON.stringify(header)}`)
             } else {
               results.ran += 1
             }
           } catch (error) {
-            if (expectRefused && /cannot be run through cmd\.exe/.test(error.message)) {
-              results.refused += 1
-            } else {
-              problems.push(`${label}: ${error.message.replace(token, '<token>')}`)
-            }
+            problems.push(`${label}: ${error.message.replace(token, '<token>')}`)
           }
           const found = canaries(root)
           if (found.length) {
@@ -104,7 +96,7 @@ const main = async () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
-  console.log(`${results.ran} helpers ran, ${results.refused} refused as expected, ${results.skipped} names the file system would not take`)
+  console.log(`${results.ran} helpers ran, ${results.skipped} names the file system would not take`)
   assert.equal(problems.length, 0, `\n${problems.join('\n')}`)
   assert.ok(results.ran > 20, 'too few names were tried to say anything')
 }

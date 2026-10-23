@@ -1,0 +1,65 @@
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index c153866..a902f13 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -191,9 +191,10 @@ const failure = (helper, label, err) => {
+ 
+ // Hides the helper's own token, exactly as it printed it and without the
+ // scheme in front of it, wherever it appears in what the helper wrote to
+-// stderr. That is all the masking there is: it is for a token echoed by
+-// accident, and a helper that encodes its credential on purpose is not stopped
+-// and cannot be.
++// stderr; control characters (C0 and C1 but tab) go too, so that a helper that
++// relays a registry's text cannot put escape sequences on the user's terminal.
++// That is all the masking there is: it is for a token echoed by accident, and
++// a helper that encodes its credential on purpose is not stopped and cannot be.
+ const shown = (stderr, stdout) => {
+   const token = stdout.trim()
+   const secrets = new Set([token, token.replace(/^[A-Za-z]+\s+/, '')])
+@@ -202,7 +203,9 @@ const shown = (stderr, stdout) => {
+   for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+     stderr = stderr.split(secret).join('***')
+   }
+-  return stderr.split(/\r?\n/).filter(line => line.trim())
++  return stderr.split(/\r?\n/)
++    .map(line => line.replace(/[^\t\x20-\x7e\xa0-\uffff]/g, ''))
++    .filter(line => line.trim())
+ }
+ 
+ // The file and arguments to start. .cmd and .bat cannot be started without
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index cc0bf9d..947bf34 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -325,16 +325,16 @@ t.test('a Windows .cmd helper without ComSpec runs through cmd.exe', async t =>
+   t.equal(calls[0].opts.shell, 'cmd.exe')
+ })
+ 
+-t.test('stderr: the exact token is hidden, warn on failure, verbose on success', async t => {
++t.test('stderr: the exact token is hidden, control characters go, warn on failure, verbose on success', async t => {
+   const secret = 'tok-0123456789'
+   const stderr = [
+     `fetching ${secret} now`,
+     `Authorization: Bearer ${secret}`,
+     '',
+     '   ',
+-    'a \ttab inside',
+-    'CRLF line\r',
++    'escape \u001b[31mred\u001b[0m and \u009bC1 and \ttab and \u0007bell',
+     'Token expired',
++    'CRLF line\r',
+   ].join('\n')
+ 
+   const ok = logsOf(t)
+@@ -343,9 +343,9 @@ t.test('stderr: the exact token is hidden, warn on failure, verbose on success',
+   t.same(text(ok, 'verbose').filter(l => l.startsWith('token-helper')), [
+     'token-helper fetching *** now',
+     'token-helper Authorization: Bearer ***',
+-    'token-helper a \ttab inside',
+-    'token-helper CRLF line',
++    'token-helper escape [31mred[0m and C1 and \ttab and bell',
+     'token-helper Token expired',
++    'token-helper CRLF line',
+   ])
+   t.same(text(ok, 'warn'), [], 'nothing is a warning when it worked')
+ 

@@ -6,9 +6,8 @@
 // helper paths that Win32 would read as another file (a trailing space or dot,
 // a slash after the name, `\\?\`, a UNC share, letter case, an 8.3 name) run
 // the file they name or run nothing, a .cmd in a directory with a name cmd.exe
-// gives a meaning to runs as itself, in its own directory, a path with `"`, `%`
-// or `!` or a directory longer than 258 characters is refused with a reason,
-// and a script whose #! interpreter is missing is reported as such.
+// gives a meaning to runs as itself, in its own directory, a directory longer
+// than 258 characters is refused with a reason, and a script whose #! interpreter is missing is reported as such.
 //
 //   node poc/platform-probes/run.js <npm-cli checkout>
 //
@@ -143,7 +142,7 @@ const spellings = async (short) => {
 const windows = async () => {
   const short = s => s.split(JSON.stringify(root).slice(1, -1)).join('<root>').split(root).join('<root>')
   const names = ['plain', 'with space', 'amp&ersand', 'caret^here', 'semi;colon', 'paren(x86)',
-    'Program Files (x86)', "apostrophe's", 'comma,equals=', 'café папка 目录',
+    'Program Files (x86)', "apostrophe's", 'comma,equals=', 'bang!here', 'café папка 目录',
     'x&mkdir injected-marker&x', 'x^&mkdir injected-marker', 'x"&mkdir injected-marker&"x']
   for (const name of names) {
     const dir = path.join(root, 'cmd-helpers', name)
@@ -168,16 +167,8 @@ const windows = async () => {
     check(`a .cmd helper in "${name}" runs as itself, in its own directory`,
       header === 'Bearer tok-cmd' && (UNC || cwd === dir) && !injected, `${header}; cwd ${cwd === dir ? 'ok' : cwd}`)
   }
-  for (const name of ['100%done', '%TEMP%', 'bang!here']) {
-    const helper = path.join(root, 'cmd-refused', name, 'helper.cmd')
-    write(helper, '@echo tok\r\n')
-    const outcome = await getTokenHelperHeader(helper, `//cmd/${name}/`, 15000).then(h => `header ${h}`, e => e.message)
-    check(`a .cmd helper under "${name}" is refused with a reason`, outcome.includes('contains ", % or !'), short(outcome))
-  }
   // refused before anything is looked up, so the paths need not exist
   const refusedAt = (helper) => getTokenHelperHeader(helper, '//refused/', 15000).then(h => `header ${h}`, e => e.message)
-  const quote = await refusedAt('C:\\tools\\a"b.cmd')
-  check('a .cmd helper with a double quote in its path is refused with a reason', quote.includes('contains ", % or !'), short(quote))
   const longDir = await refusedAt(`C:\\${'d'.repeat(260)}\\helper.cmd`)
   check('a helper in a directory longer than 258 characters is refused with a reason',
     longDir.includes('longer than 258 characters') && longDir.includes('shorter path'), longDir.slice(0, 60))

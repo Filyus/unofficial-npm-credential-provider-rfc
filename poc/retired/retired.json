@@ -39,6 +39,34 @@
           "test/lib/commands/unpublish.js"
         ]
       }
+    },
+    {
+      "name": "cmd-path-characters",
+      "patch": "cmd-path-characters.patch",
+      "tests": {
+        ".": ["test/lib/utils/token-helper.js"]
+      }
+    },
+    {
+      "name": "stderr-control-characters",
+      "patch": "stderr-control-characters.patch",
+      "tests": {
+        ".": ["test/lib/utils/token-helper.js"]
+      }
+    },
+    {
+      "name": "config-set-refusals",
+      "patch": "config-set-refusals.patch",
+      "tests": {
+        ".": ["test/lib/commands/config.js"]
+      }
+    },
+    {
+      "name": "helper-exit-code-field",
+      "patch": "helper-exit-code-field.patch",
+      "tests": {
+        ".": ["test/lib/utils/token-helper.js"]
+      }
     }
   ]
 }

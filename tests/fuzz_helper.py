@@ -11,9 +11,8 @@ process replaced:
 - `header`: the Authorization value the runner makes of the output is the one
   the model (`token_helper_header`) makes of it, or both refuse it, and a
   refusal quotes none of the output;
-- `log`: what the runner logs of stderr holds no control character and never
-  the helper's exact token, whole or without its scheme, wherever it is in a
-  line;
+- `log`: what the runner logs of stderr never holds the helper's exact token,
+  whole or without its scheme, wherever it is in a line;
 - `setting`: whether the runner takes a `tokenHelper` value is what the model
   (`check_token_helper_config`) says of it, on a tree of real files: an
   absolute path, one with arguments, one that is not there. On Windows only
@@ -158,10 +157,6 @@ def model_header(raw: bytes) -> str | None:
         return None
 
 
-# JavaScript reads its regex by UTF-16 unit, so a character beyond U+FFFF is two kept units
-CONTROL = re.compile(r"[^\t\x20-\x7e\xa0-\U0010ffff]")
-
-
 def judge(prototype: Path, cases: list[Case]) -> list[dict]:
     headers = bridge(prototype, [{"op": "header", "stdout": b64(case.stdout)} for case in cases])
     logs = bridge(prototype, [{"op": "log", "stdout": b64(case.stdout), "stderr": b64(case.stderr)} for case in cases])
@@ -191,8 +186,6 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
                 continue
             if secret in shown and secret not in around:
                 found.append({"kind": "secret in the log", "case": case, "secret": secret, "log": log["lines"]})
-        if any(CONTROL.search(line) for line in log["lines"]):
-            found.append({"kind": "control character in the log", "case": case, "log": log["lines"]})
     return found
 
 

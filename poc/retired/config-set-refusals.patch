@@ -1,0 +1,60 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 20aa07a..2c5c166 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -174,6 +174,7 @@ Two paths of one directory that a real path does not join, such as a Linux bind
+ A file chosen inside a directory below home that is managed by git, such as `~/.config` with a `.git` for dotfiles, is refused, with the remedy.
+ It is also ignored with a warning in a project `.npmrc`, in `publishConfig`, in `npm_config_*` environment variables and on the command line.
+ Unlike pnpm, npm does not accept an unscoped `tokenHelper` for the default registry, since a project can change which registry is the default, nor a helper per package scope (`//host/:@scope:tokenHelper`) or a key without the slash before the colon (`//host:tokenHelper`); each is ignored with a warning that names the line to write instead.
++`npm config set` refuses the unscoped form and project config.
+ 
+ npm refuses to start a command that makes requests while a helper is configured and the `npm-registry-fetch` it runs is older than 20.1.0, which is the version that can ask a helper: it would send the requests with no credential.
+ The credential is sent as a stored `_authToken` for the same registry is: with the same proxy and certificate settings and the same redirects.
+diff --git a/lib/commands/config.js b/lib/commands/config.js
+index 0a8b84a..1b46f0e 100644
+--- a/lib/commands/config.js
++++ b/lib/commands/config.js
+@@ -169,6 +169,16 @@ class Config extends BaseCommand {
+       if (!this.npm.config.definitions[baseKey] && !nerfDarts.includes(baseKey)) {
+         throw new Error(`\`${baseKey}\` is not a valid npm option`)
+       }
++      if (baseKey === 'tokenHelper') {
++        if (key === baseKey) {
++          throw new Error(
++            '`tokenHelper` must be scoped to a registry, such as `//registry.npmjs.org/:tokenHelper`')
++        }
++        if (where === 'project') {
++          throw new Error(
++            '`tokenHelper` is ignored in project config; set it in user or global config')
++        }
++      }
+       const deprecated = this.npm.config.definitions[baseKey]?.deprecated
+       if (deprecated) {
+         throw new Error(
+diff --git a/test/lib/commands/config.js b/test/lib/commands/config.js
+index 1ab9bba..93b2f0b 100644
+--- a/test/lib/commands/config.js
++++ b/test/lib/commands/config.js
+@@ -754,3 +754,22 @@ t.test('completion', async t => {
+     conf: { argv: { remain: ['config'] } },
+   }, ['get', 'set', 'delete', 'ls', 'rm', 'edit', 'fix'], 'and works on partials')
+ })
++
++t.test('config set tokenHelper', async t => {
++  const helper = process.platform === 'win32' ? 'C:\\tools\\token.cmd' : '/usr/local/bin/token'
++  t.test('scoped, in user config', async t => {
++    const { npm } = await loadMockNpm(t)
++    await npm.exec('config', ['set', '//npm.corp.example.com/:tokenHelper', helper])
++    t.equal(npm.config.get('//npm.corp.example.com/:tokenHelper', 'user'), helper)
++  })
++  t.test('unscoped is refused with a pointer to the scoped form', async t => {
++    const { npm } = await loadMockNpm(t)
++    await t.rejects(npm.exec('config', ['set', 'tokenHelper', helper]),
++      /`tokenHelper` must be scoped to a registry/)
++  })
++  t.test('project config is refused', async t => {
++    const { npm } = await loadMockNpm(t, { config: { location: 'project' } })
++    await t.rejects(npm.exec('config', ['set', '//npm.corp.example.com/:tokenHelper', helper]),
++      /`tokenHelper` is ignored in project config/)
++  })
++})

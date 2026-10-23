@@ -1,0 +1,126 @@
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index c14a97e..c153866 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -47,14 +47,14 @@ const isFile = (name) => {
+ 
+ class TokenHelperError extends Error {
+   // Neither stdout (the credential) nor the command line is put on the error:
+-  // npm prints and logs what an error carries. `signal` is there for the user,
+-  // and error-message.js shows it. The exit status of the helper is in the
+-  // message, not in a field called `exitCode`: the exit handler would make it
+-  // npm's own exit status.
+-  constructor (helper, message, { signal = null } = {}) {
++  // npm prints and logs what an error carries. `helperExitCode` and `signal` are
++  // there for the user, and error-message.js shows `signal`. It is not called
++  // `exitCode`: the exit handler would make it npm's own exit status.
++  constructor (helper, message, { helperExitCode = null, signal = null } = {}) {
+     super(`Token helper ${helper} ${message}`)
+     this.code = 'ETOKENHELPER'
+     this.helper = helper
++    this.helperExitCode = helperExitCode
+     this.signal = signal
+   }
+ }
+@@ -186,7 +186,7 @@ const failure = (helper, label, err) => {
+     reason = (err.code === 'ENOENT' && interpreter(helper)) ||
+       `could not be run${err.code ? ` (${err.code})` : ''}${isFile(helper) ? `: ${err.message}` : ''}`
+   }
+-  return new TokenHelperError(label, reason, { signal })
++  return new TokenHelperError(label, reason, { helperExitCode: exitCode, signal })
+ }
+ 
+ // Hides the helper's own token, exactly as it printed it and without the
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index 0cb51ac..cc0bf9d 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -113,6 +113,7 @@ t.test('output that is not a header value is refused without quoting it', async
+       code: 'ETOKENHELPER',
+       message: new RegExp(what),
+       helper: JSON.stringify(HELPER),
++      helperExitCode: null,
+       signal: null,
+     }, JSON.stringify(out))
+     await getAuthorization({ regKey: REG }).catch(er => t.notMatch(er.message, /alpha|beta|gamma|delta/, 'the output is not in the message'))
+@@ -132,11 +133,12 @@ t.test('the helper has no input, its own directory and its own environment', asy
+   t.equal(opts.windowsHide, true)
+ })
+ 
+-t.test('a failure names the helper, carries signal and never the output', async t => {
++t.test('a failure names the helper, carries helperExitCode and signal and never the output', async t => {
+   const logs = logsOf(t)
+   const { getAuthorization } = setup(t, ({ fail }) => fail({ code: 3, signal: null, stdout: 'tok-on-stdout', stderr: 'it broke' }))
+   const er = await getAuthorization({ regKey: REG }).catch(e => e)
+   t.equal(er.code, 'ETOKENHELPER')
++  t.equal(er.helperExitCode, 3)
+   t.equal(er.signal, null)
+   t.equal(er.helper, JSON.stringify(HELPER), 'what is shown of the helper, never the raw value')
+   t.match(er.message, `Token helper ${JSON.stringify(HELPER)} exited with status 3`)
+@@ -149,17 +151,18 @@ t.test('a failure names the helper, carries signal and never the output', async
+ 
+ t.test('a signal, a missing tool and a spawn error each say what happened', async t => {
+   const signalled = setup(t, ({ fail }) => fail({ code: null, signal: 'SIGSEGV' }))
+-  await t.rejects(signalled.getAuthorization({ regKey: REG }), { signal: 'SIGSEGV', message: /was killed by SIGSEGV/ })
++  await t.rejects(signalled.getAuthorization({ regKey: REG }), { signal: 'SIGSEGV', helperExitCode: null, message: /was killed by SIGSEGV/ })
+ 
+   for (const status of [127, 9009]) {
+     const missing = setup(t, ({ fail }) => fail({ code: status, signal: null }))
+     await t.rejects(missing.getAuthorization({ regKey: REG }), {
++      helperExitCode: status,
+       message: /command it runs is not found.*absolute path/,
+     }, `status ${status}`)
+   }
+ 
+   const noStart = setup(t, ({ fail }) => fail({ code: 'EACCES', message: 'spawn x EACCES' }))
+-  await t.rejects(noStart.getAuthorization({ regKey: REG }), { message: /could not be run \(EACCES\): spawn x EACCES/ })
++  await t.rejects(noStart.getAuthorization({ regKey: REG }), { helperExitCode: null, message: /could not be run \(EACCES\): spawn x EACCES/ })
+ 
+   const thrown = setup(t, () => {
+     throw Object.assign(new Error('The argument contains null bytes'), { code: 'ERR_INVALID_ARG_VALUE' })
+@@ -348,7 +351,7 @@ t.test('stderr: the exact token is hidden, warn on failure, verbose on success',
+ 
+   const bad = logsOf(t)
+   const failing = setup(t, ({ fail }) => fail({ code: 1, signal: null, stdout: secret, stderr }))
+-  await t.rejects(failing.getAuthorization({ regKey: REG }), { message: /exited with status 1/ })
++  await t.rejects(failing.getAuthorization({ regKey: REG }), { helperExitCode: 1 })
+   t.equal(text(bad, 'warn').length, 5, 'on failure the same lines are warnings')
+   t.notMatch(text(bad, 'warn').join('\n'), secret)
+ 
+@@ -390,8 +393,8 @@ t.test('one run per registry, and a failure counts', async t => {
+ 
+   const failing = setup(t, ({ fail }) => fail({ code: 2 }))
+   const first = failing.getAuthorization({ regKey: REG })
+-  await t.rejects(first, { message: /exited with status 2/ })
+-  await t.rejects(failing.getAuthorization({ regKey: REG }), { message: /exited with status 2/ })
++  await t.rejects(first, { helperExitCode: 2 })
++  await t.rejects(failing.getAuthorization({ regKey: REG }), { helperExitCode: 2 })
+   t.equal(failing.calls.length, 1, 'a failure is not retried')
+ })
+ 
+@@ -473,7 +476,7 @@ t.test('the helper\'s credential is not sent over plain http, except to this mac
+ 
+   const failing = setup(t, ({ fail }) => fail({ code: 2 }))
+   await t.rejects(failing.getAuthorization({ regKey: REG, uri: 'http://helper.registry/pkg' }), { message: /plain http/ })
+-  await t.rejects(failing.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), { message: /exited with status 2/ },
++  await t.rejects(failing.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), { helperExitCode: 2 },
+     'a refusal is not cached under the registry key: the https URL of the same host still runs the helper')
+ })
+ 
+@@ -641,6 +644,7 @@ t.test('the time limit: SIGTERM, then SIGKILL, and the request fails at once', a
+   await t.rejects(getAuthorization({ regKey: REG }), {
+     code: 'ETOKENHELPER',
+     message: /did not finish in 0.02 seconds/,
++    helperExitCode: null,
+   })
+   const { child } = calls[0]
+   t.same(child.kills, ['SIGTERM'])
+@@ -681,7 +685,7 @@ t.test('a helper that left a process holding its pipes does not keep npm waiting
+ t.test('a failing helper does not set npm\'s own exit status', async t => {
+   const { getAuthorization } = setup(t, ({ fail }) => fail({ code: 3 }))
+   const er = await getAuthorization({ regKey: REG }).catch(e => e)
+-  t.match(er.message, /exited with status 3/)
++  t.equal(er.helperExitCode, 3)
+   t.notOk('exitCode' in er, 'the exit handler would use it')
+ })
+ 
