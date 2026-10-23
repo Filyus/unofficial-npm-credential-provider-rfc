@@ -12,7 +12,7 @@ Phase 1a changes nothing for anyone who has not configured a helper, and Phase 2
 
 ### Phase 1a: `tokenHelper`
 
-[Proposal](phase-1a-token-helper.md): pnpm's per-registry `tokenHelper` for npm. An executable prints a token and npm sends it as a stored token is sent. It holds the motivation and the trust rule that every phase follows. [Implementation](phase-1a-implementation.md). Done when one helper serves npm and pnpm from the same `~/.npmrc`.
+[Proposal](phase-1a-token-helper.md): pnpm's per-registry `tokenHelper` for npm. An executable prints a token and npm sends it as a stored token is sent. It holds the motivation and the trust rule that every phase follows. [Implementation](phase-1a-implementation.md). Done when one helper serves npm and pnpm from the same `~/.npmrc`, where it prints a Bearer token for an `https:` registry and its path has no spaces, `$`, `%` or quotes; Phase 2 and pnpm do not mix for one registry. The proposal also says [what it protects against, and what it does not](phase-1a-token-helper.md#what-this-protects-against-and-what-it-does-not): a repository's config when no repository code runs, not code already running as the user or in the job.
 
 | Submission | State | Condition to move on |
 |---|---|---|
@@ -22,7 +22,7 @@ Phase 1a changes nothing for anyone who has not configured a helper, and Phase 2
 
 ### Phase 1b: credential hardening
 
-[Proposal](phase-1b-credential-hardening.md): how every credential travels, stored tokens, helpers and providers alike. `https:` or loopback only, transport from config a project cannot write, redirects, the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major. [Implementation](phase-1b-implementation.md). Done when no credential travels outside the rules unless the user turned them off.
+[Proposal](phase-1b-credential-hardening.md): how every credential travels, stored tokens, helpers and providers alike. `https:` or loopback only (a per-registry `allow-http-credential` allowance for stored tokens, never for a helper's), transport from config a project cannot write, no `${VAR}` expansion in project files under strict mode, a user or global file that was chosen inside a project counts as the project layer, redirects (make-fetch-happen and minipass-fetch compare the host), the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major. [Implementation](phase-1b-implementation.md). Done when no credential travels outside the rules unless the user turned them off.
 
 | Submission | State | Condition to move on |
 |---|---|---|
@@ -46,6 +46,7 @@ Phase 1a changes nothing for anyone who has not configured a helper, and Phase 2
 - [Examples](examples/README.md): how providers for real registries would answer, and where each is easy to get wrong.
 - [sources.md](sources.md): is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are.
 - [poc/patches](poc/patches): the Phase 1a prototype as patches against upstream npm/cli and npm-registry-fetch.
+- [poc/retired](poc/retired/README.md): the mechanisms a review retired, each one `git apply` away and proved by CI to still apply.
 - The old address, [rfc-credential-provider.md](rfc-credential-provider.md), says where each of its sections went.
 
 ## Running the checks

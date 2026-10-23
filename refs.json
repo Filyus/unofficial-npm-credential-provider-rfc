@@ -795,6 +795,10 @@
     "kind": "source",
     "cited": "2026-10-22"
   },
+  "https://github.com/npm/cli/blob/ae98c62586b6fea44114f72e249e246a2981de70/workspaces/config/lib/parse-field.js": {
+    "kind": "source",
+    "cited": "2026-10-23"
+  },
   "https://github.com/npm/cli/blob/ae98c62586b6fea44114f72e249e246a2981de70/workspaces/config/lib/set-envs.js": {
     "kind": "source",
     "cited": "2026-10-22"
