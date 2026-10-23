@@ -30,7 +30,7 @@ const runner = require(path.join(npmCliDir, 'lib', 'utils', 'token-helper.js'))
 // the factory npm uses, with a stub config, for one helper; a fresh one for
 // each call, so that nothing is cached
 const getTokenHelperHeader = (helper, regKey, timeout = 15000) => runner(
-  { flat: { tokenHelpers: { [regKey]: helper } }, get: () => undefined },
+  { flat: { tokenHelpers: { [regKey]: helper } }, get: () => undefined, credentialKeysFromCliOrEnv: () => [], tokenHelperProjectTransport: [] },
   {}, process.platform, { timeout, grace: 2000, drain: 250 })({ regKey })
 
 const WIN = process.platform === 'win32'

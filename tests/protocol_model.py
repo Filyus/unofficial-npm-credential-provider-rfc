@@ -1403,3 +1403,71 @@ def token_helper_header(exit_code: int, stdout: str) -> str:
             "(more than one line, a control character or a non-ASCII character)"
         )
     return token if _SCHEME.match(token) else f"Bearer {token}"
+
+
+# The hosts a helper's credential may be sent to over plain http: this machine,
+# as the host of a parsed URL reads (a WHATWG URL has lowercased it, turned
+# `127.1` into `127.0.0.1` and kept the brackets of an IPv6 address)
+_LOOPBACK_HOST = re.compile(r"^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$")
+
+
+def token_helper_route_outcome(
+    scheme: str,
+    hostname: str,
+    run_credential: bool = False,
+    project_route_keys: tuple[str, ...] = (),
+) -> str:
+    """What Phase 1a does with a request to a registry that has a helper, before
+    any program starts: `run-credential` when the command line or the
+    environment gave a credential for the registry's key (the helper is not run,
+    that credential is used), `plain-http` for an `http:` URL to a host that is
+    not this machine, `project-route` when `proxy`, `https-proxy`, `ca`,
+    `cafile` (or `strict-ssl=false`) came from the project layer, otherwise
+    `ran`. The checks are made for every request, and in this order."""
+    if run_credential:
+        return "run-credential"
+    if scheme == "http:" and not _LOOPBACK_HOST.match(hostname):
+        return "plain-http"
+    if project_route_keys:
+        return "project-route"
+    return "ran"
+
+
+def credential_in_use(helper: bool, file_credential: bool, run_credential: bool) -> str | None:
+    """Which credential a request for a registry key carries when more than one is
+    set for that key: one given on the command line or in the environment beats
+    the helper (and OIDC lands in that layer, so it wins by the same rule); the
+    helper beats one stored in a file."""
+    if run_credential:
+        return "run"
+    if helper:
+        return "helper"
+    if file_credential:
+        return "file"
+    return None
+
+
+PROJECT_MARKERS = ("package.json", ".git")
+
+
+def containing_project(
+    file_directories: list[str],
+    home: str | None,
+    exists: Callable[[str, str], bool],
+) -> tuple[str, str] | None:
+    """Phase 1a's location rule for a user or global file whose path the command
+    line or the environment chose: the directory, and the mark in it, that makes
+    the file a project's, or None. `file_directories` runs from the directory of
+    the file's real path up to the filesystem root. The walk stops at home
+    without looking at it, and goes on to the root for a file that is not below
+    home (`home` is None when it is a filesystem root or not there). A `.git`
+    that is a file counts as one that is a directory, and `node_modules` is no
+    mark. Nothing here depends on the current directory, `--prefix`, `--global`
+    or `location`."""
+    for directory in file_directories:
+        if home is not None and directory == home:
+            return None
+        for marker in PROJECT_MARKERS:
+            if exists(directory, marker):
+                return directory, marker
+    return None

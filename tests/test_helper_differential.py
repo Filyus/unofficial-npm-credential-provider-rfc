@@ -54,6 +54,18 @@ module.exports = (config) => async ({ regKey }) => {
 """
 
 
+# the same stand-in with the route checks the runner makes before it starts anything
+ROUTES = HONEST.replace(
+    "module.exports = (config) => async ({ regKey }) => {",
+    r"""module.exports = (config) => async ({ regKey, uri }) => {
+  if (config.credentialKeysFromCliOrEnv(regKey).length) return undefined
+  const { protocol, hostname } = uri ? new URL(uri) : {}
+  if (protocol === 'http:' && !/^(localhost|127(\.\d{1,3}){3}|\[::1\])$/.test(hostname)) throw new Error('was not run: its credential is not sent over plain http')
+  if (config.tokenHelperProjectTransport.length) throw new Error('was not run: its credential is not sent over a route that a project chose')""",
+)
+assert ROUTES != HONEST
+
+
 def prototype(source: str) -> Path:
     root = Path(tempfile.mkdtemp(prefix="prototype-"))
     (root / "lib" / "utils").mkdir(parents=True)
@@ -109,6 +121,31 @@ class HarnessTests(unittest.TestCase):
             for value, verdict in expected.items():
                 with self.subTest(value=value):
                     self.assertEqual(fuzz_helper.model_refusal(value), verdict)
+
+    def found_routes(self, source: str) -> set[str]:
+        root = prototype(source)
+        self.addCleanup(shutil.rmtree, root, True)
+        cases = fuzz_helper.route_cases(random.Random(1), 1500)
+        return {finding["kind"] for finding in fuzz_helper.judge_routes(root, cases)}
+
+    def test_a_stand_in_that_refuses_what_the_model_refuses_has_no_route_finding(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES), set())
+
+    def test_a_runner_that_sends_over_any_http_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("protocol === 'http:' &&", "false &&")), {"route"})
+
+    def test_a_runner_that_calls_a_longer_host_loopback_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("^(localhost|", "^(localhost\\.?|")), {"route"})
+
+    def test_a_runner_that_ignores_the_route_a_project_chose_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("config.tokenHelperProjectTransport.length", "false")), {"route"})
+
+    def test_a_runner_that_runs_the_helper_beside_a_credential_for_the_run_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("config.credentialKeysFromCliOrEnv(regKey).length", "false")), {"route"})
+
+    def test_a_runner_with_no_route_checks_at_all_is_found(self) -> None:
+        # the stand-in that has the checks of the header and the log only: the bridge gives it a config with the route answers
+        self.assertEqual(self.found_routes(HONEST), {"route"})
 
     def test_a_log_that_keeps_a_control_character_is_found(self) -> None:
         source = HONEST.replace("const shown = line.replace(", "const shown = '\\x1b' + line.replace(")

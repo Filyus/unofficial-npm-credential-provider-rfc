@@ -1,6 +1,6 @@
-From f96f71d150126330328c8756ee69b5f0dfc210b8 Mon Sep 17 00:00:00 2001
+From 752e04e49dc5bf6b5d5bd777f7f607677bdcab61 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
-Date: Thu, 22 Oct 2026 19:11:57 +0500
+Date: Fri, 23 Oct 2026 11:03:20 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
  token
 
@@ -9,11 +9,11 @@ credential for a registry, the setting of the same name that pnpm has. A raw
 token is sent as `Bearer <token>`; output that starts with an auth scheme and
 a space is used as the header value. The credential is supplied through the
 `getAuthorization({ regKey, uri })` option of npm-registry-fetch, so it is sent
-as a stored `_authToken` is: same proxy and certificate settings, same http:
-behaviour, same redirects. npm-registry-fetch moves to ^20.1.0, the first
-version with the option, and a command that makes requests fails with
-ETOKENHELPER when a helper is configured and the library in use lacks it,
-instead of sending every request without a credential.
+as a stored `_authToken` is: same proxy and certificate settings, same
+redirects. npm-registry-fetch moves to ^20.1.0, the first version with the
+option, and a command that makes requests fails with ETOKENHELPER when a helper
+is configured and the library in use lacks it, instead of sending every request
+without a credential.
 
 The runner (lib/utils/token-helper.js, on @npmcli/promise-spawn) takes one
 absolute path with no arguments and refuses anything else, and a value that is
@@ -36,52 +36,84 @@ warnings when the helper fails, at verbose when it works. A failure is an
 ETOKENHELPER error that carries helperExitCode and signal itself, so npm exits
 as for any of its errors.
 
+The credential does not go where a stored token would be sent but a user did
+not choose to send it. A request over plain http to a host that is not this
+machine is refused for every request (the registry key has no scheme), and so is
+any request while proxy, https-proxy, ca or cafile has its value from a project
+.npmrc, or strict-ssl is false there; the message names the key and the file,
+and the helper is not run. The publishConfig of package.json is a project's choice
+too: publish and unpublish refuse, naming publishConfig.<key>, when it sets one of
+these for a registry that a helper serves (a key set on the command line wins over
+publishConfig and is not refused). A child npm gets the project's settings as
+npm_config_* values, so the parent lists the keys that came from the project in
+npm_config_token_helper_project_transport (set only when a helper is configured
+or inherited) and the child counts a listed key in its environment as the
+project's. A token, `_auth` or username and password given on the command line
+or in the environment is used instead of the helper, which is not run, with one
+warning per registry; one in a file loses to the helper as before.
+getCredentialsByURI reports the same, so whoami and publish agree with the
+request path.
+
 Only the user and global config files may set it. In project config,
 publishConfig, the environment and on the command line it is ignored with a
 warning, and so is a user or global file when project config sets userconfig,
 globalconfig or prefix (keys compared after ${VAR} expansion), or when its path
-was chosen on the command line or in the environment and its real path lies
-inside a project root: the project found from the current directory by the
-usual walk up the tree whatever --prefix says, and localPrefix unless the
-command is global (`npm ci --prefix sub`, `npm --prefix client ci` with
-NPM_CONFIG_USERCONFIG at the repository root, `--userconfig ./ci.npmrc`). A child npm is told which files its
-parent did not trust in npm_config_token_helper_untrusted, set only when one of
-them has a helper. The unscoped, slash-less and per-package-scope forms are
-ignored with a warning that names the line to write instead.
+was chosen on the command line or in the environment and lies inside a project.
+Where the project is comes from the file alone: its real path and each
+directory above it, from the file's own up to the filesystem root, stopping
+without looking at the home directory; a directory with a package.json or a
+.git (a file in a worktree or a submodule) is a project, node_modules is not a
+mark. The current directory, --prefix, --global and location play no part, so a
+project .npmrc cannot switch the check off, and a stray package.json in home
+does not make ~/.npmrc.work or ~/.config/npm/npmrc a project's. The warning
+names the directory and the mark, and the remedy. A child npm is told which
+files its parent did not trust in npm_config_token_helper_untrusted, set only
+when one of them has a helper. The unscoped, slash-less and per-package-scope
+forms are ignored with a warning that names the line to write instead.
 
-The helper wins over a stored credential for the same registry, with one
-warning per registry that names what is ignored; an OIDC trusted-publishing
-token wins over both. publish, whoami and get-identity count a helper as a
-login; config set refuses the unscoped form and project config.
+The helper wins over a stored credential in a file for the same registry, with
+one warning per registry that names what is ignored; an OIDC trusted-publishing
+token wins over both, as the token it sets in the cli layer is a credential
+given for the run. publish, whoami and get-identity count a helper as a
+login; config set refuses the unscoped form and project config. `npm login`
+refuses for a registry with a helper, since the token it saved would never be
+sent and its requests would carry the helper's credential, and `npm logout`
+says that the setting has to be removed and names a token stored beside it
+without revoking it, instead of revoking a token the helper's credential
+replaces.
 ---
- docs/lib/content/configuring-npm/npmrc.md  |  63 +-
+ docs/lib/content/configuring-npm/npmrc.md  |  80 ++-
  lib/commands/config.js                     |  10 +
- lib/commands/publish.js                    |   7 +-
- lib/commands/unpublish.js                  |   4 +-
+ lib/commands/login.js                      |  13 +
+ lib/commands/logout.js                     |  23 +
+ lib/commands/publish.js                    |   9 +-
+ lib/commands/unpublish.js                  |   7 +-
  lib/npm.js                                 |  26 +
  lib/utils/get-identity.js                  |   2 +-
- lib/utils/oidc.js                          |  10 +
- lib/utils/publish-config.js                |  24 +
- lib/utils/token-helper.js                  | 408 +++++++++++++
+ lib/utils/oidc.js                          |   3 +
+ lib/utils/publish-config.js                |  72 ++
+ lib/utils/token-helper.js                  | 447 ++++++++++++
  package.json                               |   2 +-
  test/fixtures/mock-npm.js                  |   6 +
  test/fixtures/token-helper/helper          |   2 +
  test/fixtures/token-helper/helper.cmd      |   1 +
  test/fixtures/token-helper/index.js        |   5 +
  test/lib/commands/config.js                |  19 +
- test/lib/commands/publish.js               |  33 ++
- test/lib/commands/unpublish.js             |  29 +
+ test/lib/commands/login.js                 |  42 ++
+ test/lib/commands/logout.js                |  44 ++
+ test/lib/commands/publish.js               |  50 ++
+ test/lib/commands/unpublish.js             |  48 ++
  test/lib/commands/whoami.js                |  11 +
- test/lib/npm.js                            |  35 ++
- test/lib/utils/oidc.js                     |  25 +
- test/lib/utils/publish-config.js           |  26 +
- test/lib/utils/token-helper.js             | 657 +++++++++++++++++++++
+ test/lib/npm.js                            |  69 ++
+ test/lib/utils/oidc.js                     |  30 +
+ test/lib/utils/publish-config.js           |  89 +++
+ test/lib/utils/token-helper.js             | 764 +++++++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 233 +++++++-
- workspaces/config/lib/set-envs.js          |   9 +
- workspaces/config/test/index.js            | 289 +++++++++
- workspaces/config/test/set-envs.js         |  25 +
- 27 files changed, 1937 insertions(+), 32 deletions(-)
+ workspaces/config/lib/index.js             | 251 +++++++
+ workspaces/config/lib/set-envs.js          |  22 +
+ workspaces/config/test/index.js            | 533 +++++++++++++-
+ workspaces/config/test/set-envs.js         |  76 ++
+ 31 files changed, 2755 insertions(+), 9 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -91,7 +123,7 @@ login; config set refuses the unscoped form and project config.
  create mode 100644 test/lib/utils/token-helper.js
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index b1e7d16..e0994ae 100644
+index b1e7d16..69bac2f 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -87,7 +87,7 @@ This is primarily for distribution maintainers to override default configs in a
@@ -103,7 +135,7 @@ index b1e7d16..e0994ae 100644
  This ensures that `npm` will never send credentials to the wrong host.
  
  The full list is:
-@@ -99,12 +99,73 @@ The full list is:
+@@ -99,12 +99,90 @@ The full list is:
   - `cafile` (path to certificate authority file)
   - `certfile` (path to certificate file)
   - `keyfile` (path to key file)
@@ -143,10 +175,12 @@ index b1e7d16..e0994ae 100644
 +The program prints the credential on one line.
 +A raw token is sent as `Authorization: Bearer <token>`, and output that starts with an auth scheme and a space, such as `Basic …`, is used as the header value as it is.
 +Spaces around the output and a byte order mark are removed.
-+A registry that has both a `tokenHelper` and a stored `_authToken` uses the helper, and npm warns once, naming the credential it ignores.
++A registry that has both a `tokenHelper` and a stored `_authToken` in a file uses the helper, and npm warns once, naming the credential it ignores.
++A credential given for the run itself, `--//host/:_authToken=…` or `npm_config_//host/:_authToken`, or the same for `_auth` or `username` and `_password`, is used instead: the helper is not run, and npm warns once for the registry, naming the key.
 +It does not fall back to the stored token: a token left over from before the helper was set up has usually expired, and would answer 401 where the helper's would not.
 +A token stored under a longer registry key than the helper's is the more specific credential and is used.
 +While an OIDC trusted-publishing token is in use for a registry, it is sent instead of the helper's credential.
++`npm login` refuses for a registry with a helper, and `npm logout` says that the setting has to be removed.
 +
 +The helper is run the first time a request to that registry needs a credential, once per npm process, and its outcome is kept for the rest of the process: a failure is not retried either.
 +Credentials are resolved before the cache is consulted, so the helper also runs for `--prefer-offline` and for a package the cache could have answered, and a failing helper fails every request to that registry, public packages included (a failure is visible, not a silent request without credentials).
@@ -166,13 +200,28 @@ index b1e7d16..e0994ae 100644
 +A value that is not an existing file is never printed, because it may be a token pasted by mistake: the messages name the config key and say the value is not shown.
 +
 +Because npm executes the program, `tokenHelper` is honored only from the per-user and global config files, and only when the repository did not choose them: the settings `userconfig`, `globalconfig` and `prefix` (compared after `${VAR}` expansion) must not be set in a project `.npmrc`, or the helper in those files is ignored with a warning.
-+A user or global file whose path was chosen on the command line or in the environment (not left at its default) and whose real path lies inside the project (`npm ci --prefix sub`, `--userconfig ./ci.npmrc`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`) is ignored the same way, since the repository can have written it.
++A user or global file whose path was chosen on the command line or in the environment (not left at its default) is ignored the same way when it lies inside a project, since the repository can have written it.
++Where the project is comes from the file alone: npm takes its real path, so that a link cannot hide it, and looks at the directory the file is in and each one above it, up to the filesystem root.
++A directory that holds a `package.json` or a `.git` (a file in a worktree or a submodule) is a project (`npm ci --prefix sub`, `--userconfig ./ci.npmrc`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`); `node_modules` is not a mark.
++The walk stops at the home directory without looking at it, so a file in `~` or below it, such as `~/.npmrc.work` or `$XDG_CONFIG_HOME/npm/npmrc`, is the user's even when `~` has a `package.json`.
++The current directory, `--prefix`, `--global` and `location` play no part, so a project `.npmrc` cannot switch the check off.
++The warning names the directory that made the file a project, and what to do: use the default path (`~/.npmrc`) for the file, or move the `tokenHelper` line into the default user file.
++The rule has three limits.
++A `HOME` that is set to the checkout makes the default user file the repository's own `.npmrc`, which is not a chosen path; every tool trusts `HOME`, and git runs programs named in `~/.gitconfig`.
++Two paths of one directory that a real path does not join, such as a Linux bind mount, a Windows administrative share of a local drive, or a case-insensitive mount on Linux, are not recognised as the same.
++A file chosen inside a directory below home that is managed by git, such as `~/.config` with a `.git` for dotfiles, is refused, with the remedy.
 +It is also ignored with a warning in a project `.npmrc`, in `publishConfig`, in `npm_config_*` environment variables and on the command line.
 +Unlike pnpm, npm does not accept an unscoped `tokenHelper` for the default registry, since a project can change which registry is the default, nor a helper per package scope (`//host/:@scope:tokenHelper`) or a key without the slash before the colon (`//host:tokenHelper`); each is ignored with a warning that names the line to write instead.
 +`npm config set` refuses the unscoped form and project config.
 +
 +npm refuses to start a command that makes requests while a helper is configured and the `npm-registry-fetch` it runs is older than 20.1.0, which is the version that can ask a helper: it would send the requests with no credential.
-+The credential is sent as a stored `_authToken` for the same registry is: with the same proxy and certificate settings, the same rules for `http:` registries and the same redirects.
++The credential is sent as a stored `_authToken` for the same registry is: with the same proxy and certificate settings and the same redirects.
++Two things a stored token would be sent over are refused for the helper's credential, with `ETOKENHELPER` and without running the helper.
++A request over plain `http:` to a host that is not this machine (`localhost`, `127.0.0.0/8`, `[::1]`) is refused: use `https:`.
++A request is also refused when `proxy`, `https-proxy`, `ca` or `cafile` has its value from a project `.npmrc`, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and the file.
++Remove the setting from the project's `.npmrc`, or set it on the command line or in the environment, which override project config.
++The same goes for the `publishConfig` of `package.json`: when it sets one of them and a helper serves the registry that `npm publish` or `npm unpublish` targets, the command is refused with `ETOKENHELPER`, naming `publishConfig.<key>`; remove it from `publishConfig`, or set it on the command line, which overrides `publishConfig`.
++An `npm` that another `npm` started (a script that runs `npm publish`) gets the project's settings as `npm_config_*` variables, so the parent names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats them the same way.
 +
  ### Unsupported Custom Configuration Keys
  
@@ -198,8 +247,81 @@ index 0a8b84a..1b46f0e 100644
        const deprecated = this.npm.config.definitions[baseKey]?.deprecated
        if (deprecated) {
          throw new Error(
+diff --git a/lib/commands/login.js b/lib/commands/login.js
+index 630abf9..a8b07d3 100644
+--- a/lib/commands/login.js
++++ b/lib/commands/login.js
+@@ -2,6 +2,8 @@ const { log, output } = require('proc-log')
+ const { redactLog: replaceInfo } = require('@npmcli/redact')
+ const auth = require('../utils/auth.js')
+ const BaseCommand = require('../base-cmd.js')
++const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
++const { display } = require('../utils/token-helper.js')
+ 
+ class Login extends BaseCommand {
+   static description = 'Login to a registry user account'
+@@ -26,6 +28,17 @@ class Login extends BaseCommand {
+ 
+     const creds = this.npm.config.getCredentialsByURI(registry)
+ 
++    // a token saved by this login would never be sent while a helper supplies
++    // the credential, and the login requests themselves would carry the
++    // helper's credential
++    if (creds.tokenHelper) {
++      throw Object.assign(new Error(
++        `credentials for ${replaceInfo(registry)} come from the tokenHelper ` +
++        `${display(creds.tokenHelper, `${nerfDart(registry)}:tokenHelper`)}; ` +
++        'log in through the tool behind the helper, or remove the helper setting first'
++      ), { code: 'ETOKENHELPER' })
++    }
++
+     log.notice('', `Log in on ${replaceInfo(registry)}`)
+ 
+     const { message, newCreds } = await auth.login(this.npm, {
+diff --git a/lib/commands/logout.js b/lib/commands/logout.js
+index dc5a0df..3046c08 100644
+--- a/lib/commands/logout.js
++++ b/lib/commands/logout.js
+@@ -1,7 +1,9 @@
+ const npmFetch = require('npm-registry-fetch')
+ const { getAuth } = npmFetch
+ const { log } = require('proc-log')
++const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
+ const BaseCommand = require('../base-cmd.js')
++const { display } = require('../utils/token-helper.js')
+ 
+ class Logout extends BaseCommand {
+   static description = 'Log out of the registry'
+@@ -17,6 +19,27 @@ class Logout extends BaseCommand {
+     const regRef = scope ? `${scope}:registry` : 'registry'
+     const reg = this.npm.config.get(regRef) || registry
+ 
++    // A helper hands out credentials on demand, so logging out means removing
++    // the helper setting. A token stored beside it is not in use while the
++    // helper is, and is named rather than revoked: revoking it would send the
++    // helper's credential, and deleting it unasked could lose a token the
++    // user still relies on elsewhere.
++    const { tokenHelper } = this.npm.config.getCredentialsByURI(reg)
++    if (tokenHelper) {
++      const regKey = nerfDart(reg)
++      const helperLevel = this.npm.config.find(`${regKey}:tokenHelper`)
++      const tokenKey = `${regKey}:_authToken`
++      const tokenLevel = this.npm.config.get(tokenKey) && this.npm.config.find(tokenKey)
++      throw Object.assign(new Error(
++        `credentials for ${reg} come from the tokenHelper ${display(tokenHelper, `${regKey}:tokenHelper`)}; ` +
++        `remove "${regKey}:tokenHelper" from your ${helperLevel} config to stop using it` +
++        (tokenLevel
++          ? `. A token is also stored as "${tokenKey}" in your ${tokenLevel} config; ` +
++            'it is not used while the helper is configured and was not revoked'
++          : '')
++      ), { code: 'ETOKENHELPER' })
++    }
++
+     const auth = getAuth(reg, this.npm.flatOptions)
+ 
+     const level = this.npm.config.find(`${auth.regKey}:${auth.authKey}`)
 diff --git a/lib/commands/publish.js b/lib/commands/publish.js
-index a18b6f0..0c95077 100644
+index a18b6f0..c8df8e2 100644
 --- a/lib/commands/publish.js
 +++ b/lib/commands/publish.js
 @@ -15,6 +15,7 @@ const { flatten } = require('@npmcli/config/lib/definitions')
@@ -220,7 +342,7 @@ index a18b6f0..0c95077 100644
      const outputRegistry = replaceInfo(registry)
  
      if (workspace && manifest.private) {
-@@ -319,8 +321,7 @@ class Publish extends BaseCommand {
+@@ -319,14 +321,15 @@ class Publish extends BaseCommand {
      if (manifest.publishConfig) {
        const cliFlags = this.npm.config.data.get('cli').raw
        // Filter out properties set in CLI flags to prioritize them over corresponding `publishConfig` settings
@@ -230,11 +352,27 @@ index a18b6f0..0c95077 100644
        if (logWarnings) {
          for (const key in filteredPublishConfig) {
            this.npm.config.checkUnknown('publishConfig', key)
+         }
+       }
+       flatten(filteredPublishConfig, opts)
++      publishConfigOverrides.refuseProjectRoute(this.npm.config, filteredPublishConfig,
++        npmFetch.pickRegistry(npa.resolve(manifest.name, manifest.version), opts))
+     }
+     return manifest
+   }
 diff --git a/lib/commands/unpublish.js b/lib/commands/unpublish.js
-index fc390a2..626785a 100644
+index fc390a2..042e971 100644
 --- a/lib/commands/unpublish.js
 +++ b/lib/commands/unpublish.js
-@@ -8,6 +8,7 @@ const { flatten } = require('@npmcli/config/lib/definitions')
+@@ -1,6 +1,7 @@
+ const libaccess = require('libnpmaccess')
+ const libunpub = require('libnpmpublish').unpublish
+ const npa = require('npm-package-arg')
++const npmFetch = require('npm-registry-fetch')
+ const pacote = require('pacote')
+ const { output, log } = require('proc-log')
+ const pkgJson = require('@npmcli/package-json')
+@@ -8,6 +9,7 @@ const { flatten } = require('@npmcli/config/lib/definitions')
  const getIdentity = require('../utils/get-identity.js')
  const { otplease } = require('../utils/auth.js')
  const BaseCommand = require('../base-cmd.js')
@@ -242,7 +380,7 @@ index fc390a2..626785a 100644
  
  const LAST_REMAINING_VERSION_ERROR = 'Refusing to delete the last version of the package. It will block from republishing a new version for 24 hours.\nRun with --force to do this.'
  
-@@ -127,8 +128,7 @@ class Unpublish extends BaseCommand {
+@@ -127,12 +129,13 @@ class Unpublish extends BaseCommand {
      if (manifest?.name === spec.name && manifest.publishConfig) {
        const cliFlags = this.npm.config.data.get('cli').raw
        // Filter out properties set in CLI flags to prioritize them over corresponding `publishConfig` settings
@@ -252,6 +390,12 @@ index fc390a2..626785a 100644
        for (const key in filteredPublishConfig) {
          this.npm.config.checkUnknown('publishConfig', key)
        }
+       flatten(filteredPublishConfig, opts)
++      publishConfigOverrides.refuseProjectRoute(this.npm.config, filteredPublishConfig,
++        npmFetch.pickRegistry(spec, opts))
+     }
+ 
+     const versions = await Unpublish.getKeysOfVersions(spec.name, opts)
 diff --git a/lib/npm.js b/lib/npm.js
 index 5c42dbe..4c77f0b 100644
 --- a/lib/npm.js
@@ -317,40 +461,19 @@ index a523a7c..036fb1d 100644
      if (typeof registryData?.username === 'string') {
        return registryData.username
 diff --git a/lib/utils/oidc.js b/lib/utils/oidc.js
-index 7f18170..776c900 100644
+index 7f18170..40c4900 100644
 --- a/lib/utils/oidc.js
 +++ b/lib/utils/oidc.js
-@@ -13,6 +13,12 @@ const libaccess = require('libnpmaccess')
-  */
- let activeExchangeRecord
- 
-+// A configured tokenHelper wins over a stored _authToken for the same registry,
-+// and trusted publishing wins over both: while an OIDC token is in use, the
-+// helper for that registry is masked with an empty value in the cli layer,
-+// which is what npm builds its `getAuthorization` option from.
-+const helperKeyFor = authTokenKey => authTokenKey.replace(/:_authToken$/, ':tokenHelper')
-+
- const setOidcToken = ({ config, opts, authTokenKey, token }) => {
-   activeExchangeRecord = {
-     config,
-@@ -24,6 +30,7 @@ const setOidcToken = ({ config, opts, authTokenKey, token }) => {
+@@ -23,6 +23,8 @@ const setOidcToken = ({ config, opts, authTokenKey, token }) => {
+     previousOptsToken: opts[authTokenKey],
    }
    opts[authTokenKey] = token
++  // in the cli layer, where a credential for the key replaces a tokenHelper for
++  // it (see lib/utils/token-helper.js): trusted publishing wins over the helper
    config.set(authTokenKey, token, 'cli')
-+  config.set(helperKeyFor(authTokenKey), '', 'cli')
    log.verbose('oidc', 'Successfully retrieved and set token')
  }
- 
-@@ -46,6 +53,8 @@ const clearOidcToken = ({ config, opts }) => {
-     } else {
-       previousConfig.set(authTokenKey, previousCliToken, 'cli')
-     }
-+    // a tokenHelper is never loaded from the cli layer, so the mask is all there is
-+    previousConfig.delete(helperKeyFor(authTokenKey), 'cli')
-   }
-   for (const requestOpts of new Set([previousOpts, opts])) {
-     if (requestOpts[authTokenKey] === token) {
-@@ -193,6 +202,7 @@ async function oidc ({
+@@ -193,6 +195,7 @@ async function oidc ({
        response = await npmFetch.json(new URL(`/-/npm/v1/oidc/token/exchange/package/${escapedPackageName}`, registry), {
          ...opts,
          [authTokenKey]: idToken, // Use the idToken as the auth token for the request
@@ -360,11 +483,12 @@ index 7f18170..776c900 100644
      } catch (error) {
 diff --git a/lib/utils/publish-config.js b/lib/utils/publish-config.js
 new file mode 100644
-index 0000000..ffafd42
+index 0000000..118f114
 --- /dev/null
 +++ b/lib/utils/publish-config.js
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,72 @@
 +const { log } = require('proc-log')
++const { display } = require('./token-helper.js')
 +
 +// The `publishConfig` settings that apply on top of the loaded config. Keys
 +// set on the command line win over the manifest, and a `tokenHelper` is
@@ -387,13 +511,60 @@ index 0000000..ffafd42
 +  return overrides
 +}
 +
++// The settings that choose where a request goes and whom it trusts, which a
++// token helper's credential must not follow when package.json chose them (as
++// it must not when a project .npmrc did, see @npmcli/config).
++const TRANSPORT = ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']
++
++// The registry key of the token helper that a request to `registry` would run:
++// npm-registry-fetch asks for each key of the URL from the longest up and stops
++// at the first that holds a stored credential, and a credential given on the
++// command line or in the environment is used instead of the helper.
++const helperKey = (config, registry) => {
++  const helpers = config.flat.tokenHelpers || {}
++  const { host, pathname } = new URL(registry)
++  let key = `//${host}${pathname}`
++  while (key.length > '//'.length) {
++    if (helpers[key]) {
++      return config.credentialKeysFromCliOrEnv(key).length ? null : key
++    }
++    if (config.get(`${key}:_authToken`) || config.get(`${key}:_auth`) ||
++      config.get(`${key}:username`) && config.get(`${key}:_password`)) {
++      return null
++    }
++    key = key.replace(/([^/]+|\/)$/, '')
++  }
++  return null
++}
++
++// Refuses, before the helper is run, when the publishConfig that applies (what
++// publishConfigOverrides returned: keys set on the command line are not in it)
++// sets one of those for a registry that has a token helper. It is a refusal
++// and not a dropped key, as for a project .npmrc: the user is told what
++// package.json asks for.
++const refuseProjectRoute = (config, overrides, registry) => {
++  const keys = TRANSPORT.filter(key => key in overrides &&
++    (key === 'strict-ssl' ? overrides[key] === false : overrides[key] !== null && overrides[key] !== undefined))
++  const key = keys.length ? helperKey(config, registry) : null
++  if (key) {
++    throw Object.assign(new Error(
++      `Token helper ${display(config.flat.tokenHelpers[key], `${key}:tokenHelper`)} was not run: its credential ` +
++      'is not sent over a route that a project chose, and package.json sets ' +
++      `${keys.map(k => `"publishConfig.${k}"`).join(', ')}; remove ` +
++      `${keys.length > 1 ? 'them' : 'it'} from publishConfig, or set ${keys.length > 1 ? 'them' : 'it'} ` +
++      'on the command line, which overrides publishConfig'
++    ), { code: 'ETOKENHELPER' })
++  }
++}
++
 +module.exports = publishConfigOverrides
++module.exports.refuseProjectRoute = refuseProjectRoute
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
 new file mode 100644
-index 0000000..abc5587
+index 0000000..796c3c4
 --- /dev/null
 +++ b/lib/utils/token-helper.js
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,447 @@
 +const fs = require('node:fs')
 +const path = require('node:path')
 +const promiseSpawn = require('@npmcli/promise-spawn')
@@ -406,6 +577,10 @@ index 0000000..abc5587
 +// Bearer token, and output that already starts with an auth scheme
 +// (`Bearer ...`, `Basic ...`) is used as the header value. npm-registry-fetch
 +// has no process code; it asks the function made here, as opts.getAuthorization.
++// The function does not run the helper, and says why, when the credential would
++// go over plain http or over a proxy or CA that a project's config chose, and
++// it steps aside, for the stored credential, when the command line or the
++// environment gives one.
 +
 +const TIMEOUT = 60 * 1000
 +// how long a helper that ignores SIGTERM gets before it is killed outright
@@ -422,6 +597,8 @@ index 0000000..abc5587
 +// or `TOKEN_HELPER` is a name a user or a CI job could have set for their own
 +// reasons, which would then break every npm command with a helper configured.
 +const GUARD = 'NPM_INTERNAL_TOKEN_HELPER_RUNNING'
++// the hosts to which a credential may be sent over plain http: this machine
++const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/
 +
 +const isFile = (name) => {
 +  try {
@@ -765,15 +942,47 @@ index 0000000..abc5587
 +  limits = { timeout: TIMEOUT, grace: GRACE, drain: DRAIN }
 +) => {
 +  const cache = new Map()
-+  return async ({ regKey }) => {
++  const overridden = new Set()
++  return async ({ regKey, uri }) => {
 +    // read from the config as it is now: an OIDC token in use masks the helper
 +    const helper = config.flat.tokenHelpers?.[regKey]
 +    if (!helper) {
 +      return undefined
 +    }
++    // A credential the user gave for this run, on the command line or in the
++    // environment, is the one in use: undefined makes npm-registry-fetch use the
++    // credential it has for the key, and the helper is not run. One in a file
++    // loses to the helper, as below.
++    const given = config.credentialKeysFromCliOrEnv(regKey)
++    if (given.length) {
++      if (!overridden.has(regKey)) {
++        overridden.add(regKey)
++        log.warn('token-helper', `${regKey}:tokenHelper is not used for ${regKey}: ` +
++          `the command line or environment sets ${given.join(' and ')}`)
++      }
++      return undefined
++    }
 +    if (startEnv[GUARD]) {
 +      throw new TokenHelperError(display(helper, `${regKey}:tokenHelper`), 'cannot run: this npm was started by a token helper, ' +
 +        'and a token helper\'s own npm cannot run a token helper (it would start itself again)')
++    }
++    // The checks below are made for every request, before the cache and before
++    // the program is started: a refusal never runs the helper. The URL is the
++    // request's own, and one registry key serves its http and https URLs alike,
++    // so it is not part of what is cached.
++    const { protocol, hostname } = uri ? new URL(uri) : {}
++    if (protocol === 'http:' && !LOOPBACK.test(hostname)) {
++      throw new TokenHelperError(display(helper, `${regKey}:tokenHelper`),
++        'was not run: its credential is not sent over plain http ' +
++        `to ${hostname}; use https`)
++    }
++    const transport = config.tokenHelperProjectTransport
++    if (transport.length) {
++      throw new TokenHelperError(display(helper, `${regKey}:tokenHelper`),
++        'was not run: its credential is not sent over a route that a ' +
++        `project chose, and ${transport.map(({ key, source }) => `"${key}" comes from ${source}`).join(', ')}; ` +
++        'remove it from the project\'s .npmrc, or set it on the command line or in the environment, ' +
++        'which override project config')
 +    }
 +    const key = `${regKey}\0${helper}`
 +    if (!cache.has(key)) {
@@ -798,6 +1007,7 @@ index 0000000..abc5587
 +}
 +
 +module.exports.GUARD = GUARD
++module.exports.display = display
 +module.exports.TIMEOUT = TIMEOUT
 +module.exports.GRACE = GRACE
 +module.exports.DRAIN = DRAIN
@@ -885,11 +1095,116 @@ index 1ab9bba..93b2f0b 100644
 +      /`tokenHelper` is ignored in project config/)
 +  })
 +})
+diff --git a/test/lib/commands/login.js b/test/lib/commands/login.js
+index 623bc58..66f51f5 100644
+--- a/test/lib/commands/login.js
++++ b/test/lib/commands/login.js
+@@ -41,6 +41,48 @@ t.test('usage', async t => {
+   t.match(login.usage, 'login', 'usage has command name in it')
+ })
+ 
++t.test('tokenHelper refuses instead of saving a token it would shadow', async t => {
++  const helper = require('../../fixtures/token-helper')
++  const { login, rc } = await mockLogin(t, {
++    config: { 'auth-type': 'web' },
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++  })
++  // nothing is mocked on the registry: any request would fail the test
++  await t.rejects(login.exec([]), {
++    code: 'ETOKENHELPER',
++    message: `credentials for https://registry.npmjs.org/ come from the tokenHelper ${JSON.stringify(helper)}; ` +
++      'log in through the tool behind the helper, or remove the helper setting first',
++  })
++  t.same(rc(), { '//registry.npmjs.org/:tokenHelper': helper }, 'no token is saved')
++})
++
++t.test('tokenHelper that is not a file is not shown', async t => {
++  // a pasted base64 token has a `/` in it, and passes for a path
++  const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
++  const { login } = await mockLogin(t, {
++    config: { 'auth-type': 'web' },
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${pasted}\n` },
++  })
++  await t.rejects(login.exec([]), {
++    code: 'ETOKENHELPER',
++    message: 'credentials for https://registry.npmjs.org/ come from the tokenHelper configured as ' +
++      '"//registry.npmjs.org/:tokenHelper" (the value is not shown); ' +
++      'log in through the tool behind the helper, or remove the helper setting first',
++  })
++})
++
++t.test('tokenHelper on a scoped registry refuses a scoped login', async t => {
++  const helper = require('../../fixtures/token-helper')
++  const { login } = await mockLogin(t, {
++    config: { 'auth-type': 'web', scope: '@npmcli' },
++    homeDir: { '.npmrc': `@npmcli:registry=https://scoped.example/\n//scoped.example/:tokenHelper=${helper}\n` },
++  })
++  await t.rejects(login.exec([]), {
++    code: 'ETOKENHELPER',
++    message: /^credentials for https:\/\/scoped\.example\/ come from the tokenHelper/,
++  })
++})
++
+ t.test('legacy', t => {
+   t.test('basic login', async t => {
+     const { npm, registry, login, rc } = await mockLogin(t, {
+diff --git a/test/lib/commands/logout.js b/test/lib/commands/logout.js
+index b18b84c..a08489a 100644
+--- a/test/lib/commands/logout.js
++++ b/test/lib/commands/logout.js
+@@ -152,3 +152,47 @@ t.test('token logout - project config', async t => {
+   const projectRc = await fs.readFile(join(prefix, '.npmrc'), 'utf-8')
+   t.equal(projectRc.trim(), 'fund=true', 'removes project config')
+ })
++
++t.test('tokenHelper logout explains instead of claiming no login', async t => {
++  const helper = require('../../fixtures/token-helper')
++  const { npm, home } = await loadMockNpm(t, {
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++  })
++
++  await t.rejects(npm.exec('logout', []), {
++    code: 'ETOKENHELPER',
++    message: `credentials for https://registry.npmjs.org/ come from the tokenHelper ${JSON.stringify(helper)}; ` +
++      'remove "//registry.npmjs.org/:tokenHelper" from your user config to stop using it',
++  })
++  const userRc = await fs.readFile(join(home, '.npmrc'), 'utf-8')
++  t.match(userRc, /:tokenHelper=/, 'the helper setting is left alone')
++})
++
++t.test('tokenHelper logout does not show a value that is not a file', async t => {
++  const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
++  const { npm } = await loadMockNpm(t, {
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${pasted}\n` },
++  })
++  await t.rejects(npm.exec('logout', []), {
++    code: 'ETOKENHELPER',
++    message: 'credentials for https://registry.npmjs.org/ come from the tokenHelper configured as ' +
++      '"//registry.npmjs.org/:tokenHelper" (the value is not shown); ' +
++      'remove "//registry.npmjs.org/:tokenHelper" from your user config to stop using it',
++  })
++})
++
++t.test('tokenHelper logout names a token stored beside the helper', async t => {
++  const helper = require('../../fixtures/token-helper')
++  const { npm, home } = await loadMockNpm(t, {
++    homeDir: {
++      '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n//registry.npmjs.org/:_authToken=stale\n`,
++    },
++  })
++
++  await t.rejects(npm.exec('logout', []), {
++    code: 'ETOKENHELPER',
++    message: /A token is also stored as "\/\/registry\.npmjs\.org\/:_authToken" in your user config; it is not used while the helper is configured and was not revoked$/,
++  })
++  const userRc = await fs.readFile(join(home, '.npmrc'), 'utf-8')
++  t.match(userRc, /:_authToken=stale/, 'nothing is deleted')
++})
 diff --git a/test/lib/commands/publish.js b/test/lib/commands/publish.js
-index 9ddca28..a2ae1ee 100644
+index 9ddca28..a2381bc 100644
 --- a/test/lib/commands/publish.js
 +++ b/test/lib/commands/publish.js
-@@ -2103,3 +2103,36 @@ t.test('passes script-shell config to lifecycle hooks', async t => {
+@@ -2103,3 +2103,53 @@ t.test('passes script-shell config to lifecycle hooks', async t => {
      t.equal(rs?.scriptShell, '/bin/bash', `${event} receives scriptShell`)
    }
  })
@@ -926,11 +1241,28 @@ index 9ddca28..a2ae1ee 100644
 +    'publish Ignoring publishConfig "//registry.npmjs.org/:tokenHelper": tokenHelper may only be set in user or global config.',
 +  ])
 +})
++
++t.test('a publishConfig route setting is refused for a registry that has a tokenHelper', async t => {
++  const helper = require('../../fixtures/token-helper')
++  for (const [key, value] of [['proxy', 'http://project-proxy:3128'], ['strict-ssl', false]]) {
++    t.test(key, async t => {
++      const packageJson = { ...pkgJson, publishConfig: { [key]: value } }
++      const { npm } = await loadNpmWithRegistry(t, {
++        homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++        prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
++      })
++      await t.rejects(npm.exec('publish', []), {
++        code: 'ETOKENHELPER',
++        message: new RegExp(`was not run.*"publishConfig\\.${key}".*remove it from publishConfig`),
++      }, 'nothing is requested, and the helper is not run')
++    })
++  }
++})
 diff --git a/test/lib/commands/unpublish.js b/test/lib/commands/unpublish.js
-index 4c8bc5e..6034ae8 100644
+index 4c8bc5e..b5ac4f6 100644
 --- a/test/lib/commands/unpublish.js
 +++ b/test/lib/commands/unpublish.js
-@@ -651,3 +651,32 @@ t.test('completion', async t => {
+@@ -651,3 +651,51 @@ t.test('completion', async t => {
      })
    })
  })
@@ -963,6 +1295,25 @@ index 4c8bc5e..6034ae8 100644
 +    'unpublish Ignoring publishConfig "//registry.npmjs.org/:tokenHelper": tokenHelper may only be set in user or global config.',
 +  ])
 +})
++
++t.test('a publishConfig route setting is refused for a registry that has a tokenHelper', async t => {
++  const helper = require('../../fixtures/token-helper')
++  const { npm } = await loadMockNpm(t, {
++    config: { force: true },
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++    prefixDir: {
++      'package.json': JSON.stringify({
++        name: pkg,
++        version: '1.0.0',
++        publishConfig: { 'https-proxy': 'http://project-proxy:3128' },
++      }, null, 2),
++    },
++  })
++  await t.rejects(npm.exec('unpublish', []), {
++    code: 'ETOKENHELPER',
++    message: /was not run.*"publishConfig\.https-proxy".*remove it from publishConfig/,
++  }, 'nothing is requested, and the helper is not run')
++})
 diff --git a/test/lib/commands/whoami.js b/test/lib/commands/whoami.js
 index 8291b09..85b4e2d 100644
 --- a/test/lib/commands/whoami.js
@@ -983,10 +1334,10 @@ index 8291b09..85b4e2d 100644
 +  t.equal(joinedOutput(), username, 'asks the registry instead of refusing')
 +})
 diff --git a/test/lib/npm.js b/test/lib/npm.js
-index 0957baa..800706d 100644
+index 0957baa..1033bc9 100644
 --- a/test/lib/npm.js
 +++ b/test/lib/npm.js
-@@ -739,3 +739,38 @@ t.test('usage', async t => {
+@@ -739,3 +739,72 @@ t.test('usage', async t => {
      }
    })
  })
@@ -1025,20 +1376,58 @@ index 0957baa..800706d 100644
 +  })
 +  await npm.exec('config', ['list'])
 +})
++
++t.test('the token helper is not run over a route a project chose, and a credential for this run replaces it', async t => {
++  const helper = require('../fixtures/token-helper')
++  const homeDir = { '.npmrc': `//helper.example/:tokenHelper=${helper}\n` }
++  const regKey = '//helper.example/'
++  const uri = 'https://helper.example/pkg'
++  const projectProxy = { '.npmrc': 'proxy=http://project-proxy:3128\n' }
++
++  t.test('a proxy in the project', async t => {
++    const { npm } = await loadMockNpm(t, { homeDir, prefixDir: projectProxy })
++    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
++      code: 'ETOKENHELPER',
++      message: /"proxy" comes from .*\.npmrc.*remove it from the project's \.npmrc/,
++    })
++  })
++
++  t.test('a proxy on the command line is the user\'s own', async t => {
++    const { npm } = await loadMockNpm(t, { homeDir, prefixDir: projectProxy, config: { proxy: 'http://my-proxy:3128' } })
++    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), 'Bearer test-helper-token')
++  })
++
++  t.test('plain http', async t => {
++    const { npm } = await loadMockNpm(t, { homeDir })
++    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: 'http://helper.example/pkg' }),
++      { code: 'ETOKENHELPER', message: /not sent over plain http to helper\.example; use https/ })
++  })
++
++  t.test('a token on the command line', async t => {
++    const { npm } = await loadMockNpm(t, { homeDir, config: { '//helper.example/:_authToken': 'cli-token' } })
++    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), undefined, 'is used instead of the helper')
++    t.same(npm.config.getCredentialsByURI('https://helper.example/'), { token: 'cli-token' },
++      'and the commands that read the credentials agree')
++  })
++})
 diff --git a/test/lib/utils/oidc.js b/test/lib/utils/oidc.js
-index 72f7726..6bdb5cf 100644
+index 72f7726..0809669 100644
 --- a/test/lib/utils/oidc.js
 +++ b/test/lib/utils/oidc.js
-@@ -237,3 +237,28 @@ t.test('does not copy package-specific fallback options into the next package',
+@@ -237,3 +237,33 @@ t.test('does not copy package-specific fallback options into the next package',
    t.equal(firstOpts[authTokenKey], 'package-specific-token')
    t.equal(nextOpts[authTokenKey], fallbackToken)
  })
 +
-+t.test('a configured tokenHelper is masked while the OIDC token is in use', async t => {
++t.test('an OIDC token is used instead of a configured tokenHelper, and the helper is back without it', async t => {
 +  const helperKey = '//registry.npmjs.org/:tokenHelper'
-+  const helper = '/usr/local/bin/token'
++  const helper = require('../../fixtures/token-helper')
 +  const { npm, responses, run } = await setup(t)
 +  npm.config.set(helperKey, helper, 'user')
++  // what npm-registry-fetch asks for a request to the registry
++  const ask = () => npm.flatOptions.getAuthorization({
++    regKey: '//registry.npmjs.org/', uri: 'https://registry.npmjs.org/pkg',
++  })
 +  let exchangeOpts
 +  responses[0] = opts => {
 +    exchangeOpts = opts
@@ -1049,21 +1438,22 @@ index 72f7726..6bdb5cf 100644
 +  t.ok(Object.hasOwn(exchangeOpts, 'getAuthorization'), 'the exchange request names the option')
 +  t.equal(exchangeOpts.getAuthorization, undefined, 'and does not use the helper')
 +  t.equal(opts[authTokenKey], exchangeToken)
-+  t.equal(npm.config.get(helperKey), '', 'config reports no helper while the token is active')
-+  t.equal(npm.flatOptions.tokenHelpers['//registry.npmjs.org/'], '', 'so the function npm passes has none to run')
-+  t.equal(npm.config.get(helperKey, 'user'), helper, 'user config is never overwritten')
++  t.equal(npm.config.get(helperKey), helper, 'the helper is still configured')
++  t.equal(await ask(), undefined, 'but the function npm passes does not run it: the token in use is the credential')
++  t.same(npm.config.getCredentialsByURI('https://registry.npmjs.org/'), { token: exchangeToken },
++    'and the commands that read the credentials agree')
 +
 +  responses.push({})
 +  await run(opts)
-+  t.equal(npm.config.get(helperKey, 'cli'), undefined, 'the mask is removed with the token')
-+  t.equal(npm.flatOptions.tokenHelpers['//registry.npmjs.org/'], helper, 'and the helper is back')
++  t.equal(npm.config.get(authTokenKey, 'cli'), undefined, 'the token is removed')
++  t.equal(await ask(), 'Bearer test-helper-token', 'and the helper is back')
 +})
 diff --git a/test/lib/utils/publish-config.js b/test/lib/utils/publish-config.js
 new file mode 100644
-index 0000000..23452aa
+index 0000000..eb1fef2
 --- /dev/null
 +++ b/test/lib/utils/publish-config.js
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,89 @@
 +const t = require('tap')
 +const publishConfigOverrides = require('../../../lib/utils/publish-config.js')
 +
@@ -1090,12 +1480,75 @@ index 0000000..23452aa
 +  publishConfigOverrides(manifest, {}, 'publish', false)
 +  t.same(logs, [], 'no warning when asked not to')
 +})
++
++// a config as far as the check reads it: token helpers by registry key, stored
++// values, and what the command line or environment gives
++const configFor = ({ helpers = { '//r.example/': '/usr/local/bin/token' }, stored = {}, given = {} } = {}) => ({
++  flat: { tokenHelpers: helpers },
++  get: key => stored[key],
++  credentialKeysFromCliOrEnv: key => given[key] || [],
++})
++
++t.test('a publishConfig route setting is refused for a registry that has a token helper', async t => {
++  const { refuseProjectRoute } = publishConfigOverrides
++  const refused = (overrides, config = configFor(), registry = 'https://r.example/') =>
++    t.throws(() => refuseProjectRoute(config, overrides, registry), { code: 'ETOKENHELPER' }, JSON.stringify(overrides))
++
++  for (const overrides of [
++    { proxy: 'http://p:1' },
++    { 'https-proxy': 'http://p:1' },
++    { ca: 'x' },
++    { cafile: '/repo/ca.pem' },
++    { 'strict-ssl': false },
++  ]) {
++    const [key] = Object.keys(overrides)
++    t.throws(() => refuseProjectRoute(configFor(), overrides, 'https://r.example/'), {
++      code: 'ETOKENHELPER',
++      message: new RegExp(`was not run.*"publishConfig\\.${key}".*remove it from publishConfig, ` +
++        'or set it on the command line, which overrides publishConfig'),
++    }, key)
++  }
++  t.throws(() => refuseProjectRoute(configFor(), { proxy: 'http://p:1', ca: 'x' }, 'https://r.example/'), {
++    message: /"publishConfig\.proxy", "publishConfig\.ca"; remove them from publishConfig, or set them on the command line/,
++  }, 'every setting is named')
++
++  refused({ proxy: 'http://p:1' }, configFor({ helpers: { '//r.example/': '/usr/local/bin/token' } }), 'https://r.example/pkg/')
++  refused({ proxy: 'http://p:1' }, configFor({ helpers: { '//r.example/': '/usr/local/bin/token' } }), 'https://r.example/npm/sub/')
++  t.throws(() => refuseProjectRoute(configFor(), { proxy: 'http://p:1' }, 'https://r.example/'),
++    { message: /Token helper configured as "\/\/r\.example\/:tokenHelper" \(the value is not shown\)/ },
++    'a helper value that is not a file is not printed')
++})
++
++t.test('a publishConfig route setting is allowed where no token helper would run', async t => {
++  const { refuseProjectRoute } = publishConfigOverrides
++  const ok = (name, overrides, config, registry = 'https://r.example/') =>
++    t.doesNotThrow(() => refuseProjectRoute(config, overrides, registry), name)
++
++  ok('no token helper at all', { proxy: 'http://p:1' }, { flat: {}, get: () => undefined })
++  ok('a helper for another registry', { proxy: 'http://p:1' }, configFor(), 'https://other.example/')
++  ok('nothing about the route', { tag: 'next', registry: 'https://r.example/' }, configFor())
++  ok('strict-ssl left on', { 'strict-ssl': true }, configFor())
++  ok('null settings are the default', { proxy: null, ca: null, cafile: undefined }, configFor())
++  ok('a credential given for this run replaces the helper', { proxy: 'http://p:1' },
++    configFor({ given: { '//r.example/': ['//r.example/:_authToken'] } }))
++  ok('a token stored under a longer key is used instead', { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:_authToken': 't' } }),
++    'https://r.example/npm/')
++  ok('so is _auth, or a username and password',
++    { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:_auth': 't' } }), 'https://r.example/npm/')
++  ok('a username and password', { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:username': 'u', '//r.example/npm/:_password': 'p' } }),
++    'https://r.example/npm/')
++  ok('a key set on the command line is not in what applies', publishConfigOverrides(
++    { publishConfig: { proxy: 'http://p:1' } }, { proxy: 'http://mine:1' }, 'publish', false), configFor())
++})
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
 new file mode 100644
-index 0000000..f7c2488
+index 0000000..703b9bc
 --- /dev/null
 +++ b/test/lib/utils/token-helper.js
-@@ -0,0 +1,657 @@
+@@ -0,0 +1,764 @@
 +const t = require('tap')
 +const { EventEmitter } = require('node:events')
 +const { PassThrough } = require('node:stream')
@@ -1155,9 +1608,14 @@ index 0000000..f7c2488
 +
 +const load = (t, spawn) => t.mock('../../../lib/utils/token-helper.js', { '@npmcli/promise-spawn': spawn })
 +
-+const configOf = (tokenHelpers, stored = {}) => ({
++// `transport` is what config.tokenHelperProjectTransport reports, and `given`
++// the keys of the registry that config.credentialKeysFromCliOrEnv reports; the
++// config tests make both from real layers
++const configOf = (tokenHelpers, stored = {}, { transport = [], given = [] } = {}) => ({
 +  flat: { tokenHelpers },
 +  get: (key) => stored[key],
++  tokenHelperProjectTransport: transport,
++  credentialKeysFromCliOrEnv: () => given,
 +})
 +
 +// the function npm passes to npm-registry-fetch, for one registry
@@ -1167,10 +1625,12 @@ index 0000000..f7c2488
 +  startEnv = {},
 +  stored,
 +  limits,
++  config,
 +} = {}) => {
 +  const { spawn, calls } = fakeSpawn(script)
 +  const make = load(t, spawn)
-+  const getAuthorization = make(configOf({ [REG]: helper }, stored), startEnv, platform, limits)
++  const getAuthorization = make(
++    configOf({ [REG]: helper }, stored, config), startEnv, platform, limits)
 +  return { getAuthorization, calls, make }
 +}
 +
@@ -1449,7 +1909,7 @@ index 0000000..f7c2488
 +  t.same(text(logs, 'warn'), [])
 +
 +  const two = fakeSpawn(({ finish }) => finish('x'))
-+  const getTwo = load(t, two.spawn)({ flat: { tokenHelpers: { '//a/': HELPER, '//b/': HELPER } }, get: () => undefined }, {})
++  const getTwo = load(t, two.spawn)(configOf({ '//a/': HELPER, '//b/': HELPER }), {})
 +  await Promise.all([getTwo({ regKey: '//a/' }), getTwo({ regKey: '//b/' })])
 +  t.equal(two.calls.length, 2, 'each registry runs its own')
 +
@@ -1464,7 +1924,7 @@ index 0000000..f7c2488
 +  const logs = logsOf(t)
 +  const { spawn, calls } = fakeSpawn(printing('tok'))
 +  const make = load(t, spawn)
-+  t.equal(await make({ flat: {}, get: () => undefined }, {})({ regKey: REG }), undefined, 'no helpers at all')
++  t.equal(await make(configOf(undefined), {})({ regKey: REG }), undefined, 'no helpers at all')
 +  t.equal(await make(configOf({ [REG]: HELPER }), {})({ regKey: '//other.registry/' }), undefined, 'another registry')
 +  t.equal(await make(configOf({ [REG]: '' }), {})({ regKey: REG }), undefined, 'an OIDC token in use masks the helper')
 +  t.equal(calls.length, 0)
@@ -1501,6 +1961,106 @@ index 0000000..f7c2488
 +  const none = logsOf(t)
 +  await setup(t, printing('tok')).getAuthorization({ regKey: REG })
 +  t.same(text(none, 'warn'), [], 'no stored credential, no warning')
++})
++
++t.test('the helper\'s credential is not sent over plain http, except to this machine', async t => {
++  const { getAuthorization, calls } = setup(t, printing('tok'))
++  for (const uri of [
++    'http://helper.registry/pkg',
++    'http://helper.registry:8080/pkg/-/pkg-1.0.0.tgz',
++    'http://192.168.0.5/pkg',
++    'http://[::2]/pkg',
++    'http://localhost.example/pkg',
++  ]) {
++    await t.rejects(getAuthorization({ regKey: REG, uri }), {
++      code: 'ETOKENHELPER',
++      message: new RegExp(`credential is not sent over plain http to ${new URL(uri).hostname.replace(/[[\].]/g, '\\$&')}; use https`),
++    }, uri)
++  }
++  t.equal(calls.length, 0, 'a refusal does not start the program')
++
++  for (const uri of [
++    'http://localhost/pkg',
++    'http://localhost:4873/pkg',
++    'http://127.0.0.1:4873/pkg',
++    'http://127.12.0.9/pkg',
++    'http://[::1]:4873/pkg',
++  ]) {
++    t.equal(await getAuthorization({ regKey: REG, uri }), 'Bearer tok', uri)
++  }
++  t.equal(calls.length, 1, 'loopback http is allowed, and runs the helper once')
++
++  t.equal(await getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), 'Bearer tok',
++    'https is allowed, and the answer of a loopback request is cached')
++  await t.rejects(getAuthorization({ regKey: REG, uri: 'http://helper.registry/pkg' }), { code: 'ETOKENHELPER' },
++    'the answer is not what lets plain http through: the check is made for every request')
++  t.equal(calls.length, 1)
++
++  const failing = setup(t, ({ fail }) => fail({ code: 2 }))
++  await t.rejects(failing.getAuthorization({ regKey: REG, uri: 'http://helper.registry/pkg' }), { message: /plain http/ })
++  await t.rejects(failing.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), { helperExitCode: 2 },
++    'a refusal is not cached under the registry key: the https URL of the same host still runs the helper')
++})
++
++t.test('the helper\'s credential is not sent over a route that a project chose', async t => {
++  const FILE = join('proj', '.npmrc')
++  const refused = (key, source = FILE) => ({ transport: [{ key, source }] })
++  for (const key of ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']) {
++    const { getAuthorization, calls } = setup(t, printing('tok'), { config: refused(key) })
++    await t.rejects(getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), {
++      code: 'ETOKENHELPER',
++      message: new RegExp(`"${key}" comes from ${FILE.replace('\\', '\\\\')}.*remove it from the project's .npmrc, ` +
++        'or set it on the command line or in the environment, which override project config'),
++    }, key)
++    t.equal(calls.length, 0, `${key}: the helper is not run`)
++  }
++
++  const { getAuthorization, calls } = setup(t, printing('tok'), {
++    config: { transport: [{ key: 'proxy', source: 'a.npmrc' }, { key: 'ca', source: 'b.npmrc' }] },
++  })
++  await t.rejects(getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }),
++    { message: /"proxy" comes from a.npmrc, "ca" comes from b.npmrc/ }, 'every setting is named')
++  t.equal(calls.length, 0)
++
++  const clear = setup(t, printing('tok'), { config: { transport: [] } })
++  t.equal(await clear.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), 'Bearer tok',
++    'nothing from a project: the helper runs')
++  const other = setup(t, printing('tok'), { config: refused('proxy') })
++  t.equal(await other.getAuthorization({ regKey: '//other.registry/', uri: 'https://other.registry/pkg' }), undefined,
++    'a registry without a helper has no credential to protect')
++})
++
++t.test('a credential from the command line or the environment is used instead of the helper, with one warning per registry', async t => {
++  const logs = logsOf(t)
++  const { getAuthorization, calls } = setup(t, printing('tok'), {
++    config: { transport: [{ key: 'proxy', source: 'a.npmrc' }], given: [`${REG}:_authToken`] },
++  })
++  for (let i = 0; i < 3; i++) {
++    t.equal(await getAuthorization({ regKey: REG, uri: 'http://helper.registry/pkg' }), undefined,
++      'the stored credential is used: the helper is not run, nor is its route checked')
++  }
++  t.equal(calls.length, 0)
++  t.same(text(logs, 'warn'), [
++    `token-helper ${REG}:tokenHelper is not used for ${REG}: the command line or environment sets ${REG}:_authToken`,
++  ], 'one warning, naming the key')
++
++  const pair = logsOf(t)
++  const both = setup(t, printing('tok'), { config: { given: [`${REG}:username`, `${REG}:_password`] } })
++  t.equal(await both.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), undefined)
++  t.same(text(pair, 'warn'), [
++    `token-helper ${REG}:tokenHelper is not used for ${REG}: ` +
++    `the command line or environment sets ${REG}:username and ${REG}:_password`,
++  ])
++
++  const file = logsOf(t)
++  const stored = setup(t, printing('tok'), { stored: { [`${REG}:_authToken`]: 'stale' }, config: { given: [] } })
++  t.equal(await stored.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), 'Bearer tok',
++    'a credential in a file still loses to the helper')
++  t.same(text(file, 'warn'), [`token-helper ${REG}:tokenHelper is used for ${REG}; the stored "${REG}:_authToken" is ignored`])
++
++  const own = setup(t, printing('tok'), { startEnv: { NPM_INTERNAL_TOKEN_HELPER_RUNNING: '1' }, config: { given: [`${REG}:_auth`] } })
++  t.equal(await own.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), undefined,
++    'a helper\'s own npm has no helper to refuse when the credential is given')
 +})
 +
 +t.test('the environment', async t => {
@@ -1780,24 +2340,23 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..88afaa1 100644
+index 37dfecf..6a25406 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
-@@ -4,7 +4,8 @@ const ini = require('ini')
- const nopt = require('nopt')
+@@ -5,6 +5,7 @@ const nopt = require('nopt')
  const { log, time } = require('proc-log')
  
--const { resolve, dirname, join } = require('node:path')
-+const { resolve, dirname, join, relative, isAbsolute, sep } = require('node:path')
-+const { realpathSync, statSync } = require('node:fs')
+ const { resolve, dirname, join } = require('node:path')
++const { realpathSync, statSync, existsSync } = require('node:fs')
  const { homedir } = require('node:os')
  const {
    readFile,
-@@ -20,8 +21,17 @@ const internalEnv = [
+@@ -20,8 +21,18 @@ const internalEnv = [
    'npm-version',
    'global-prefix',
    'local-prefix',
 +  'token-helper-untrusted',
++  'token-helper-project-transport',
  ]
  
 +const isFile = (name) => {
@@ -1811,7 +2370,7 @@ index 37dfecf..88afaa1 100644
  const fileExists = (...p) => stat(resolve(...p))
    .then((st) => st.isFile())
    .catch(() => false)
-@@ -64,6 +74,12 @@ class Config {
+@@ -64,6 +75,12 @@ class Config {
    // Entries: { where, key, baseKey, source }. `baseKey` is non-null only for scoped keys (e.g. `<nerfdart>:foo`) and holds the trailing segment.
    // `env` and `publishConfig` entries warn instead of error.
    #unknownConfigs = []
@@ -1824,7 +2383,7 @@ index 37dfecf..88afaa1 100644
  
    static get typeDefs () {
      return typeDefs
-@@ -645,6 +661,18 @@ class Config {
+@@ -645,6 +662,18 @@ class Config {
        conf.raw = obj
        outer: for (const [key, value] of Object.entries(obj)) {
          const k = envReplace(key, this.env)
@@ -1843,7 +2402,7 @@ index 37dfecf..88afaa1 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +706,53 @@ class Config {
+@@ -678,6 +707,53 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -1897,113 +2456,16 @@ index 37dfecf..88afaa1 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -795,8 +870,27 @@ class Config {
-       return
-     }
- 
-+    const found = await this.#walkLocalPrefix({ apply: true })
-+    if (found.prefix) {
-+      this.localPrefix = found.prefix
-+      this.localPackage = found.package
-+    }
-+    if (!this.localPrefix) {
-+      this.localPrefix = this.cwd
-+    }
-+  }
-+
-+  // The project directory found from the current directory by the usual walk
-+  // up the tree, as `{ prefix, package }` (`prefix` is null outside any
-+  // project). With `apply`, it also records a found workspace root in the
-+  // default layer and warns about a workspace's own .npmrc; without, it only
-+  // looks, so that a token helper's trust rule can ask where the project is
-+  // whatever `--prefix` says.
-+  async #walkLocalPrefix ({ apply = false } = {}) {
-     const cliWorkspaces = this.#get('workspaces', 'cli')
-     const isGlobal = this.#get('global') || this.#get('location') === 'global'
-+    let prefix = null
-+    let localPackage
- 
-     for (const p of walkUp(this.cwd)) {
-       // HACK: this is an option set in tests to stop the local prefix from being set
-@@ -807,22 +901,22 @@ class Config {
- 
-       const hasPackageJson = await fileExists(p, 'package.json')
- 
--      if (!this.localPrefix && (hasPackageJson || await dirExists(p, 'node_modules'))) {
--        this.localPrefix = p
--        this.localPackage = hasPackageJson
-+      if (!prefix && (hasPackageJson || await dirExists(p, 'node_modules'))) {
-+        prefix = p
-+        localPackage = hasPackageJson
- 
-         // if workspaces are disabled, or we're in global mode, return now
-         if (cliWorkspaces === false || isGlobal) {
--          return
-+          break
-         }
- 
-         // otherwise, continue the loop
-         continue
-       }
- 
--      if (this.localPrefix && hasPackageJson) {
-+      if (prefix && hasPackageJson) {
-         const pkgJson = require('@npmcli/package-json')
--        // if we already set localPrefix but this dir has a package.json
-+        // if we already found a prefix but this dir has a package.json
-         // then we need to see if `p` is a workspace root by reading its package.json
-         // however, if reading it fails then we should just move on
-         const { content: pkg } = await pkgJson.normalize(p).catch(() => ({ content: {} }))
-@@ -833,38 +927,121 @@ class Config {
-         const mapWorkspaces = require('@npmcli/map-workspaces')
-         const workspaces = await mapWorkspaces({ cwd: p, pkg })
-         for (const w of workspaces.values()) {
--          if (w === this.localPrefix) {
--            // see if there's a .npmrc file in the workspace, if so log a warning
--            if (await fileExists(this.localPrefix, '.npmrc')) {
--              log.warn('config', `ignoring workspace config at ${this.localPrefix}/.npmrc`)
--            }
-+          if (w === prefix) {
-+            if (apply) {
-+              // see if there's a .npmrc file in the workspace, if so log a warning
-+              if (await fileExists(prefix, '.npmrc')) {
-+                log.warn('config', `ignoring workspace config at ${prefix}/.npmrc`)
-+              }
- 
--            // set the workspace in the default layer, which allows it to be overridden easily
--            const { data } = this.data.get('default')
--            data.workspace = [this.localPrefix]
--            this.localPrefix = p
--            this.localPackage = hasPackageJson
--            log.info('config', `found workspace root at ${this.localPrefix}`)
-+              // set the workspace in the default layer, which allows it to be overridden easily
-+              const { data } = this.data.get('default')
-+              data.workspace = [prefix]
-+              log.info('config', `found workspace root at ${p}`)
-+            }
-             // we found a root, so we return now
--            return
-+            return { prefix: p, package: hasPackageJson }
-           }
-         }
-       }
-     }
- 
--    if (!this.localPrefix) {
--      this.localPrefix = this.cwd
--    }
-+    return { prefix, package: localPackage }
+@@ -858,13 +934,179 @@ class Config {
    }
  
--  loadUserConfig () {
-+  async loadUserConfig () {
-+    await this.#trustTokenHelpers('user')
+   loadUserConfig () {
++    this.#trustTokenHelpers('user')
      return this.#loadFile(this.#get('userconfig'), 'user')
    }
  
--  loadGlobalConfig () {
-+  async loadGlobalConfig () {
-+    await this.#trustTokenHelpers('global')
+   loadGlobalConfig () {
++    this.#trustTokenHelpers('global')
      return this.#loadFile(this.#get('globalconfig'), 'global')
    }
  
@@ -2015,7 +2477,7 @@ index 37dfecf..88afaa1 100644
 +  // applies them, after ${VAR} expansion: `user${UNSET?}config=` is
 +  // `userconfig`. A child npm inherits the chosen paths as environment values,
 +  // so its parent passes on which files it did not trust.
-+  async #trustTokenHelpers (where) {
++  #trustTokenHelpers (where) {
 +    const { raw } = this.data.get('project')
 +    const chosen = ['userconfig', 'globalconfig', 'prefix'].some(key =>
 +      Object.keys(raw).some(k => envReplace(k, this.env) === key))
@@ -2024,58 +2486,79 @@ index 37dfecf..88afaa1 100644
 +        'project config sets userconfig, globalconfig or prefix, so the file may not be the user\'s')
 +    } else if (this.#inheritedUntrusted().includes(where)) {
 +      this.#tokenHelperRefusals.set(where, 'the parent npm process did not trust it')
-+    } else if (await this.#chosenInsideProject(where)) {
-+      this.#tokenHelperRefusals.set(where,
-+        'its path was chosen on the command line or in the environment and lies inside the project')
 +    } else {
-+      this.#tokenHelperTrusted.add(where)
++      const inside = this.#chosenInsideProject(where)
++      if (inside) {
++        this.#tokenHelperRefusals.set(where,
++          'its path was chosen on the command line or in the environment and lies ' +
++          `inside ${inside.dir}, which holds ${inside.marker}: a repository can have written it. ` +
++          'Use the default path, ~/.npmrc, for the file (a link there does), ' +
++          'or move the tokenHelper line into the default user file')
++      } else {
++        this.#tokenHelperTrusted.add(where)
++      }
 +    }
 +  }
 +
 +  // The command line and the environment are not always the user's: a CI job
 +  // writes `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, and `npm ci --prefix
 +  // sub` makes `sub/etc/npmrc` the global file. A file whose path was chosen
-+  // there, and not left at its default, is not the user's own when it is inside
-+  // a project root, where the repository can have written it. The roots are the
-+  // project found from the current directory by the usual walk up the tree
-+  // whatever `--prefix` says (`npm --prefix client ci` run in the repository
-+  // root with a userconfig at the root), and `localPrefix` itself unless the
-+  // command is global (`npm -g --prefix ~/.npm-global` is the user's own).
-+  // The comparison is between real paths, so a link or a spelling cannot hide
-+  // the file. A file at its default path is never refused here: a home
-+  // directory that is the checkout (HOME=/app) is the user's own. A file that
-+  // does not exist has no key to refuse.
-+  async #chosenInsideProject (where) {
++  // there, and not left at its default, is not the user's own when it lies
++  // inside a project, where the repository can have written it. Where the
++  // project is comes from the file alone: its real path (so a link or a
++  // spelling cannot hide it) and each directory above it, from the file's own
++  // up to the filesystem root, the root included. A directory that holds a
++  // package.json or a .git (a file in a worktree or a submodule) is a
++  // project; node_modules is not a mark, a global prefix on Windows holds
++  // one. Nothing depends on the current directory, `--prefix`, `--global` or
++  // `location`, which project config can set. The walk stops at the home
++  // directory, which is never looked at: the user's own files are there or
++  // below it, and a stray package.json in home must not make them a project's.
++  // Returns the directory and the mark that made it a project, or null. A file
++  // that does not exist has no key to refuse.
++  //
++  // Limits, documented in the RFC: HOME set to the checkout (every tool
++  // trusts HOME, and the default user file is then the repository's own
++  // .npmrc, which is not "chosen"); aliases of one directory that a real path
++  // does not merge (a Linux bind mount, a Windows UNC administrative share of
++  // a local drive, a case-insensitive mount on Linux), which is why the
++  // comparison of identities stays retired; and a file chosen inside a
++  // git-managed dotfiles directory below home (~/.config with a .git), which
++  // is refused with the remedy.
++  #chosenInsideProject (where) {
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
 +    // asked of the raw input: a value for globalconfig is stored beneath every layer
 +    const chosen = keys.some(key => ['cli', 'env'].some(layer => this.data.get(layer).raw[key] !== undefined)) ||
 +      (where === 'global' && !!this.env.PREFIX)
 +    if (!chosen) {
-+      return false
++      return null
 +    }
 +    let file
 +    try {
 +      file = realpathSync.native(this.#get(where === 'user' ? 'userconfig' : 'globalconfig'))
 +    } catch {
-+      return false
++      return null
 +    }
-+    const roots = [(await this.#walkLocalPrefix()).prefix]
-+    if (!(this.#get('global') || this.#get('location') === 'global')) {
-+      roots.push(this.localPrefix)
++    let home = null
++    try {
++      home = realpathSync.native(this.home)
++    } catch {
++      // a home that is not there stops nothing
 +    }
-+    return roots.some(root => {
-+      if (!root) {
-+        return false
++    if (home && dirname(home) === home) {
++      home = null
++    }
++    for (const dir of walkUp(dirname(file))) {
++      if (dir === home) {
++        break
 +      }
-+      let real
-+      try {
-+        real = realpathSync.native(root)
-+      } catch {
-+        return false
++      for (const marker of ['package.json', '.git']) {
++        if (existsSync(join(dir, marker))) {
++          return { dir, marker }
++        }
 +      }
-+      const away = relative(real, file)
-+      return away === '' || !(away === '..' || away.startsWith('..' + sep) || isAbsolute(away))
-+    })
++    }
++    return null
 +  }
 +
 +  #inheritedUntrusted () {
@@ -2090,17 +2573,78 @@ index 37dfecf..88afaa1 100644
 +      (this.#tokenHelperSeen.has(where) || this.#inheritedUntrusted().includes(where)))
 +  }
 +
++  #inheritedProjectTransport () {
++    return (this.env.npm_config_token_helper_project_transport || '').split(',').filter(Boolean)
++  }
++
++  // The settings that choose where a request goes and whom it trusts, when a
++  // project chose them: `[{ key, source }]`, `source` being the .npmrc. A
++  // token helper's credential must not be sent over a route a repository chose.
++  // A parent npm exports its project config to a child as npm_config_* values,
++  // which the child reads as the user's own, so the parent lists the keys that
++  // came from the project (set-envs.js) and a listed key whose value is in the
++  // environment here counts as the project's still. Only strict-ssl=false is a
++  // choice; a null is the default. Empty when no token helper is configured and
++  // none was inherited, so that nothing is exported for anyone without one.
++  get tokenHelperProjectTransport () {
++    const inherited = this.#inheritedProjectTransport()
++    const configured = ['user', 'global'].some(where =>
++      this.#tokenHelperTrusted.has(where) && this.#tokenHelperSeen.has(where))
++    if (!inherited.length && !configured) {
++      return []
++    }
++    const found = []
++    for (const key of ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']) {
++      const value = this.get(key)
++      if (key === 'strict-ssl' ? value !== false : value === null || value === undefined) {
++        continue
++      }
++      const where = this.find(key)
++      if (where === 'project') {
++        found.push({ key, source: this.data.get('project').source })
++      } else if (where === 'env' && inherited.includes(key)) {
++        found.push({ key, source: 'the environment, where a parent npm put its project config' })
++      }
++    }
++    return found
++  }
++
++  // The keys under which a credential for `regKey` is set on the command line
++  // or in the environment, which a user wrote for this run, as opposed to a
++  // file: the token, or the `_auth` pair, or the username and password. They
++  // are the credential in use, and a token helper for the registry is not.
++  credentialKeysFromCliOrEnv (regKey) {
++    const set = (name) => !!this.get(`${regKey}:${name}`) &&
++      ['cli', 'env'].includes(this.find(`${regKey}:${name}`))
++    const keys = []
++    for (const name of ['_authToken', '_auth']) {
++      if (set(name)) {
++        keys.push(`${regKey}:${name}`)
++      }
++    }
++    // the pair counts when it is complete, wherever its other half is
++    if (this.get(`${regKey}:username`) && this.get(`${regKey}:_password`)) {
++      for (const name of ['username', '_password']) {
++        if (set(name)) {
++          keys.push(`${regKey}:${name}`)
++        }
++      }
++    }
++    return keys
++  }
++
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1153,14 @@ class Config {
+@@ -976,6 +1218,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
 +    // a helper supplies the credential at request time and, as in
-+    // npm-registry-fetch, takes precedence over a token stored beside it
++    // npm-registry-fetch, takes precedence over a token stored beside it in a
++    // file, but not over one given on the command line or in the environment
 +    const helperReg = this.get(`${nerfed}:tokenHelper`)
-+    if (helperReg) {
++    if (helperReg && !this.credentialKeysFromCliOrEnv(nerfed).length) {
 +      creds.tokenHelper = helperReg
 +      return creds
 +    }
@@ -2109,10 +2653,10 @@ index 37dfecf..88afaa1 100644
      if (tokenReg) {
        creds.token = tokenReg
 diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
-index 12719b5..0338354 100644
+index 12719b5..04dfd59 100644
 --- a/workspaces/config/lib/set-envs.js
 +++ b/workspaces/config/lib/set-envs.js
-@@ -93,6 +93,15 @@ const setEnvs = (config) => {
+@@ -93,6 +93,28 @@ const setEnvs = (config) => {
    // TODO this may not be the best away to persist these
    env.npm_config_global_prefix = config.globalPrefix
    env.npm_config_local_prefix = config.localPrefix
@@ -2125,14 +2669,36 @@ index 12719b5..0338354 100644
 +  } else {
 +    delete env.npm_config_token_helper_untrusted
 +  }
++  // The proxy, CA and strict-ssl settings that came from a project .npmrc are
++  // exported above as the user's own values, and a child npm with a token
++  // helper must know to refuse them; nothing is set unless a helper is
++  // configured. Nerf-darted keys (`//host/:_authToken`) are never exported
++  // above (envKey skips keys that start with `/`, `@` or `_`), so a token in a
++  // project file does not reach a child as an environment value that would
++  // beat the helper there.
++  const transport = (config.tokenHelperProjectTransport || []).map(({ key }) => key)
++  if (transport.length) {
++    env.npm_config_token_helper_project_transport = transport.join(',')
++  } else {
++    delete env.npm_config_token_helper_project_transport
++  }
    if (cliConf.editor) {
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..eddfa01 100644
+index 9f83d98..acd3b39 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
-@@ -2468,3 +2468,292 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -3,7 +3,7 @@ const t = require('tap')
+ const fs = require('node:fs')
+ const { readFileSync } = fs
+ const { homedir } = require('node:os')
+-const { resolve, join, dirname } = require('node:path')
++const { resolve, join, dirname, parse } = require('node:path')
+ 
+ // when running with `npm test` it adds environment variables that
+ // mess with the things we expect here, so delete all of those.
+@@ -2468,3 +2468,534 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2142,7 +2708,11 @@ index 9f83d98..eddfa01 100644
 +const HELPER = process.platform === 'win32' ? 'C:\\tools\\token.cmd' : '/usr/local/bin/token'
 +const helperIn = (flat, regKey) => flat.tokenHelpers?.[regKey]
 +
-+const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false } = {}) => {
++// `tree` adds to the fixture, `home` is the home directory relative to the
++// fixture (the fixture itself by default: the walk up from a chosen file stops
++// there, and so never reaches the repository that holds these tests), `cwd`
++// overrides the current directory
++const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false, tree = {}, home = '', cwd = null } = {}) => {
 +  const path = t.testdir({
 +    home: { '.npmrc': user },
 +    prefix: { etc: { npmrc: global } },
@@ -2156,6 +2726,7 @@ index 9f83d98..eddfa01 100644
 +    // a directory that is in no project
 +    outside: { 'x.npmrc': sub },
 +    'other.npmrc': `//other.registry/:tokenHelper=${HELPER}\n`,
++    ...tree,
 +  })
 +  const logs = []
 +  const logHandler = (...args) => logs.push(args)
@@ -2176,11 +2747,11 @@ index 9f83d98..eddfa01 100644
 +    // outside any project the walk up the tree would end in the repository
 +    // that holds these tests, unless it meets npm's own directory first
 +    npmPath: outside ? path : `${path}/npm`,
-+    env: Object.fromEntries(Object.entries({ HOME: `${path}/home`, ...env }).map(([k, v]) => [k, fill(v)])),
++    env: Object.fromEntries(Object.entries({ HOME: home ? `${path}/${home}` : path, ...env }).map(([k, v]) => [k, fill(v)])),
 +    argv: [process.execPath, __filename,
 +      ...(files ? [`--userconfig=${path}/home/.npmrc`, `--globalconfig=${path}/prefix/etc/npmrc`] : []),
 +      ...argv.map(fill)],
-+    cwd: `${path}/${outside ? 'outside' : inWorkspace ? 'project/packages/a' : 'project'}`,
++    cwd: `${path}/${cwd ?? (outside ? 'outside' : inWorkspace ? 'project/packages/a' : 'project')}`,
 +    excludeNpmCwd: true,
 +    shorthands,
 +    definitions,
@@ -2244,68 +2815,104 @@ index 9f83d98..eddfa01 100644
 +
 +t.test('a user or global file that the command line or the environment put inside the project is not trusted', async t => {
 +  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
-+  const refused = 'its path was chosen on the command line or in the environment and lies inside the project'
-+  for (const [name, options, where] of [
-+    ['--userconfig into the checkout', { argv: ['--userconfig=<path>/project/ci.npmrc'] }, 'user'],
++  const real = (path, ...parts) => fs.realpathSync.native(join(path, ...parts))
++  // the refusal names the directory that made it a project, and says what to do
++  const refusedFor = (path, dir, marker) => [
++    `lies inside ${real(path, dir)}, which holds ${marker}`,
++    'Use the default path, ~/.npmrc, for the file',
++    'or move the tokenHelper line into the default user file',
++  ]
++  const isRefused = (t, { config, warned, path }, where, dir, marker, what = 'no helper from the file') => {
++    t.notOk(helperIn(config.flat, '//helper.registry/'), what)
++    for (const part of refusedFor(path, dir, marker)) {
++      t.ok(warned.some(w => w.includes(part)), `reported: ${part}`)
++    }
++    t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
++  }
++  for (const [name, options, where, dir] of [
++    ['--userconfig into the checkout', { argv: ['--userconfig=<path>/project/ci.npmrc'] }, 'user', 'project'],
 +    ['NPM_CONFIG_USERCONFIG into the checkout, as a CI job writes it',
-+      { env: { npm_config_userconfig: '<path>/project/ci.npmrc' } }, 'user'],
++      { env: { npm_config_userconfig: '<path>/project/ci.npmrc' } }, 'user', 'project'],
 +    ['--userconfig=./ci.npmrc, a spelling that has to be resolved',
-+      { argv: ['--userconfig=<path>/project/sub/../ci.npmrc'] }, 'user'],
++      { argv: ['--userconfig=<path>/project/sub/../ci.npmrc'] }, 'user', 'project'],
 +    ['npm ci --prefix sub: the global file is sub/etc/npmrc',
-+      { argv: ['--prefix=<path>/project/sub'] }, 'global'],
-+    ['NPM_CONFIG_PREFIX into the checkout', { env: { npm_config_prefix: '<path>/project/sub' } }, 'global'],
-+    ['PREFIX into the checkout', { env: { PREFIX: '<path>/project/sub' } }, 'global'],
-+    ['--globalconfig into the checkout', { argv: ['--globalconfig=<path>/project/ci.npmrc'] }, 'global'],
++      { argv: ['--prefix=<path>/project/sub'] }, 'global', 'project'],
++    ['NPM_CONFIG_PREFIX into the checkout', { env: { npm_config_prefix: '<path>/project/sub' } }, 'global', 'project'],
++    ['PREFIX into the checkout', { env: { PREFIX: '<path>/project/sub' } }, 'global', 'project'],
++    ['--globalconfig into the checkout', { argv: ['--globalconfig=<path>/project/ci.npmrc'] }, 'global', 'project'],
 +  ]) {
 +    t.test(name, async t => {
-+      const { config, warned } = await loadHelperConfig(t, {
-+        project: '', sub: keyed, files: false, ...options,
-+      })
-+      t.notOk(helperIn(config.flat, '//helper.registry/'), 'no helper from the file')
-+      t.ok(warned.some(w => w.includes(refused)), 'reported')
-+      t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
++      const loaded = await loadHelperConfig(t, { project: '', sub: keyed, files: false, ...options })
++      isRefused(t, loaded, where, dir, 'package.json')
 +    })
 +  }
 +
 +  t.test('npm --prefix client ci from the repository root, with a userconfig at the root', async t => {
-+    const { config, warned } = await loadHelperConfig(t, {
++    const loaded = await loadHelperConfig(t, {
 +      files: false,
 +      sub: keyed,
 +      argv: ['--prefix=<path>/project/client'],
 +      env: { npm_config_userconfig: '<path>/project/ci.npmrc' },
 +    })
-+    t.notOk(helperIn(config.flat, '//helper.registry/'), 'the project is the one the walk finds, not --prefix')
-+    t.ok(warned.some(w => w.includes(refused)), 'reported')
++    isRefused(t, loaded, 'user', 'project', 'package.json')
 +  })
 +
-+  t.test('a global command: --prefix is the user\'s own, the project found from the cwd is not', async t => {
-+    const own = await loadHelperConfig(t, { files: false, global: keyed, argv: ['--global', '--prefix=<path>/prefix'] })
-+    t.equal(helperIn(own.config.flat, '//helper.registry/'), HELPER, 'npm -g --prefix outside the project')
-+    const inside = await loadHelperConfig(t, { files: false, sub: keyed, argv: ['--global', '--prefix=<path>/project/sub'] })
-+    t.notOk(helperIn(inside.config.flat, '//helper.registry/'), 'npm -g --prefix into the repository, run inside it')
-+    t.ok(inside.warned.some(w => w.includes(refused)))
++  t.test('a repository root with .git and no package.json', async t => {
++    const loaded = await loadHelperConfig(t, {
++      files: false,
++      tree: { repo: { '.git': {}, 'ci.npmrc': keyed, packages: { a: { 'package.json': '{}' } } } },
++      cwd: 'repo/packages/a',
++      argv: ['--userconfig=<path>/repo/ci.npmrc'],
++    })
++    isRefused(t, loaded, 'user', 'repo', '.git', 'a file at the root of the repository')
++  })
++
++  t.test('a .git that is a file: a worktree or a submodule', async t => {
++    const loaded = await loadHelperConfig(t, {
++      files: false,
++      tree: { worktree: { '.git': 'gitdir: ../main/.git/worktrees/w', 'ci.npmrc': keyed } },
++      argv: ['--userconfig=<path>/worktree/ci.npmrc'],
++    })
++    isRefused(t, loaded, 'user', 'worktree', '.git')
++  })
++
++  t.test('a nested package that no workspaces field names', async t => {
++    const loaded = await loadHelperConfig(t, {
++      files: false,
++      tree: { nested: { pkg: { 'package.json': '{}', 'ci.npmrc': keyed } } },
++      argv: ['--userconfig=<path>/nested/pkg/ci.npmrc'],
++    })
++    isRefused(t, loaded, 'user', 'nested/pkg', 'package.json', 'the package the file is in')
 +  })
 +
 +  t.test('a workspace of a monorepo: the root of the repository counts', async t => {
-+    const { config, warned } = await loadHelperConfig(t, {
++    const loaded = await loadHelperConfig(t, {
 +      files: false,
 +      sub: keyed,
 +      inWorkspace: true,
 +      env: { npm_config_userconfig: '<path>/project/ci.npmrc' },
 +    })
-+    t.notOk(helperIn(config.flat, '//helper.registry/'), 'a file at the root, run from a workspace')
-+    t.ok(warned.some(w => w.includes(refused)))
++    isRefused(t, loaded, 'user', 'project', 'package.json', 'a file at the root, run from a workspace')
 +  })
 +
-+  t.test('a current directory in no project: a chosen file is the user\'s', async t => {
-+    const { config } = await loadHelperConfig(t, {
-+      files: false, outside: true, user: keyed, argv: ['--userconfig=<path>/home/.npmrc'],
++  t.test('a global --prefix into the repository, from anywhere', async t => {
++    const inside = await loadHelperConfig(t, {
++      files: false, sub: keyed, argv: ['--global', '--prefix=<path>/project/sub'],
 +    })
-+    t.equal(helperIn(config.flat, '//helper.registry/'), HELPER)
-+    const inCwd = await loadHelperConfig(t, {
-+      files: false, outside: true, sub: keyed, argv: ['--userconfig=<path>/outside/x.npmrc'],
++    isRefused(t, inside, 'global', 'project', 'package.json', 'npm -g --prefix into the repository, run inside it')
++    const away = await loadHelperConfig(t, {
++      files: false, sub: keyed, outside: true, argv: ['--prefix=<path>/project/sub'],
 +    })
-+    t.notOk(helperIn(inCwd.config.flat, '//helper.registry/'), 'but a file in that directory itself is not: it is the root npm falls back to')
++    isRefused(t, away, 'global', 'project', 'package.json', 'the same from a current directory outside any project')
++  })
++
++  t.test('location=global in the project changes nothing', async t => {
++    for (const project of ['location=global\n', 'global=true\n']) {
++      const loaded = await loadHelperConfig(t, {
++        project, files: false, sub: keyed, env: { npm_config_userconfig: '<path>/project/ci.npmrc' },
++      })
++      isRefused(t, loaded, 'user', 'project', 'package.json', project.trim())
++    }
 +  })
 +
 +  t.test('a link from outside the project to a file inside it', async t => {
@@ -2318,17 +2925,88 @@ index 9f83d98..eddfa01 100644
 +    t.notOk(helperIn(config.flat, '//helper.registry/'), 'the real path is what counts')
 +  })
 +
-+  t.test('files outside the project, and a default path inside it, stay the user\'s', async t => {
-+    const outside = await loadHelperConfig(t, { user: keyed })
-+    t.equal(helperIn(outside.config.flat, '//helper.registry/'), HELPER, 'a chosen file outside the project')
++  t.test('a file that no project holds is the user\'s', async t => {
++    const dir = await loadHelperConfig(t, {
++      files: false, outside: true, sub: keyed, argv: ['--userconfig=<path>/outside/x.npmrc'],
++    })
++    t.equal(helperIn(dir.config.flat, '//helper.registry/'), HELPER, 'a directory without a mark, below home, in the current directory')
++    const chosen = await loadHelperConfig(t, { user: keyed, global: keyed })
++    t.equal(helperIn(chosen.config.flat, '//helper.registry/'), HELPER, 'both files, chosen outside the project')
++    t.same(chosen.config.tokenHelperUntrusted, [])
++    const sibling = await loadHelperConfig(t, {
++      files: false, sub: keyed, tree: { sibling: { 'ci.npmrc': keyed } }, argv: ['--userconfig=<path>/sibling/ci.npmrc'],
++    })
++    t.equal(helperIn(sibling.config.flat, '//helper.registry/'), HELPER, 'a directory next to the checkout, with no mark of its own')
 +    const missing = await loadHelperConfig(t, {
 +      files: false, user: keyed, argv: ['--userconfig=<path>/home/.npmrc', '--prefix=<path>/missing'],
 +    })
-+    t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there is no root')
-+    const home = await loadHelperConfig(t, { files: false, project: null, user: '', env: { HOME: '<path>/project' } })
-+    t.same(home.config.tokenHelperUntrusted, [], 'a home directory that is the checkout')
++    t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there holds no file to refuse')
++    const absent = await loadHelperConfig(t, { files: false, argv: ['--userconfig=<path>/project/absent.npmrc'] })
++    t.same(absent.config.tokenHelperUntrusted, [], 'a file that is not there has no key to refuse')
++  })
++
++  t.test('npm -g --prefix with node_modules only', async t => {
++    const { config } = await loadHelperConfig(t, {
++      files: false,
++      tree: { npmglobal: { node_modules: {}, etc: { npmrc: keyed } } },
++      argv: ['--global', '--prefix=<path>/npmglobal'],
++    })
++    t.equal(helperIn(config.flat, '//helper.registry/'), HELPER, 'node_modules is no mark')
++  })
++
++  t.test('home is never looked at', async t => {
++    const tree = {
++      'package.json': '{}',
++      '.npmrc.work': keyed,
++      '.config': { npm: { npmrc: keyed } },
++    }
++    const inHome = await loadHelperConfig(t, { files: false, tree, argv: ['--userconfig=<path>/.npmrc.work'] })
++    t.equal(helperIn(inHome.config.flat, '//helper.registry/'), HELPER, 'a file directly in home')
++    const xdg = await loadHelperConfig(t, {
++      files: false, tree, env: { npm_config_userconfig: '<path>/.config/npm/npmrc' }, cwd: '.config',
++    })
++    t.equal(helperIn(xdg.config.flat, '//helper.registry/'), HELPER, 'a file in ~/.config/npm, from a current directory in ~/.config')
++    const tilde = await loadHelperConfig(t, {
++      files: false, tree, home: '.config', argv: ['--userconfig=<path>/.config/npm/npmrc'],
++    })
++    t.equal(helperIn(tilde.config.flat, '//helper.registry/'), HELPER, 'with a home that is itself a directory below another')
++  })
++
++  t.test('a git-managed dotfiles directory below home', async t => {
++    const loaded = await loadHelperConfig(t, {
++      files: false,
++      tree: { '.config': { '.git': {}, npm: { npmrc: keyed } } },
++      argv: ['--userconfig=<path>/.config/npm/npmrc'],
++    })
++    isRefused(t, loaded, 'user', '.config', '.git')
++  })
++
++  t.test('a home that is a root or is not there', async t => {
++    const tree = { top: { 'package.json': '{}', sub: { 'x.npmrc': keyed } } }
++    const root = await loadHelperConfig(t, {
++      files: false, tree, env: { HOME: parse(process.cwd()).root }, argv: ['--userconfig=<path>/top/sub/x.npmrc'],
++    })
++    t.notOk(helperIn(root.config.flat, '//helper.registry/'), 'the walk goes on to the project above the file')
++    const missing = await loadHelperConfig(t, {
++      files: false, tree: { 'package.json': '{}', ...tree }, home: 'nowhere', argv: ['--userconfig=<path>/top/sub/x.npmrc'],
++    })
++    t.notOk(helperIn(missing.config.flat, '//helper.registry/'))
++    const above = await loadHelperConfig(t, {
++      files: false, tree: { 'package.json': '{}', beyond: { 'x.npmrc': keyed } }, home: 'project', argv: ['--userconfig=<path>/beyond/x.npmrc'],
++    })
++    t.notOk(helperIn(above.config.flat, '//helper.registry/'), 'a file that is not below home is walked to the root')
++  })
++
++  t.test('a default path and a home that is the checkout', async t => {
++    const home = await loadHelperConfig(t, {
++      files: false,
++      project: null,
++      tree: { project: { 'package.json': '{}', '.npmrc': keyed } },
++      env: { HOME: '<path>/project' },
++    })
++    t.equal(helperIn(home.config.flat, '//helper.registry/'), HELPER, 'a home directory that is the checkout')
 +    const prefixOutside = await loadHelperConfig(t, { files: false, global: keyed, env: { npm_config_prefix: '<path>/prefix' } })
-+    t.same(prefixOutside.config.tokenHelperUntrusted, [], 'a prefix in the environment outside the project')
++    t.equal(helperIn(prefixOutside.config.flat, '//helper.registry/'), HELPER, 'a prefix in the environment outside the project')
 +  })
 +})
 +
@@ -2368,6 +3046,136 @@ index 9f83d98..eddfa01 100644
 +  })
 +  t.same(config.getCredentialsByURI('https://helper.registry/'), { tokenHelper: HELPER })
 +  t.same(config.getCredentialsByURI('https://plain.registry/'), { token: 'plain' })
++})
++
++t.test('getCredentialsByURI leaves out the tokenHelper for a credential given for this run', async t => {
++  const user = [
++    `//helper.registry/:tokenHelper=${HELPER}`,
++    '//helper.registry/:_authToken=stale',
++  ].join('\n')
++  const viaEnv = await loadHelperConfig(t, { user, env: { 'npm_config_//helper.registry/:_authToken': 'from-env' } })
++  t.same(viaEnv.config.getCredentialsByURI('https://helper.registry/'), { token: 'from-env' })
++  const viaCli = await loadHelperConfig(t, { user: `//helper.registry/:tokenHelper=${HELPER}`, argv: ['--//helper.registry/:_auth=Zm9vOmJhcg=='] })
++  t.match(viaCli.config.getCredentialsByURI('https://helper.registry/'), { username: 'foo', password: 'bar' })
++  t.notOk(viaCli.config.getCredentialsByURI('https://helper.registry/').tokenHelper)
++  const fileOnly = await loadHelperConfig(t, { user })
++  t.same(fileOnly.config.getCredentialsByURI('https://helper.registry/'), { tokenHelper: HELPER })
++})
++
++t.test('a credential on the command line or in the environment is reported, one in a file is not', async t => {
++  const REG = '//helper.registry/'
++  const keyed = `${REG}:tokenHelper=${HELPER}\n`
++  const keysOf = async (options) => (await loadHelperConfig(t, { user: keyed, ...options }))
++    .config.credentialKeysFromCliOrEnv(REG)
++  t.same(await keysOf({}), [], 'nothing')
++  t.same(await keysOf({ user: `${keyed}${REG}:_authToken=stale\n${REG}:_auth=abc\n` }), [], 'a token and _auth in a file')
++  t.same(await keysOf({ user: `${keyed}${REG}:username=u\n${REG}:_password=cA==\n` }), [], 'a pair in a file')
++  t.same(await keysOf({ env: { [`npm_config_${REG}:_authToken`]: 'tok' } }), [`${REG}:_authToken`], 'a token in the environment')
++  t.same(await keysOf({ argv: [`--${REG}:_authToken=tok`] }), [`${REG}:_authToken`], 'a token on the command line')
++  t.same(await keysOf({ env: { [`npm_config_${REG}:_auth`]: 'abc' } }), [`${REG}:_auth`], '_auth in the environment')
++  t.same(await keysOf({ env: { [`npm_config_${REG}:_authToken`]: 'tok', [`npm_config_${REG}:_auth`]: 'abc' } }),
++    [`${REG}:_authToken`, `${REG}:_auth`], 'both')
++  t.same(await keysOf({ env: { [`npm_config_${REG}:username`]: 'u', [`npm_config_${REG}:_password`]: 'cA==' } }),
++    [`${REG}:username`, `${REG}:_password`], 'a pair in the environment')
++  t.same(await keysOf({ user: `${keyed}${REG}:_password=cA==\n`, env: { [`npm_config_${REG}:username`]: 'u' } }),
++    [`${REG}:username`], 'a pair whose halves are in a file and in the environment: the half that is not a file\'s')
++  t.same(await keysOf({ env: { [`npm_config_${REG}:username`]: 'u' } }), [], 'a username with no password is no credential')
++  t.same(await keysOf({ env: { 'npm_config_//other.registry/:_authToken': 'tok' } }), [], 'another registry')
++})
++
++t.test('a project\'s proxy, CA and strict-ssl are reported with their file, an override is not', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  const reported = async (options) => {
++    const { config, path } = await loadHelperConfig(t, { user: keyed, ...options })
++    return { found: config.tokenHelperProjectTransport, file: resolve(path, 'project', '.npmrc') }
++  }
++  for (const [key, line] of [
++    ['proxy', 'proxy=http://proxy.project:3128'],
++    ['https-proxy', 'https-proxy=http://proxy.project:3128'],
++    ['ca', 'ca=project-ca'],
++    ['cafile', 'cafile=<path>/project/ca.pem'],
++    ['strict-ssl', 'strict-ssl=false'],
++  ]) {
++    const { found, file } = await reported({ project: `${line}\n` })
++    t.same(found, [{ key, source: file }], `${key} from the project's .npmrc`)
++  }
++  const all = await reported({ project: 'proxy=http://p:1\nca=x\nstrict-ssl=false\n' })
++  t.same(all.found.map(({ key }) => key), ['proxy', 'ca', 'strict-ssl'], 'every setting')
++
++  t.same((await reported({ project: 'strict-ssl=true\n' })).found, [], 'strict-ssl=true is no choice')
++  t.same((await reported({ project: 'ca=null\nproxy=null\n' })).found, [], 'a null is the default')
++  t.same((await reported({ project: 'save=false\n' })).found, [], 'other project settings')
++  t.same((await reported({ project: 'proxy=http://p:1\n', env: { npm_config_proxy: 'http://mine:1' } })).found, [],
++    'the environment overrides the project')
++  t.same((await reported({ project: 'proxy=http://p:1\n', argv: ['--proxy=http://mine:1'] })).found, [],
++    'the command line overrides the project')
++  t.same((await reported({ project: 'strict-ssl=false\n', env: { npm_config_strict_ssl: 'true' } })).found, [],
++    'strict-ssl is overridden too')
++  t.same((await reported({ project: 'proxy=http://p:1\n', user: '' })).found, [],
++    'with no token helper nothing is reported, and so nothing is exported')
++  t.same((await reported({ project: 'proxy=http://p:1\nuserconfig=<path>/other.npmrc\n' })).found, [],
++    'with the only helper in a file project config chose, none is configured')
++  t.same((await reported({ user: `//u.registry/:tokenHelper=${HELPER}\n`, global: '', project: 'proxy=http://p:1\n' })).found.map(e => e.key),
++    ['proxy'], 'a helper for any registry')
++  t.same((await reported({ user: '', global: keyed, project: 'proxy=http://p:1\n' })).found.map(e => e.key),
++    ['proxy'], 'a helper in the global file')
++})
++
++t.test('a child npm treats what its parent took from a project as the project\'s', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  const marked = {
++    npm_config_token_helper_project_transport: 'proxy,strict-ssl',
++    npm_config_proxy: 'http://parent-project:3128',
++    npm_config_strict_ssl: 'false',
++    npm_config_ca: 'not-listed',
++  }
++  const { config } = await loadHelperConfig(t, { user: keyed, env: marked })
++  t.same(config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy', 'strict-ssl'],
++    'a listed key in the environment, and no other')
++  t.match(config.tokenHelperProjectTransport[0].source, /parent npm/, 'the source says where it came from')
++  t.same(config.getUnknownConfigs('env'), [], 'the marker is not unknown config')
++
++  const own = await loadHelperConfig(t, { user: keyed, env: marked, argv: ['--proxy=http://mine:1', '--strict-ssl'] })
++  t.same(own.config.tokenHelperProjectTransport, [], 'the command line overrides what was inherited')
++
++  const bare = await loadHelperConfig(t, { user: '', env: marked })
++  t.same(bare.config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy', 'strict-ssl'],
++    'a marked key is passed on even when this npm has no helper of its own')
++
++  const empty = await loadHelperConfig(t, { user: keyed, env: { npm_config_token_helper_project_transport: '', npm_config_proxy: 'http://user:1' } })
++  t.same(empty.config.tokenHelperProjectTransport, [], 'an environment proxy the parent did not list is the user\'s')
++})
++
++t.test('a project\'s proxy is passed to a child npm, which keeps refusing it', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  const parent = await loadHelperConfig(t, {
++    user: keyed,
++    project: 'proxy=http://project-proxy:3128\n//helper.registry/:_authToken=project-token\n',
++  })
++  const { env } = parent.config
++  t.equal(env.npm_config_proxy, 'http://project-proxy:3128', 'the project value is exported like any other')
++  t.equal(env.npm_config_token_helper_project_transport, 'proxy', 'with the list of what came from the project')
++  t.same(Object.keys(env).filter(key => /authtoken|helper\.registry/i.test(key)), [],
++    'a token in the project file is not exported, so it does not reach a child as an environment value')
++
++  const inherit = (from) => ({
++    npm_config_proxy: from.npm_config_proxy,
++    npm_config_token_helper_project_transport: from.npm_config_token_helper_project_transport,
++  })
++  const child = await loadHelperConfig(t, { user: keyed, project: null, env: inherit(env) })
++  t.same(child.config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy'], 'the child refuses it')
++  t.equal(child.config.env.npm_config_token_helper_project_transport, 'proxy', 'and passes the list on')
++  const grandchild = await loadHelperConfig(t, {
++    user: keyed, project: null, env: inherit(child.config.env),
++  })
++  t.same(grandchild.config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy'], 'so does the next one')
++
++  const own = await loadHelperConfig(t, { user: keyed, project: null, env: inherit(env), argv: ['--proxy=http://mine:1'] })
++  t.same(own.config.tokenHelperProjectTransport, [], 'a child that is given its own proxy does not')
++  t.notOk('npm_config_token_helper_project_transport' in own.config.env, 'and has nothing to pass on')
++
++  const plain = await loadHelperConfig(t, { user: '', project: 'proxy=http://project-proxy:3128\n' })
++  t.notOk('npm_config_token_helper_project_transport' in plain.config.env, 'nothing is exported without a token helper')
 +})
 +
 +t.test('pnpm-only tokenHelper forms get a pointer to the registry form and are not fatal', async t => {
@@ -2426,10 +3234,10 @@ index 9f83d98..eddfa01 100644
 +  'a publishConfig key, which has no file behind it, names a placeholder')
 +})
 diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
-index 9426265..e899208 100644
+index 9426265..a82ed55 100644
 --- a/workspaces/config/test/set-envs.js
 +++ b/workspaces/config/test/set-envs.js
-@@ -277,3 +277,28 @@ t.test('does not export persistent allow-scripts config', t => {
+@@ -277,3 +277,79 @@ t.test('does not export persistent allow-scripts config', t => {
    )
    t.end()
  })
@@ -2458,22 +3266,70 @@ index 9426265..e899208 100644
 +  t.notOk('npm_config_token_helper_untrusted' in env, 'cleared when every file was trusted')
 +  t.end()
 +})
++
++t.test('a child npm is told which project settings choose the route of a request, when a token helper is configured', t => {
++  const { definitions, defaults } = mockDefinitions(t)
++  const envConf = Object.create(defaults)
++  const cliConf = Object.create(envConf)
++  const make = (tokenHelperProjectTransport, env) => ({
++    env,
++    defaults,
++    definitions,
++    list: [cliConf, envConf],
++    globalPrefix,
++    localPrefix,
++    npmBin,
++    execPath,
++    tokenHelperProjectTransport,
++  })
++  const env = { npm_config_token_helper_project_transport: 'stale' }
++  setEnvs(make([{ key: 'proxy', source: 'a.npmrc' }], env))
++  t.equal(env.npm_config_token_helper_project_transport, 'proxy')
++  setEnvs(make([{ key: 'proxy', source: 'a.npmrc' }, { key: 'strict-ssl', source: 'a.npmrc' }, { key: 'ca', source: 'b' }], env))
++  t.equal(env.npm_config_token_helper_project_transport, 'proxy,strict-ssl,ca', 'every setting is passed on')
++  setEnvs(make([], env))
++  t.notOk('npm_config_token_helper_project_transport' in env, 'cleared when a project chose none, or no helper is configured')
++  setEnvs({ ...make([], env), tokenHelperProjectTransport: undefined })
++  t.notOk('npm_config_token_helper_project_transport' in env, 'and where the config has no such list')
++  t.end()
++})
++
++t.test('a nerf-darted credential in config is not exported, so it cannot reach a child as an environment value', t => {
++  const { definitions, defaults } = mockDefinitions(t)
++  const envConf = Object.create(defaults)
++  const cliConf = Object.create(envConf)
++  cliConf['//registry.example/:_authToken'] = 'project-token'
++  cliConf['//registry.example/:_auth'] = 'project-auth'
++  cliConf['//registry.example/:username'] = 'u'
++  cliConf['//registry.example/:tokenHelper'] = '/x'
++  cliConf['@scope:registry'] = 'https://registry.example/'
++  const env = {}
++  setEnvs({
++    env,
++    defaults,
++    definitions,
++    list: [cliConf, envConf],
++    globalPrefix,
++    localPrefix,
++    npmBin,
++    execPath,
++  })
++  t.same(Object.keys(env).filter(key => /registry|token|auth|username/i.test(key)), [])
++  t.end()
++})
 -- 
 2.52.0.windows.1
 
 
-From 8aa269a42f57dea9c89365fdfd00c2285bb9d4b8 Mon Sep 17 00:00:00 2001
+From dc1e20f6f1843a48bbbaa94492c058d6ac5f41aa Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
-Date: Thu, 22 Oct 2026 19:12:42 +0500
-Subject: [PATCH 2/2] feat: tell a user of a tokenHelper what to do in login,
- logout, profile and on a 401
+Date: Fri, 23 Oct 2026 11:03:27 +0500
+Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
+ a helper fails to start
 
-`npm login` refuses for a registry with a helper, since the token it saved would
-never be sent and its requests would carry the helper's credential; `npm logout`
-says that the setting has to be removed and names a token stored beside it
-without revoking it; `profile enable-2fa` says why it cannot work through a
-helper. Each names the helper only when its value is an existing file, and the
-config key otherwise.
+`profile enable-2fa` says why it cannot work through a helper. The message names
+the helper only when its value is an existing file, and the config key
+otherwise.
 
 A 401 from a registry that has a helper says that the registry refused the token
 the helper printed and to refresh the login or the cache of the tool behind it,
@@ -2485,21 +3341,17 @@ exit status 127 or 9009 says that a tool the script calls was not found and to
 give its absolute path, and a .ps1 or .js file on Windows, which Windows does
 not start directly, is refused with a pointer to a .cmd wrapper.
 ---
- docs/lib/content/configuring-npm/npmrc.md |  7 ++--
- lib/commands/login.js                     | 13 +++++++
- lib/commands/logout.js                    | 23 ++++++++++++
- lib/commands/profile.js                   |  9 +++++
- lib/utils/error-message.js                | 33 +++++++++++++++++
- lib/utils/token-helper.js                 | 40 ++++++++++++++++++++-
- test/lib/commands/login.js                | 42 ++++++++++++++++++++++
- test/lib/commands/logout.js               | 44 +++++++++++++++++++++++
- test/lib/commands/profile.js              | 11 ++++++
- test/lib/utils/error-message.js           | 26 ++++++++++++++
- test/lib/utils/token-helper.js            | 36 ++++++++++++++++++-
- 11 files changed, 280 insertions(+), 4 deletions(-)
+ docs/lib/content/configuring-npm/npmrc.md |  6 ++--
+ lib/commands/profile.js                   |  9 ++++++
+ lib/utils/error-message.js                | 33 +++++++++++++++++++
+ lib/utils/token-helper.js                 | 39 ++++++++++++++++++++++-
+ test/lib/commands/profile.js              | 11 +++++++
+ test/lib/utils/error-message.js           | 26 +++++++++++++++
+ test/lib/utils/token-helper.js            | 36 ++++++++++++++++++++-
+ 7 files changed, 156 insertions(+), 4 deletions(-)
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index e0994ae..2df50b0 100644
+index 69bac2f..3390c7f 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -125,7 +125,7 @@ For example, for AWS CodeArtifact, on Linux and macOS (`chmod +x` it):
@@ -2511,15 +3363,7 @@ index e0994ae..2df50b0 100644
  
  ```bat
  @echo off
-@@ -139,6 +139,7 @@ A registry that has both a `tokenHelper` and a stored `_authToken` uses the help
- It does not fall back to the stored token: a token left over from before the helper was set up has usually expired, and would answer 401 where the helper's would not.
- A token stored under a longer registry key than the helper's is the more specific credential and is used.
- While an OIDC trusted-publishing token is in use for a registry, it is sent instead of the helper's credential.
-+`npm login` refuses for a registry with a helper, and `npm logout` says that the setting has to be removed.
- 
- The helper is run the first time a request to that registry needs a credential, once per npm process, and its outcome is kept for the rest of the process: a failure is not retried either.
- Credentials are resolved before the cache is consulted, so the helper also runs for `--prefer-offline` and for a package the cache could have answered, and a failing helper fails every request to that registry, public packages included (a failure is visible, not a silent request without credentials).
-@@ -153,9 +154,11 @@ An `npm` that the helper itself runs finds the variable `NPM_INTERNAL_TOKEN_HELP
+@@ -155,9 +155,11 @@ An `npm` that the helper itself runs finds the variable `NPM_INTERNAL_TOKEN_HELP
  Lines the helper writes to standard error are shown as warnings when it fails and at `--loglevel verbose` when it works, with the token it printed replaced by `***`.
  
  If a request fails with `ETOKENHELPER`, run it again with `--loglevel verbose` to see the helper's output.
@@ -2531,80 +3375,7 @@ index e0994ae..2df50b0 100644
 +A request that the registry answers with 401 while a helper is configured says that the helper's token was refused, and to refresh the login or the cache of the tool behind it, not to run `npm login`.
  
  Because npm executes the program, `tokenHelper` is honored only from the per-user and global config files, and only when the repository did not choose them: the settings `userconfig`, `globalconfig` and `prefix` (compared after `${VAR}` expansion) must not be set in a project `.npmrc`, or the helper in those files is ignored with a warning.
- A user or global file whose path was chosen on the command line or in the environment (not left at its default) and whose real path lies inside the project (`npm ci --prefix sub`, `--userconfig ./ci.npmrc`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`) is ignored the same way, since the repository can have written it.
-diff --git a/lib/commands/login.js b/lib/commands/login.js
-index 630abf9..a8b07d3 100644
---- a/lib/commands/login.js
-+++ b/lib/commands/login.js
-@@ -2,6 +2,8 @@ const { log, output } = require('proc-log')
- const { redactLog: replaceInfo } = require('@npmcli/redact')
- const auth = require('../utils/auth.js')
- const BaseCommand = require('../base-cmd.js')
-+const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
-+const { display } = require('../utils/token-helper.js')
- 
- class Login extends BaseCommand {
-   static description = 'Login to a registry user account'
-@@ -26,6 +28,17 @@ class Login extends BaseCommand {
- 
-     const creds = this.npm.config.getCredentialsByURI(registry)
- 
-+    // a token saved by this login would never be sent while a helper supplies
-+    // the credential, and the login requests themselves would carry the
-+    // helper's credential
-+    if (creds.tokenHelper) {
-+      throw Object.assign(new Error(
-+        `credentials for ${replaceInfo(registry)} come from the tokenHelper ` +
-+        `${display(creds.tokenHelper, `${nerfDart(registry)}:tokenHelper`)}; ` +
-+        'log in through the tool behind the helper, or remove the helper setting first'
-+      ), { code: 'ETOKENHELPER' })
-+    }
-+
-     log.notice('', `Log in on ${replaceInfo(registry)}`)
- 
-     const { message, newCreds } = await auth.login(this.npm, {
-diff --git a/lib/commands/logout.js b/lib/commands/logout.js
-index dc5a0df..3046c08 100644
---- a/lib/commands/logout.js
-+++ b/lib/commands/logout.js
-@@ -1,7 +1,9 @@
- const npmFetch = require('npm-registry-fetch')
- const { getAuth } = npmFetch
- const { log } = require('proc-log')
-+const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
- const BaseCommand = require('../base-cmd.js')
-+const { display } = require('../utils/token-helper.js')
- 
- class Logout extends BaseCommand {
-   static description = 'Log out of the registry'
-@@ -17,6 +19,27 @@ class Logout extends BaseCommand {
-     const regRef = scope ? `${scope}:registry` : 'registry'
-     const reg = this.npm.config.get(regRef) || registry
- 
-+    // A helper hands out credentials on demand, so logging out means removing
-+    // the helper setting. A token stored beside it is not in use while the
-+    // helper is, and is named rather than revoked: revoking it would send the
-+    // helper's credential, and deleting it unasked could lose a token the
-+    // user still relies on elsewhere.
-+    const { tokenHelper } = this.npm.config.getCredentialsByURI(reg)
-+    if (tokenHelper) {
-+      const regKey = nerfDart(reg)
-+      const helperLevel = this.npm.config.find(`${regKey}:tokenHelper`)
-+      const tokenKey = `${regKey}:_authToken`
-+      const tokenLevel = this.npm.config.get(tokenKey) && this.npm.config.find(tokenKey)
-+      throw Object.assign(new Error(
-+        `credentials for ${reg} come from the tokenHelper ${display(tokenHelper, `${regKey}:tokenHelper`)}; ` +
-+        `remove "${regKey}:tokenHelper" from your ${helperLevel} config to stop using it` +
-+        (tokenLevel
-+          ? `. A token is also stored as "${tokenKey}" in your ${tokenLevel} config; ` +
-+            'it is not used while the helper is configured and was not revoked'
-+          : '')
-+      ), { code: 'ETOKENHELPER' })
-+    }
-+
-     const auth = getAuth(reg, this.npm.flatOptions)
- 
-     const level = this.npm.config.find(`${auth.regKey}:${auth.authKey}`)
+ A user or global file whose path was chosen on the command line or in the environment (not left at its default) is ignored the same way when it lies inside a project, since the repository can have written it.
 diff --git a/lib/commands/profile.js b/lib/commands/profile.js
 index 9417989..da206c4 100644
 --- a/lib/commands/profile.js
@@ -2677,10 +3448,10 @@ index 41e35bd..50a9152 100644
          // npm ERR! code E401
          // npm ERR! Unable to authenticate, need: Basic
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
-index abc5587..db2446a 100644
+index 796c3c4..7f848a5 100644
 --- a/lib/utils/token-helper.js
 +++ b/lib/utils/token-helper.js
-@@ -66,6 +66,9 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
+@@ -72,6 +72,9 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
    '(a shell script, or a .cmd file on Windows) and give the path of the script'
  const BARE_NAME = 'must be an absolute path: give the full path of the program ' +
    '(a bare name would be looked up on a PATH that a project can extend)'
@@ -2690,7 +3461,7 @@ index abc5587..db2446a 100644
  // `aws codeartifact get-authorization-token` is not a path, and neither is
  // `/usr/bin/aws codeartifact ...`; a real path with a space in it is. A path
  // with whitespace in it that does not exist is told apart by what comes before
-@@ -78,6 +81,9 @@ const refusal = (helper, platform) => {
+@@ -84,6 +87,9 @@ const refusal = (helper, platform) => {
      return typeof helper === 'string' && /\s/.test(helper) ? ARGUMENTS : BARE_NAME
    }
    if (platform === 'win32') {
@@ -2700,7 +3471,7 @@ index abc5587..db2446a 100644
      if (path.win32.dirname(helper).length > MAX_WIN_CWD) {
        return `is in a directory whose path is longer than ${MAX_WIN_CWD} characters, ` +
          'where Windows cannot start a program: move it to a shorter path'
-@@ -128,6 +134,31 @@ const toHeader = (label, stdout) => {
+@@ -134,6 +140,31 @@ const toHeader = (label, stdout) => {
    return /^[A-Za-z]+ /.test(token) ? token : `Bearer ${token}`
  }
  
@@ -2732,7 +3503,7 @@ index abc5587..db2446a 100644
  // Why the helper failed, in words for the user. For a failure to start the
  // message of the error is "spawn <path> ENOENT" and never contains output.
  const failure = (helper, label, err) => {
-@@ -136,12 +167,18 @@ const failure = (helper, label, err) => {
+@@ -142,12 +173,18 @@ const failure = (helper, label, err) => {
    let reason
    if (signal) {
      reason = `was killed by ${signal}`
@@ -2752,119 +3523,6 @@ index abc5587..db2446a 100644
    }
    return new TokenHelperError(label, reason, { helperExitCode: exitCode, signal })
  }
-@@ -402,6 +439,7 @@ module.exports = (
- }
- 
- module.exports.GUARD = GUARD
-+module.exports.display = display
- module.exports.TIMEOUT = TIMEOUT
- module.exports.GRACE = GRACE
- module.exports.DRAIN = DRAIN
-diff --git a/test/lib/commands/login.js b/test/lib/commands/login.js
-index 623bc58..66f51f5 100644
---- a/test/lib/commands/login.js
-+++ b/test/lib/commands/login.js
-@@ -41,6 +41,48 @@ t.test('usage', async t => {
-   t.match(login.usage, 'login', 'usage has command name in it')
- })
- 
-+t.test('tokenHelper refuses instead of saving a token it would shadow', async t => {
-+  const helper = require('../../fixtures/token-helper')
-+  const { login, rc } = await mockLogin(t, {
-+    config: { 'auth-type': 'web' },
-+    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
-+  })
-+  // nothing is mocked on the registry: any request would fail the test
-+  await t.rejects(login.exec([]), {
-+    code: 'ETOKENHELPER',
-+    message: `credentials for https://registry.npmjs.org/ come from the tokenHelper ${JSON.stringify(helper)}; ` +
-+      'log in through the tool behind the helper, or remove the helper setting first',
-+  })
-+  t.same(rc(), { '//registry.npmjs.org/:tokenHelper': helper }, 'no token is saved')
-+})
-+
-+t.test('tokenHelper that is not a file is not shown', async t => {
-+  // a pasted base64 token has a `/` in it, and passes for a path
-+  const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
-+  const { login } = await mockLogin(t, {
-+    config: { 'auth-type': 'web' },
-+    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${pasted}\n` },
-+  })
-+  await t.rejects(login.exec([]), {
-+    code: 'ETOKENHELPER',
-+    message: 'credentials for https://registry.npmjs.org/ come from the tokenHelper configured as ' +
-+      '"//registry.npmjs.org/:tokenHelper" (the value is not shown); ' +
-+      'log in through the tool behind the helper, or remove the helper setting first',
-+  })
-+})
-+
-+t.test('tokenHelper on a scoped registry refuses a scoped login', async t => {
-+  const helper = require('../../fixtures/token-helper')
-+  const { login } = await mockLogin(t, {
-+    config: { 'auth-type': 'web', scope: '@npmcli' },
-+    homeDir: { '.npmrc': `@npmcli:registry=https://scoped.example/\n//scoped.example/:tokenHelper=${helper}\n` },
-+  })
-+  await t.rejects(login.exec([]), {
-+    code: 'ETOKENHELPER',
-+    message: /^credentials for https:\/\/scoped\.example\/ come from the tokenHelper/,
-+  })
-+})
-+
- t.test('legacy', t => {
-   t.test('basic login', async t => {
-     const { npm, registry, login, rc } = await mockLogin(t, {
-diff --git a/test/lib/commands/logout.js b/test/lib/commands/logout.js
-index b18b84c..a08489a 100644
---- a/test/lib/commands/logout.js
-+++ b/test/lib/commands/logout.js
-@@ -152,3 +152,47 @@ t.test('token logout - project config', async t => {
-   const projectRc = await fs.readFile(join(prefix, '.npmrc'), 'utf-8')
-   t.equal(projectRc.trim(), 'fund=true', 'removes project config')
- })
-+
-+t.test('tokenHelper logout explains instead of claiming no login', async t => {
-+  const helper = require('../../fixtures/token-helper')
-+  const { npm, home } = await loadMockNpm(t, {
-+    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
-+  })
-+
-+  await t.rejects(npm.exec('logout', []), {
-+    code: 'ETOKENHELPER',
-+    message: `credentials for https://registry.npmjs.org/ come from the tokenHelper ${JSON.stringify(helper)}; ` +
-+      'remove "//registry.npmjs.org/:tokenHelper" from your user config to stop using it',
-+  })
-+  const userRc = await fs.readFile(join(home, '.npmrc'), 'utf-8')
-+  t.match(userRc, /:tokenHelper=/, 'the helper setting is left alone')
-+})
-+
-+t.test('tokenHelper logout does not show a value that is not a file', async t => {
-+  const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
-+  const { npm } = await loadMockNpm(t, {
-+    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${pasted}\n` },
-+  })
-+  await t.rejects(npm.exec('logout', []), {
-+    code: 'ETOKENHELPER',
-+    message: 'credentials for https://registry.npmjs.org/ come from the tokenHelper configured as ' +
-+      '"//registry.npmjs.org/:tokenHelper" (the value is not shown); ' +
-+      'remove "//registry.npmjs.org/:tokenHelper" from your user config to stop using it',
-+  })
-+})
-+
-+t.test('tokenHelper logout names a token stored beside the helper', async t => {
-+  const helper = require('../../fixtures/token-helper')
-+  const { npm, home } = await loadMockNpm(t, {
-+    homeDir: {
-+      '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n//registry.npmjs.org/:_authToken=stale\n`,
-+    },
-+  })
-+
-+  await t.rejects(npm.exec('logout', []), {
-+    code: 'ETOKENHELPER',
-+    message: /A token is also stored as "\/\/registry\.npmjs\.org\/:_authToken" in your user config; it is not used while the helper is configured and was not revoked$/,
-+  })
-+  const userRc = await fs.readFile(join(home, '.npmrc'), 'utf-8')
-+  t.match(userRc, /:_authToken=stale/, 'nothing is deleted')
-+})
 diff --git a/test/lib/commands/profile.js b/test/lib/commands/profile.js
 index 15c4d11..0081fa4 100644
 --- a/test/lib/commands/profile.js
@@ -2925,10 +3583,10 @@ index 44a57ec..5c1ca5f 100644
    const { errorMessage } = await loadMockNpm(t)
  
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
-index f7c2488..540cd09 100644
+index 703b9bc..4726cb8 100644
 --- a/test/lib/utils/token-helper.js
 +++ b/test/lib/utils/token-helper.js
-@@ -142,10 +142,18 @@ t.test('a failure names the helper, carries helperExitCode and signal and never
+@@ -149,10 +149,18 @@ t.test('a failure names the helper, carries helperExitCode and signal and never
    t.equal(await getAuthorization({ regKey: REG }).catch(e => e), er, 'the failure is cached')
  })
  
@@ -2948,7 +3606,7 @@ index f7c2488..540cd09 100644
    const noStart = setup(t, ({ fail }) => fail({ code: 'EACCES', message: 'spawn x EACCES' }))
    await t.rejects(noStart.getAuthorization({ regKey: REG }), { helperExitCode: null, message: /could not be run \(EACCES\): spawn x EACCES/ })
  
-@@ -160,6 +168,30 @@ t.test('a signal and a spawn error each say what happened', async t => {
+@@ -167,6 +175,30 @@ t.test('a signal and a spawn error each say what happened', async t => {
    await t.rejects(unnamed.getAuthorization({ regKey: REG }), { message: /could not be run: no code on this one$/ })
  })
  
@@ -2979,7 +3637,7 @@ index f7c2488..540cd09 100644
  t.test('values that are not an absolute path with no arguments say what to do', async t => {
    const dir = t.testdir({
      script: '#!/bin/sh\n',
-@@ -179,6 +211,8 @@ t.test('values that are not an absolute path with no arguments say what to do',
+@@ -186,6 +218,8 @@ t.test('values that are not an absolute path with no arguments say what to do',
    await refused(`${absolute('script')} --domain x`, /put the command in a two-line script/, HOST)
    await refused(`${join(absolute('dir with space'), 'script')} --domain x`, /two-line script/, HOST)
    await refused(`${absolute('missing')} --domain x`, /was not found/, HOST)

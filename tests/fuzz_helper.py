@@ -3,7 +3,7 @@
     python -m tests.fuzz_helper --prototype ../npm-cli [--seconds 60] [--seed N]
 
 A helper's stdout is the credential and its stderr is shown to the user, so
-three things are checked against the Python model and against what Phase 1a
+four things are checked against the Python model and against what Phase 1a
 says. The runner is npm/cli's lib/utils/token-helper.js, driven through the
 factory npm uses with a stub config (poc/helper-fuzz/bridge.js), with only the
 process replaced:
@@ -19,10 +19,19 @@ process replaced:
   absolute path, one with arguments, one that is not there. On Windows only
   the values with no whitespace are compared, since whether a path with
   whitespace in it is there depends on how Win32, Python and libuv each
-  normalize a name; Linux and macOS compare them all.
+  normalize a name; Linux and macOS compare them all;
+- `route`: what the runner does with a request before any program starts is what
+  the model (`token_helper_route_outcome`) says: the helper is not run when the
+  command line or the environment gave a credential, over plain `http:` to a host
+  that is not this machine (hosts written in the spellings a URL parser folds to
+  loopback, and ones that only look like it), or with a route setting a project
+  chose; otherwise it starts exactly once. The stub config says which of those
+  hold.
 
 What it does not look for is in "Limits" in phase-1-implementation.md: a
-credential that is encoded on purpose.
+credential that is encoded on purpose (the log check is for the exact token only),
+and what no stub config reaches, which files are the user's and where a setting came
+from: npm's own tests cover those.
 
 Needs `node`. Exit status 1 if anything was found.
 """
@@ -38,7 +47,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.parse
 from typing import Any
 
 from tests.protocol_model import (
@@ -47,6 +55,7 @@ from tests.protocol_model import (
     TokenHelperFailure,
     check_token_helper_config,
     token_helper_header,
+    token_helper_route_outcome,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,34 +101,22 @@ def decode(raw: bytes) -> str:
     return raw.decode("utf-8", "replace")
 
 
-def forms(secret: str) -> set[str]:
-    """The ways a helper that echoes its credential may write it: as JSON (both
-    ways, with a quote, a backslash or a control character escaped, and in
-    ASCII), inside a shell's single quotes (`set -x`) or double quotes, and
-    percent-encoded as a URL has it."""
-    return {
-        json.dumps(secret, ensure_ascii=ascii_)[1:-1] for ascii_ in (True, False)
-    } | {
-        secret.replace("'", "'\\''"),
-        re.sub(r'(["$`\\])', r"\\\1", secret),
-        urllib.parse.quote(secret, safe=""),
-    }
-
-
 def stderr_text(rng: random.Random, secret: str, bare: str) -> str:
-    """What a helper might say, with its own credential in it."""
+    """What a helper might say, with its own credential in it exactly as it
+    printed it (whole, as `{s}`, or without its scheme, as `{b}`): the one
+    thing npm hides. The credential in another form is not generated: a
+    helper that encodes it on purpose is not stopped and is not looked for."""
     templates = [
         "{s}", "{b}", "Authorization: {s}", "Authorization: Bearer {b}", "authorization={s}",
-        'curl -H "Authorization: {s}" https://r.test/', '{{"token":"{j}"}}', '{{"authorizationToken": "{j}"}}',
+        'curl -H "Authorization: {s}" https://r.test/', '{{"token":"{b}"}}',
         "NPM_TOKEN={b}", "--token {b}", "+ echo {s}", "x{b}y", "token: {b}", "Basic {b}", "Bearer {b}",
         "\x1b[31m{s}\x1b[0m", "{s}\r", "'{s}'", '"{s}"', "{s}{s}", "password={b}", "secret: {b}",
-        "request failed: 401 for {b}", "{j}", "failed to get {s} (HTTP 500)",
+        "request failed: 401 for {b}", "failed to get {s} (HTTP 500)",
     ]
     lines = []
     for _ in range(rng.randint(1, 4)):
         template = rng.choice(templates)
-        encoded = rng.choice(sorted(forms(secret)))
-        lines.append(template.format(s=secret, b=bare, j=encoded))
+        lines.append(template.format(s=secret, b=bare))
         if rng.random() < 0.3:
             lines.append(rng.choice(["", "ordinary text", "the token was refreshed", "done"] + NOISE))
     return rng.choice(["\n", "\r\n"]).join(lines)
@@ -192,10 +189,8 @@ def judge(prototype: Path, cases: list[Case]) -> list[dict]:
             # to, a decoding artifact and not something typed
             if not secret or not secret.isprintable() or "\ufffd" in secret or secret in "***":
                 continue
-            for form in (secret,):
-                if form and form in shown and form not in around:
-                    found.append({"kind": "secret in the log", "case": case, "secret": secret, "form": form, "log": log["lines"]})
-                    break
+            if secret in shown and secret not in around:
+                found.append({"kind": "secret in the log", "case": case, "secret": secret, "log": log["lines"]})
         if any(CONTROL.search(line) for line in log["lines"]):
             found.append({"kind": "control character in the log", "case": case, "log": log["lines"]})
     return found
@@ -278,6 +273,54 @@ def judge_paths(prototype: Path, values: list[str]) -> list[dict]:
     return found
 
 
+# --- the route: whether a request gets the helper at all ---------------------------
+
+# a host as written in a URL, and as the parsed URL reads it (what the runner sees):
+# lowercased, an IPv4 address in its dotted form, an IPv6 address shortened, in brackets
+ROUTE_HOSTS = [
+    ("localhost", "localhost"), ("LOCALHOST", "localhost"), ("127.0.0.1", "127.0.0.1"), ("127.1", "127.0.0.1"),
+    ("127.255.255.254", "127.255.255.254"), ("0x7f.0.0.1", "127.0.0.1"), ("2130706433", "127.0.0.1"),
+    ("[::1]", "[::1]"), ("[0:0:0:0:0:0:0:1]", "[::1]"), ("[::ffff:127.0.0.1]", "[::ffff:7f00:1]"),
+    ("localhost.", "localhost."), ("0.0.0.0", "0.0.0.0"), ("127.0.0.1.example.com", "127.0.0.1.example.com"),
+    ("localhost.example.com", "localhost.example.com"), ("example.com", "example.com"),
+    ("Registry.Corp.Example", "registry.corp.example"), ("10.0.0.1", "10.0.0.1"), ("192.168.1.5", "192.168.1.5"),
+    ("[fe80::1]", "[fe80::1]"), ("128.0.0.1", "128.0.0.1"), ("126.255.255.255", "126.255.255.255"),
+]
+ROUTE_SCHEMES = [("http", "http:"), ("HTTP", "http:"), ("https", "https:"), ("HTTPS", "https:")]
+ROUTE_KEYS = ["proxy", "https-proxy", "ca", "cafile", "strict-ssl"]
+
+
+def route_cases(rng: random.Random, count: int) -> list[dict]:
+    cases = []
+    for _ in range(count):
+        written, scheme = rng.choice(ROUTE_SCHEMES)
+        host, hostname = rng.choice(ROUTE_HOSTS)
+        port = rng.choice(["", "", ":8080", ":4873", ":80", ":443"])
+        keys = rng.sample(ROUTE_KEYS, rng.choice([0, 0, 1, 2]))
+        cases.append({
+            "uri": f"{written}://{host}{port}{rng.choice(['/', '/pkg', '/@scope%2fpkg', '/pkg/-/pkg-1.0.0.tgz'])}",
+            "scheme": scheme, "hostname": hostname, "given": rng.random() < 0.2, "keys": keys,
+        })
+    return cases
+
+
+def judge_routes(prototype: Path, cases: list[dict]) -> list[dict]:
+    answers = bridge(prototype, [{
+        "op": "route", "uri": case["uri"], "given": ["//bridge.example/:_authToken"] if case["given"] else [],
+        "transport": [{"key": key, "source": "a .npmrc"} for key in case["keys"]],
+    } for case in cases])
+    found = []
+    for case, answer in zip(cases, answers):
+        expected = token_helper_route_outcome(case["scheme"], case["hostname"], case["given"], tuple(case["keys"]))
+        started = 1 if expected == "ran" else 0
+        if answer["outcome"] != expected or answer["started"] != started:
+            found.append({
+                "kind": "route", "value": f"{case['uri']} given={case['given']} keys={case['keys']}",
+                "prototype": f"{answer['outcome']}, {answer['started']} started", "model": f"{expected}, {started} started",
+            })
+    return found
+
+
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--prototype", type=Path, required=True, help="the npm-cli checkout with the prototype")
@@ -288,7 +331,7 @@ def run(argv: list[str] | None = None) -> int:
     master = args.seed if args.seed is not None else random.SystemRandom().getrandbits(32)
     chooser = random.Random(master)
     print(f"master seed {master}", flush=True)
-    started, tried, settings, kinds = time.monotonic(), 0, 0, {}
+    started, tried, settings, routes, kinds = time.monotonic(), 0, 0, 0, {}
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="helper-paths-") as scratch:
@@ -300,19 +343,22 @@ def run(argv: list[str] | None = None) -> int:
             values = path_cases(chooser, existing, 800)
             settings += len(values)
             findings += judge_paths(args.prototype, values)
+            requests = route_cases(chooser, 400)
+            routes += len(requests)
+            findings += judge_routes(args.prototype, requests)
             for finding in findings:
                 size = lambda item: len(item["case"].stdout) + len(item["case"].stderr) if "case" in item else len(item["value"])
                 current = kinds.get(finding["kind"])
                 if current is None or size(finding) < size(current):
                     kinds[finding["kind"]] = finding
-    print(f"{tried} outputs and {settings} settings in {time.monotonic() - started:.0f} s, master seed {master}")
+    print(f"{tried} outputs, {settings} settings and {routes} requests in {time.monotonic() - started:.0f} s, master seed {master}")
     for kind, finding in kinds.items():
         case = finding.get("case")
         if case:
             print(f"\n[{kind}] seed {case.seed}\n  stdout {case.stdout[:200]!r}\n  stderr {case.stderr[:300]!r}")
         else:
             print(f"\n[{kind}] {finding['value']!r}")
-        for key in ("model", "prototype", "secret", "form", "log"):
+        for key in ("model", "prototype", "secret", "log"):
             if key in finding:
                 print(f"  {key}: {str(finding[key])[:300]}")
     if not kinds:
