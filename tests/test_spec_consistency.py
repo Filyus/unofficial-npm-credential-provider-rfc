@@ -240,7 +240,7 @@ class UnusedPolicyValueTests(unittest.TestCase):
         policy's `tokenHelper.timeoutSeconds` is not generated into the model,
         and the text it summarizes is what pins it."""
         policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-        text = (ROOT / "phase-1-token-helper.md").read_text(encoding="utf-8")
+        text = (ROOT / "phase-1a-token-helper.md").read_text(encoding="utf-8")
 
         self.assertIn(f"Running longer than {policy['tokenHelper']['timeoutSeconds']} seconds", text)
         self.assertFalse(hasattr(protocol_model, "TOKEN_HELPER_TIMEOUT_SECONDS"))

@@ -14,7 +14,7 @@ Which situations each example shows, and which it does not yet, is in [COVERAGE.
 | [Azure Artifacts](azure-artifacts.md) | PATs and Entra ID tokens over Basic; organisation- and project-scoped feeds; a least-privileged read that can write; a publish 403 that is a version conflict |
 | [GitHub Packages](github-packages.md) | One host shared by every owner; tokens no narrower than an owner; two accounts mapped by scope; `GITHUB_TOKEN` in Actions |
 | [JFrog Artifactory](jfrog-artifactory.md) | Many repositories on one host; access tokens valid on the whole instance; permissions per user, not per token; anonymous reads |
-| [npmjs.com](npmjs.md) | Session tokens and granular tokens; staged publishing with a read-only `stage-read` token, as the [live test](../stage-tiers-test.md) showed; trusted publishing taking over |
+| [npmjs.com](npmjs.md) | Session tokens and granular tokens; staged publishing with a read-only `stage-read` token, as the [live test](../phase-2-implementation.md#the-npmjscom-stage-token-test) showed; trusted publishing taking over |
 | [Verdaccio](verdaccio.md) | Self-hosted, two token tiers minted once at login; a 403 that does not say why; staged publishing and rejection by the stager |
 | [Corporate SSO gateway](corporate-sso.md) | An OIDC device-code login on the controlling terminal; tokens minted per request scope; CI with a service identity; `other` rather than `not-found` when presence is needed |
 

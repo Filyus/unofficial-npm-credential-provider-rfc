@@ -6,7 +6,7 @@ An independent proposal for letting npm get registry credentials from a user-con
 
 | Document | What it is |
 |---|---|
-| [Phase 1a: `tokenHelper`](phase-1-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it as a stored token is sent. The motivation, and the trust rule both phases follow. Lands on its own, without 1b or Phase 2 |
+| [Phase 1a: `tokenHelper`](phase-1a-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it as a stored token is sent. The motivation, and the trust rule both phases follow. Lands on its own, without 1b or Phase 2 |
 | [Phase 1b: credential hardening](phase-1b-credential-hardening.md) | How every credential travels, stored tokens, helpers and providers alike: `https:` or loopback only, transport from config a project cannot write, redirects, the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major |
 | [Phase 2: credential provider protocol](phase-2-credential-provider.md) | A versioned JSON protocol modelled on Cargo's: npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login`/`logout` delegation, the security model, prior art |
 | [Examples](examples/README.md) | How providers for real registries would answer, and where each is easy to get wrong |
@@ -20,14 +20,14 @@ Phase 1a changes nothing for anyone who has not configured a helper, Phase 1b no
 | Document | What it holds |
 |---|---|
 | [sources.md](sources.md) | Is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are |
-| [phase-1-implementation.md](phase-1-implementation.md) | Does the npm patch do what Phase 1a says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
-| [phase-2-conformance.md](phase-2-conformance.md) | What does the conformance material check, rule by rule, and what can only an npm client show? The artifacts, each Phase 2 rule with its test, the fuzzing history |
-| [stage-tiers-test.md](stage-tiers-test.md) | The live test of which npmjs.com tokens read `/-/stage`, and its result |
+| [phase-1a-implementation.md](phase-1a-implementation.md) | Does the npm patch do what Phase 1a says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
+| [phase-2-implementation.md](phase-2-implementation.md) | What does the conformance material check, rule by rule, and what can only an npm client show? The artifacts, each Phase 2 rule with its test, the fuzzing history |
+| [the live token test](phase-2-implementation.md#the-npmjscom-stage-token-test) | The live test of which npmjs.com tokens read `/-/stage`, and its result |
 | [poc/patches](poc/patches) | The prototype as patches against upstream npm/cli and npm-registry-fetch |
 
 ## Running the checks
 
-The Phase 2 conformance artifacts (schema, policy, vectors, Python model, Rust pair) are listed in [phase-2-conformance.md](phase-2-conformance.md).
+The Phase 2 conformance artifacts (schema, policy, vectors, Python model, Rust pair) are listed in [phase-2-implementation.md](phase-2-implementation.md).
 
 Prerequisites, as the CI workflows have them:
 
@@ -42,7 +42,7 @@ A missing tool makes these tests **skip, not fail**:
 | `jsonschema` | `test_json_schema`, `test_examples`, the schema half of `test_model_schema_agreement` |
 | `cargo` or `node` | `test_differential` |
 | `node` | `test_provider_harness`, `test_provider_hostile`, `test_provider_sessions` |
-| `NPM_CLI` naming a checkout with the Phase 1a prototype ([phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
+| `NPM_CLI` naming a checkout with the Phase 1a prototype ([phase-1a-implementation.md](phase-1a-implementation.md#reproducing-the-checks)) | the helper comparison of `test_helper_differential` |
 
 With `REQUIRE_TOOLS=1` ([tests/tools_required.py](tests/tools_required.py)) a missing tool fails the run instead. The `conformance` and `fuzz` workflows set it; a plain run does not. The one exception is `RunnerTests` in `test_helper_differential`, which skips without `NPM_CLI` either way; the `prototype` workflow runs that comparison through `tests.fuzz_helper`. `python -m unittest discover -v` shows every skip and its reason: a run with skips has not run those checks.
 
@@ -68,7 +68,7 @@ cd poc/rust && cargo +nightly fuzz run message -- -max_total_time=600 -dict=fuzz
 cd poc/rust && cargo +nightly fuzz run line_limit -- -max_total_time=300 -max_len=64
 ```
 
-End-to-end check of the Phase 1a prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [phase-1-implementation.md](phase-1-implementation.md#reproducing-the-checks):
+End-to-end check of the Phase 1a prototype, given local checkouts of npm/cli and npm/npm-registry-fetch carrying the prototype (it lays the prototype over npm's bundled npm-registry-fetch and restores it on exit). The `token-helper` branches are not published: the checkouts are made by applying the patches of `poc/patches` to the upstream commits they were made on, with the steps CI runs, in [phase-1a-implementation.md](phase-1a-implementation.md#reproducing-the-checks):
 
 ```sh
 node poc/npm-e2e/run.js <npm-cli checkout> <npm-registry-fetch checkout>

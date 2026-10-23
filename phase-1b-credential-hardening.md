@@ -4,7 +4,7 @@
 > Revision: 1
 > Date: 2026-10-22
 
-> Phase 1b of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. [Phase 1a](phase-1-token-helper.md) adds `tokenHelper`; [Phase 2](phase-2-credential-provider.md) adds a protocol. This document changes how npm sends a credential, whatever its source: a stored `_authToken`, a helper's token or a provider's.
+> Phase 1b of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. [Phase 1a](phase-1a-token-helper.md) adds `tokenHelper`; [Phase 2](phase-2-credential-provider.md) adds a protocol. This document changes how npm sends a credential, whatever its source: a stored `_authToken`, a helper's token or a provider's.
 
 ## Summary
 
@@ -22,7 +22,7 @@ It ships as one opt-in setting in a minor release, `strict-credentials`, and is 
 
 ## Motivation
 
-[Phase 1a](phase-1-token-helper.md) already refuses two of these routes for a helper's credential, plain `http:` except to this machine and a proxy or CA that a project chose, because a helper mints a fresh, often broad token. Its runner can decide that before the program starts, from the request's URL and from which layer a setting came from. This proposal extends the same two rules to every credential, a stored `_authToken` included, and adds what is the library's to do after a credential is sent.
+[Phase 1a](phase-1a-token-helper.md) already refuses two of these routes for a helper's credential, plain `http:` except to this machine and a proxy or CA that a project chose, because a helper mints a fresh, often broad token. Its runner can decide that before the program starts, from the request's URL and from which layer a setting came from. This proposal extends the same two rules to every credential, a stored `_authToken` included, and adds what is the library's to do after a credential is sent.
 
 The weaknesses below are today's behaviour for a stored `_authToken`. A helper or provider inherits those that 1a does not refuse (redirects, the cache index, error responses, `noproxy` and `local-address`) until this proposal lands.
 
@@ -75,7 +75,7 @@ A project `.npmrc` cannot set `userconfig` or `globalconfig`. In a minor release
 
 A project-set `prefix` is not refused: it still applies to installs, which is what a repository that sets `prefix` relies on. npm does not use it to locate the global config file, which is found only from the user's, environment, command-line or built-in `prefix`. The global file therefore cannot move into the repository, and `prefix` alone moves nothing the credential rules depend on.
 
-This covers the project's own choice only. [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-be-set) keeps its location rule for a file whose path the command line or the environment chose (`npm ci --prefix sub`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`): such a file is refused when a directory from its own up holds a `package.json` or a `.git`. A CI job, not the user, writes those values, so no refusal of a `.npmrc` setting reaches them, and 1b leaves them to that rule. With 1b, the clause of 1a's rule about `userconfig`, `globalconfig` and `prefix` in a project `.npmrc` holds by construction; the location rule stays.
+This covers the project's own choice only. [Phase 1a's trust rule](phase-1a-token-helper.md#where-it-may-be-set) keeps its location rule for a file whose path the command line or the environment chose (`npm ci --prefix sub`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`): such a file is refused when a directory from its own up holds a `package.json` or a `.git`. A CI job, not the user, writes those values, so no refusal of a `.npmrc` setting reaches them, and 1b leaves them to that rule. With 1b, the clause of 1a's rule about `userconfig`, `globalconfig` and `prefix` in a project `.npmrc` holds by construction; the location rule stays.
 
 ## Threat model
 
@@ -89,7 +89,7 @@ This covers the project's own choice only. [Phase 1a's trust rule](phase-1-token
 | A registry | Echoes the request in an error | The credential reaches the log | Removed from the error |
 | A repository's `.npmrc` | Sets `userconfig`, `globalconfig` or `prefix` | A repository file loads as the user's | `userconfig` and `globalconfig` refused; a project `prefix` no longer locates the global file |
 
-Out of scope, as in [Phase 1a](phase-1-token-helper.md#scope): code that already runs as the user, and a registry the user chose that is itself hostile.
+Out of scope, as in [Phase 1a](phase-1a-token-helper.md#scope): code that already runs as the user, and a registry the user chose that is itself hostile.
 
 ## Rationale and Alternatives
 
@@ -101,7 +101,7 @@ Out of scope, as in [Phase 1a](phase-1-token-helper.md#scope): code that already
 
 **Refusing project-set `userconfig` and `globalconfig`, and ignoring a project `prefix` for the global file's location,** instead of detecting where a file lies, for the project's own choice: a refusal has no spelling to get past.
 
-For a file chosen on the command line or in the environment there is no setting to refuse, and 1a detects where the file lies by a walk over its real path's directories for a mark, which needs no identity and is not fooled by a spelling; its limits are in [phase-1-implementation.md](phase-1-implementation.md#limits). A project `prefix` is kept for installs because refusing it would break repositories that use it for that, while the one thing it could do to a credential, move the global file, is cut off.
+For a file chosen on the command line or in the environment there is no setting to refuse, and 1a detects where the file lies by a walk over its real path's directories for a mark, which needs no identity and is not fooled by a spelling; its limits are in [phase-1a-implementation.md](phase-1a-implementation.md#limits). A project `prefix` is kept for installs because refusing it would break repositories that use it for that, while the one thing it could do to a credential, move the global file, is cut off.
 
 ## Prior implementation
 

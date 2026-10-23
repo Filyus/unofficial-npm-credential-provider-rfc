@@ -28,7 +28,7 @@ process replaced:
   chose; otherwise it starts exactly once. The stub config says which of those
   hold.
 
-What it does not look for is in "Limits" in phase-1-implementation.md: a
+What it does not look for is in "Limits" in phase-1a-implementation.md: a
 credential that is encoded on purpose (the log check is for the exact token only),
 and what no stub config reaches, which files are the user's and where a setting came
 from: npm's own tests cover those.

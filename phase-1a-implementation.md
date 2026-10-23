@@ -1,6 +1,6 @@
 # Phase 1a implementation
 
-How the `tokenHelper` prototype described in [Phase 1a](phase-1-token-helper.md) is built and how it was checked. [Rule by rule](#rule-by-rule) maps each statement in Phase 1a to the test or source behind it, and [sources.md](sources.md) holds what the RFC says about npm, pnpm and others. The earlier, hardened prototype, which also did what [Phase 1b](phase-1b-credential-hardening.md) now describes for every credential (transport, `http:`, redirects, the HTTP cache index, error responses) and located files by device and inode, is kept on the branches `token-helper-hardened` of npm-registry-fetch and npm/cli and `phase-1-hardened` of this repository; 1b grows from them, and nothing below is claimed about those parts.
+How the `tokenHelper` prototype described in [Phase 1a](phase-1a-token-helper.md) is built and how it was checked. [Rule by rule](#rule-by-rule) maps each statement in Phase 1a to the test or source behind it, and [sources.md](sources.md) holds what the RFC says about npm, pnpm and others. The earlier, hardened prototype, which also did what [Phase 1b](phase-1b-credential-hardening.md) now describes for every credential (transport, `http:`, redirects, the HTTP cache index, error responses) and located files by device and inode, is kept on the branches `token-helper-hardened` of npm-registry-fetch and npm/cli and `phase-1-hardened` of this repository; 1b grows from them, and nothing below is claimed about those parts.
 
 ## Where the code is
 
@@ -27,7 +27,7 @@ Coverage: tap's check fails `npm test` below 100%, and CI runs it wherever `npm 
 | Awkward names | helpers named as awkwardly as the file system allows, in directories named so, run for real: each runs as itself and nothing else, a `.cmd` path with `"`, `%` or `!` is refused | [`poc/helper-fuzz/names.js`](poc/helper-fuzz/names.js) |
 | Platform probes | helper path spellings on Windows (trailing space or dot, slashes, `\\?\`, letter case, 8.3 names), `cmd.exe` special characters, the refusals for `"`, `%`, `!`, a `.ps1` or `.js` file and a directory longer than 258 characters, missing `#!` interpreters; on Windows also on an SMB share, where a helper is a UNC path | [`poc/platform-probes/run.js`](poc/platform-probes/run.js) |
 | Every npm/cli suite | the root and its 16 workspaces (the four named in the root `package.json` plus the 12 under `workspaces/` at the base commit) pass with the prototype wherever they pass without it | [`poc/full-suites/compare.js`](poc/full-suites/compare.js) |
-| Claims | every piece of evidence this file, [phase-2-conformance.md](phase-2-conformance.md) and [sources.md](sources.md) cite still exists | [`poc/claims/check.js`](poc/claims/check.js) |
+| Claims | every piece of evidence this file, [phase-2-implementation.md](phase-2-implementation.md) and [sources.md](sources.md) cite still exists | [`poc/claims/check.js`](poc/claims/check.js) |
 
 What the end-to-end run checks:
 

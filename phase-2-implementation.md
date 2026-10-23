@@ -1,4 +1,4 @@
-# Phase 2 conformance
+# Phase 2 implementation
 
 What the conformance material for [Phase 2](phase-2-credential-provider.md) checks, rule by rule, and what only an npm client can show. The rules are data in [`spec/policy-v1.json`](spec/policy-v1.json); the schema, a Python model of the client, a Rust client and provider pair and the reference providers in [examples](examples/README.md) are held against them.
 
@@ -98,7 +98,7 @@ Each row is a rule of Phase 2 and what backs it, written as `kind: text`: `spec`
 
 ### Phase 1 rules in the Python model
 
-The Python model also holds the helper rules of [Phase 1](phase-1-token-helper.md), which [`tests/fuzz_helper.py`](tests/fuzz_helper.py) sets beside the prototype. The prototype itself is checked in [phase-1-implementation.md](phase-1-implementation.md).
+The Python model also holds the helper rules of [Phase 1](phase-1a-token-helper.md), which [`tests/fuzz_helper.py`](tests/fuzz_helper.py) sets beside the prototype. The prototype itself is checked in [phase-1a-implementation.md](phase-1a-implementation.md).
 
 | Rule | Evidence |
 |---|---|
@@ -108,7 +108,7 @@ The Python model also holds the helper rules of [Phase 1](phase-1-token-helper.m
 | A credential for the run beats the helper, and the helper beats one stored in a file | `py: test_token_helper.CredentialPrecedenceTests.test_a_credential_from_the_command_line_or_the_environment_beats_the_helper`, `py: test_token_helper.CredentialPrecedenceTests.test_the_helper_beats_a_credential_in_a_file` |
 | A user or global file whose path the command line or the environment chose is refused when a directory from its real path up holds a `package.json` or a `.git`; the walk stops at home unlooked-at and goes to the root for a file outside it; `node_modules` is no mark | `py: test_token_helper.ContainingProjectTests.test_a_package_json_in_the_directory_of_the_file`, `py: test_token_helper.ContainingProjectTests.test_a_directory_above_the_file_counts`, `py: test_token_helper.ContainingProjectTests.test_home_is_never_looked_at`, `py: test_token_helper.ContainingProjectTests.test_a_file_outside_home_is_walked_to_the_root`, `py: test_token_helper.ContainingProjectTests.test_node_modules_is_no_mark` |
 
-The model of the location rule takes the directories and the marks as data, so it holds the rule and not npm's filesystem walk: npm's own tests for that are cited in [phase-1-implementation.md](phase-1-implementation.md#rule-by-rule). Of the three rules, only the route is compared with the runner.
+The model of the location rule takes the directories and the marks as data, so it holds the rule and not npm's filesystem walk: npm's own tests for that are cited in [phase-1a-implementation.md](phase-1a-implementation.md#rule-by-rule). Of the three rules, only the route is compared with the runner.
 
 ## Differential fuzzing history
 
@@ -131,3 +131,85 @@ npm has no Phase 2 client, and the Rust `mock-client` is a test harness for the 
 - operation selection: which operation each command sends, that `--dry-run` turns `publish`, `unpublish` and `deprecate` into reads and changes no other command, that `profile enable-2fa` is refused under a provider and `disable-2fa` is not (`py: test_client_behaviour.OperationSelectionTests.test_every_command_sends_the_operation_of_its_row`, `py: test_client_behaviour.OperationSelectionTests.test_the_spec_table_lists_each_command_in_the_row_of_its_operation`, `py: test_client_behaviour.OperationSelectionTests.test_dry_run_turns_publish_unpublish_and_deprecate_into_reads`, `py: test_client_behaviour.OperationSelectionTests.test_every_other_command_sends_its_operation_whatever_dry_run_says`, `py: test_client_behaviour.OperationSelectionTests.test_enable_2fa_is_refused_under_a_provider_and_disable_2fa_is_not`); that npm's commands pass these operations is not shown;
 - that the `login` token is never logged at any level (`py: test_client_behaviour.LoggingTests.test_the_login_token_is_never_logged`);
 - warning counts: a stored credential used after a global chain declined a registry is warned about once per registry per command, and one that a per-registry list ignores on every command, once in each (`py: test_client_behaviour.WarningCountTests.test_the_fallback_is_said_once_per_registry_per_command`, `py: test_client_behaviour.WarningCountTests.test_a_stored_credential_a_list_ignores_is_said_in_every_command`).
+
+## The npmjs.com stage token test
+
+A live test for the one question the RFC leaves to evidence: which token tiers npmjs.com accepts on the staged-publishing reads. The answer is the evidence for a provider's default `stage-read` mapping on npmjs.com, within the scope tested below (npm 11.19.0, one account, one package, HTTP GETs) ([Operations](phase-2-credential-provider.md#4-operations)); it changes nothing in the protocol. The documentation names no tier: the API lists granular tokens on every `/-/stage` path and documents 401 as the only refusal on the list, and 401 and 404 on the record and the tarball ([API](https://api-docs.npmjs.com/)).
+
+It needs an npmjs.com account and real tokens, so it is run by hand.
+
+### Setup
+
+- An npmjs.com account with 2FA.
+- A package P the account already maintains, preferably a throwaway scoped one, so no public placeholder is created; and a second maintained package Q.
+- Note P's publishing-access setting. If possible, run T2 and T3 twice: with "Require 2FA" alone and with "Require 2FA and disallow tokens", staging S (below) before switching to the second, since a token presumably cannot stage under it.
+
+### Tokens
+
+Bypass-2FA off unless stated:
+
+| Token | Kind |
+|---|---|
+| T1 | Session token from `npm login` (web flow) |
+| T2 | Granular, packages read-only, selected to P |
+| T3 | Granular, read and write (stage only), P |
+| T4 | Granular, read and write (publish and stage), P |
+| T5 | Granular, read-only, selected to Q only |
+| T6 | Granular with no package access, if the site allows one; otherwise note that it does not |
+| T3b | Optional: T3 with bypass-2FA on |
+
+### Stage one version
+
+In P, run `npm stage publish` with T3 through a throwaway userconfig, which gives a stage id S. Note whether it asks for a one-time password. Confirm S with `npm stage list` under T4. The staged version need not be a real build: `node poc/stage-tiers/run.js pack <dir> <P> 0.0.0-tokentest.1` writes a package whose README says not to approve it, under the dist-tag `tokentest`. If P's publishing access disallows tokens, T3 cannot stage; stage under T1 and note it.
+
+### Requests
+
+Keep each token out of argv and shell history: put `Authorization: Bearer <token>` in a file `hdr.txt` written with an editor (or under `umask 077`), never with `echo` and the token on the command line, then run `curl -sS -D- -H @hdr.txt <url>`.
+
+| Request | URL |
+|---|---|
+| R1 | `https://registry.npmjs.org/-/stage?page=0&perPage=100` |
+| R2 | R1 plus `&package=<P, URL-encoded>` |
+| R3 | `https://registry.npmjs.org/-/stage/S` |
+| R4 | `https://registry.npmjs.org/-/stage/S/tarball` (with `-o /dev/null`) |
+
+For each token and request, record the status, the item count or error body, and every `WWW-Authenticate` header. Control: R1–R4 with no `Authorization`, expected 401.
+
+`node poc/stage-tiers/run.js check <token-dir> S <P>` does all of this: it reads each token from its own file (`T2.txt`, or the `T1.npmrc` that `npm login --userconfig` writes), sends it only to registry.npmjs.org, follows no redirect, redacts it from every body, and writes the table to `results.json` in that directory.
+
+### Reading the results
+
+- **T3 and T4** should give 200 with S on R1–R4. If T3 fails where T4 passes, a stage-only token cannot read its own staged versions. The RFC never answers `stage-read` with a credential that can publish directly, so provider users on npmjs.com then cannot run `stage list`, `view`, `download`, `approve` or `reject`: record that as a gap to report to npm, not as a default.
+- **T2** decides it:
+  - 200 with S on R1–R4: providers map `stage-read` to a separate read-only token, with no presence check, and it works in CI.
+  - 401 or 403: write-capable tokens only, and the RFC's write-policy rule applies. Note which of the two arrives; a 403 is what a provider may widen on.
+  - 200 with an empty list, and 404 on R3 and R4: the visibility filter works by tier; same conclusion, and it confirms the RFC's "a 401, a 404 or an empty list".
+- **A 401 with `WWW-Authenticate: otp`** on any read is a one-time-password challenge, not a tier refusal ([erase table](phase-2-credential-provider.md#erase-a-credential-was-rejected)), and changes how the T2 row reads.
+- **T1:** 200 means session tokens work despite the API's security list; 401 means providers need a granular token.
+- **T5:** provided Q has no staged versions, expected an empty list and 404, confirming that a token selected to other packages fails as 404 or an empty list, not 403.
+- **T6:** record the outcome. **T3b** against T3: expected the same.
+
+### Result, 2026-10-17
+
+Run once, by hand, with `poc/stage-tiers/run.js` (so not re-run by CI, and not repeatable without the account, the package and the tokens) with npm 11.19.0 against a scoped package the account maintains, whose versions are published by trusted publishing, with T1–T5 (T6 and T3b skipped, and the publishing-access setting left as it was). T3 staged `0.0.0-tokentest.1` without asking for a one-time password.
+
+| Token | R1 list | R2 list, `package=` | R3 record | R4 tarball |
+|---|---|---|---|---|
+| none | 401 | 401 | 401 | 401 |
+| T1 session | 200, S listed | 200, S listed | 200 | 200 |
+| T2 read-only, P | 200, S listed | 200, S listed | 200 | 200 |
+| T3 stage only, P | 200, S listed | 200, S listed | 200 | 200 |
+| T4 publish and stage, P | 200, S listed | 200, S listed | 200 | 200 |
+| T5 read-only, Q only | 200, S listed | 200, S listed | 404 | 404 |
+
+No response carried `WWW-Authenticate`, and none was a one-time-password challenge.
+
+- **T1 to T4, the read-only T2 included, were answered 200 on the list, the record and the tarball; T5, selected only to Q, was answered 200 on both lists and 404 on the record and the tarball** (plain HTTP GETs R1–R4 sent from Node's `fetch` with each token; npm 11.19.0; one account, one package, one staged version; the stricter publishing-access setting was not tried). So, for these requests and no others, a provider could answer `stage-read` on npmjs.com with a separate read-only token and no presence check. The `npm stage list`, `view` and `download` commands were not run with T2–T5, so that they work in CI is not shown by this test.
+- **The list is filtered by the account, not by the token:** T5, selected only to Q, still listed P's staged version, while the record and the tarball honoured its selection with 404.
+- **The dist-tag in `publishConfig` was not used:** `npm stage publish` reported staging "with tag latest" although `publishConfig.tag` named another tag. The version was rejected, never approved, so what approval would have done to `latest` was not observed.
+
+Afterwards the version was rejected under T1, which npm confirmed through the browser (its web one-time-password flow); `npm stage list` then showed no staged versions, T1 was logged out and T2–T5 revoked.
+
+### Cleanup
+
+`npm stage reject S` under T1 or T4 with a one-time password (do not approve it); revoke T2–T6 and T3b; `npm logout` for T1; delete `hdr.txt` and the throwaway userconfig.

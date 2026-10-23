@@ -1,6 +1,6 @@
 'use strict'
 
-// The live test in stage-tiers-test.md: which npmjs.com tokens serve the
+// The live test in phase-2-implementation.md ("The npmjs.com stage token test"): which npmjs.com tokens serve the
 // staged-publishing reads. It is run by hand, by whoever owns the tokens.
 //
 //   node poc/stage-tiers/run.js pack <dir> <package-name> <version>
@@ -8,7 +8,7 @@
 //     not to approve it), so no real build is needed
 //
 //   node poc/stage-tiers/run.js check <token-dir> <stage-id> <package-name>
-//     sends R1-R4 of stage-tiers-test.md once without credentials and once
+//     sends R1-R4 of that test once without credentials and once
 //     per token file, and prints what came back
 //
 // <token-dir> holds one file per token, named after the test plan: T1, T2,

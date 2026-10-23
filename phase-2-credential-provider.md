@@ -4,7 +4,7 @@
 > Revision: 30 (the combined draft, revision 28, split by phase)
 > Date: 2026-10-23
 
-> Phase 2 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It builds on [Phase 1a](phase-1-token-helper.md), the pnpm-compatible `tokenHelper`, whose motivation, [trust rule](phase-1-token-helper.md#trust) and rules for running a program it reuses. How a credential travels (transport, `http:`, redirects, the cache) is [Phase 1b](phase-1b-credential-hardening.md), which covers a provider's credential as every other.
+> Phase 2 of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion. It builds on [Phase 1a](phase-1a-token-helper.md), the pnpm-compatible `tokenHelper`, whose motivation, [trust rule](phase-1a-token-helper.md#trust) and rules for running a program it reuses. How a credential travels (transport, `http:`, redirects, the cache) is [Phase 1b](phase-1b-credential-hardening.md), which covers a provider's credential as every other.
 
 ## Summary
 
@@ -30,7 +30,7 @@ Terms used before they are defined:
 
 ## Motivation
 
-Phase 2 shares the [motivation of Phase 1a](phase-1-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1a lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per registry per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
+Phase 2 shares the [motivation of Phase 1a](phase-1a-token-helper.md#motivation): registry credentials are standing secrets every install script can read, while registries already issue short-lived tokens npm cannot ask for. Phase 1a lets npm ask, through a helper: compatible with pnpm, small next to the protocol, and enough for a single-registry setup. But a helper learns nothing about the request, cannot say how long its token lives, cannot be told that a token was rejected, and runs once per registry per process. Per-scope tokens, publish-time step-up, long installs that outlive a token, and `npm login` delegation all need the protocol.
 
 ## Scope
 
@@ -50,7 +50,7 @@ Out of scope:
 
 ### 1. Configuration
 
-`credentialProvider` follows [Trust](phase-1-token-helper.md#trust), as `tokenHelper` does. Project and workspace `.npmrc` files may still configure registries; they cannot enable, override or choose a provider.
+`credentialProvider` follows [Trust](phase-1a-token-helper.md#trust), as `tokenHelper` does. Project and workspace `.npmrc` files may still configure registries; they cannot enable, override or choose a provider.
 
 ```ini
 # ~/.npmrc or global npmrc
@@ -71,7 +71,7 @@ credentialProvider[]=npm-credential-provider-gitlab
 
 1. Built-in sources, named `npm:…`: `npm:token`, the one this version defines. The prefix is reserved for npm's own sources.
 2. Absolute paths configured in user-level or global npm config.
-3. Provider names found in npm-managed global bin directories, where `npm install -g` links a package's bins (`<prefix>/bin`, and `<prefix>` itself on Windows), derived from a `prefix` that [Trust](phase-1-token-helper.md#where-it-may-be-set) accepts: one a project `.npmrc` did not set. Otherwise a project's `prefix=` would move name resolution into the repository.
+3. Provider names found in npm-managed global bin directories, where `npm install -g` links a package's bins (`<prefix>/bin`, and `<prefix>` itself on Windows), derived from a `prefix` that [Trust](phase-1a-token-helper.md#where-it-may-be-set) accepts: one a project `.npmrc` did not set. Otherwise a project's `prefix=` would move name resolution into the repository.
 
 The current working directory and project-local `node_modules/.bin` are never searched, and `PATH` is not a trust anchor. A name found in more than one npm-managed global bin directory fails closed, asking for a more specific path. On Windows a name resolves to npm's `<name>.cmd` shim in that directory, the file npm writes for every global bin; the extensionless and `.ps1` files beside it are not run.
 
@@ -83,7 +83,7 @@ The current working directory and project-local `node_modules/.bin` are never se
 
 - **Directly, with an argv vector, never through a shell.** The one exception is a Windows `.cmd` or `.bat` file, which is what an npm-managed global bin directory holds (npm's cmd-shims): it runs as `cmd.exe /d /v:off /s /c` under the same rules as a Phase 1a helper, refusing a path that contains `"`, `%` or `!`. Each configured argument is passed to `cmd.exe` inside double quotes, and an argument containing `"`, `%` or a control character, or ending in a backslash, is refused, naming the provider, since `cmd.exe` and the shim's `%*` would reinterpret it; this is checked after ini decoding and `${VAR}` expansion. A provider that needs such an argument takes it from a wrapper script.
 - **In the provider's own directory,** never npm's: on Windows a cmd-shim's bare `node` is looked up in the current directory first. A `.cmd` provider on an SMB share starts in the Windows directory, as a helper does. A provider whose directory path is longer than 258 characters is refused, as a helper is.
-- **With the environment of a Phase 1a helper** ([How the helper runs](phase-1-token-helper.md#how-the-helper-runs)), cleaned further: without `NODE_OPTIONS`, `npm_config_*`, `EDITOR`, `NODE_ENV`, `COLOR` and the variables npm sets about itself, which carry a project's config, and with `PATH` stripped of the directories npm put in front of it for a script, as for a helper, so that a dependency whose bin npm linked cannot choose a tool the provider calls by name.
+- **With the environment of a Phase 1a helper** ([How the helper runs](phase-1a-token-helper.md#how-the-helper-runs)), cleaned further: without `NODE_OPTIONS`, `npm_config_*`, `EDITOR`, `NODE_ENV`, `COLOR` and the variables npm sets about itself, which carry a project's config, and with `PATH` stripped of the directories npm put in front of it for a script, as for a helper, so that a dependency whose bin npm linked cannot choose a tool the provider calls by name.
 - **With the sentinel argument `--npm-credential-provider`** before the configured arguments, as Cargo passes `--cargo-plugin`, so a provider can tell protocol mode from a standalone CLI mode.
 
 ### 2. Protocol
@@ -199,7 +199,7 @@ The scheme, in one place:
 | `registry` in a request | the request's | a provider sees the `http:` form and may decline it |
 | npm's cache key | included | an answer for `https:` never serves `http:` |
 | A stored credential after a decline | — | never sent, by the implicit or a listed `npm:token`, to a form declined on a host a hello lists |
-| A Phase 1a helper's credential | not part of the key; sent as a stored token is | [Which requests get the credential](phase-1-token-helper.md#which-requests-get-the-credential) |
+| A Phase 1a helper's credential | not part of the key; sent as a stored token is | [Which requests get the credential](phase-1a-token-helper.md#which-requests-get-the-credential) |
 | Any credential under [Phase 1b](phase-1b-credential-hardening.md#where-a-credential-may-go) | compared | `https:`, or `http:` to loopback, whatever its source |
 
 Providers that match for themselves should use the same comparison.
@@ -335,7 +335,7 @@ So a global provider starts with any command that goes to the network, to send i
 No provider starts in these cases:
 
 - a request that pacote serves from its cache by integrity (a tarball named in the lockfile);
-- `--offline`, except the packument fetch that precedes a write, which npm makes online whatever `--offline` says ([Phase 1a](phase-1-token-helper.md#how-the-helper-runs)) and which therefore starts the chain;
+- `--offline`, except the packument fetch that precedes a write, which npm makes online whatever `--offline` says ([Phase 1a](phase-1a-token-helper.md#how-the-helper-runs)) and which therefore starts the chain;
 - a command that makes no registry request, or one to which no chain applies.
 
 A request the HTTP cache could have answered still starts the chain first, as a Phase 1a helper runs before a `--prefer-offline` request: credentials are resolved before make-fetch-happen consults its cache. Most installs still make one registry request, the audit, unless run with `--no-audit`.
@@ -581,7 +581,7 @@ The registry URL in a cache key is the `registry` npm sent, scheme included, so 
 
 An answer for any operation other than `read` is cached bound to that operation and, when the request names a package, to that package, whatever `granularity` and `operationIndependent` say. `publish`, `dist-tag`, `unpublish` and `owner` run once per workspace package in one npm process, and a credential the user released for one package must not serve the next one without a `get`; a provider that will serve it anyway answers that `get` from its own state, without prompting again.
 
-The client keeps no credential store of its own and writes no credential to disk; what npm's HTTP cache may record about a request is what it records for a stored token ([Phase 1a](phase-1-token-helper.md#which-requests-get-the-credential)); [Phase 1b](phase-1b-credential-hardening.md#the-http-cache) keeps `Authorization` out of the cache index for every credential.
+The client keeps no credential store of its own and writes no credential to disk; what npm's HTTP cache may record about a request is what it records for a stored token ([Phase 1a](phase-1a-token-helper.md#which-requests-get-the-credential)); [Phase 1b](phase-1b-credential-hardening.md#the-http-cache) keeps `Authorization` out of the cache index for every credential.
 
 ### 6. Security model
 
@@ -589,7 +589,7 @@ Install scripts are chosen by package authors and the dependency graph; helpers 
 
 **What the design guarantees:**
 
-- **Configuration** comes only from user and global files that a project did not choose ([Trust](phase-1-token-helper.md#where-it-may-be-set)); project files, `publishConfig`, the environment and the command line cannot set either key, and npm-registry-fetch takes neither from the config keys a caller passes, only from an option npm fills from those files.
+- **Configuration** comes only from user and global files that a project did not choose ([Trust](phase-1a-token-helper.md#where-it-may-be-set)); project files, `publishConfig`, the environment and the command line cannot set either key, and npm-registry-fetch takes neither from the config keys a caller passes, only from an option npm fills from those files.
 - **Resolution** never searches the current directory or project `node_modules`, local packages cannot shadow global providers, and ambiguous names fail closed.
 - **The provider's process** starts in its own directory, without the environment variables that carry a project's config.
 - **Input** is the protocol fields only: nothing in a request is an environment variable or a file path, and stdin is not an interactive channel. The environment the provider is started with ([Spawning](#1-configuration)) is separate from the request and is its own affair; CI needs some of it. npm strips only the variables that carry a project's config, so a provider treats any other variable as set by whoever ran npm: one that releases credentials only on user presence takes the settings that choose its identity, or name a program it runs, from its own configuration where it can.
@@ -612,7 +612,7 @@ The user pins against it, outside the protocol:
 | Threat | Example | Mitigation |
 |---|---|---|
 | Malicious project `.npmrc` | A repository makes `npm install` run a program it chose. | The key is ignored in project and workspace `.npmrc`. |
-| Project relocates user or global config | A project sets `userconfig=./x.npmrc`, `globalconfig` or `prefix`, so a repository file loads as the user's. | Phase 1a: a helper or provider is honoured only when a project `.npmrc` set none of `userconfig`, `globalconfig` and `prefix` ([Where it may be set](phase-1-token-helper.md#where-it-may-be-set)). [Phase 1b](phase-1b-credential-hardening.md#project-config-cannot-choose-the-user-or-global-file) refuses those settings in a project `.npmrc`. |
+| Project relocates user or global config | A project sets `userconfig=./x.npmrc`, `globalconfig` or `prefix`, so a repository file loads as the user's. | Phase 1a: a helper or provider is honoured only when a project `.npmrc` set none of `userconfig`, `globalconfig` and `prefix` ([Where it may be set](phase-1a-token-helper.md#where-it-may-be-set)). [Phase 1b](phase-1b-credential-hardening.md#project-config-cannot-choose-the-user-or-global-file) refuses those settings in a project `.npmrc`. |
 | `publishConfig` in `package.json` | A pull request adds a helper there, and a CI publish job sends its output instead of the real token. | The key is ignored in `publishConfig`. |
 | Project chooses the transport | A project's `.npmrc` sets `https-proxy`, `proxy`, `ca`, `cafile` or `strict-ssl=false`, so a fresh credential goes through the repository's proxy or past a certificate it chose. | [Phase 1b](phase-1b-credential-hardening.md#which-settings-a-credentialed-request-may-take-from-a-project): a request that carries any credential, a provider's included, takes those settings, and `noproxy` and `local-address`, only from config a project cannot write, child npm processes included. Until it lands, a provider's credential follows the transport rules of a stored token. |
 | Project chooses the registry | A project sets `registry=` to an attacker's host, so npm asks for a credential for it. | Phase 1a has only per-registry keys. In Phase 2 every request names the registry, and a provider in the global chain answers `url-not-supported` for one it does not serve. An exhausted global chain falls back only to a credential stored under that host's own key, so a host a project chooses gets nothing the user did not store for it. |
@@ -723,7 +723,7 @@ So the global chain is asked up front, and the costs are bounded instead: `url-n
 
 ### Why no discovery suggestions?
 
-A suggestion would be triggered by the registry's host, which a project can choose: a repository that points `@scope:registry=` at a lookalike host, and answers 401, would get npm to print a ready-to-paste line binding the user's own provider to that host. No prior art suggests providers either. Cargo and pnpm are explicit; Git and Docker resolve a name only once configured; NuGet runs the `nuget-plugin-*` it finds on `PATH`, which [Trust](phase-1-token-helper.md#trust) rules out, and otherwise leaves finding plugins to a search the user starts.
+A suggestion would be triggered by the registry's host, which a project can choose: a repository that points `@scope:registry=` at a lookalike host, and answers 401, would get npm to print a ready-to-paste line binding the user's own provider to that host. No prior art suggests providers either. Cargo and pnpm are explicit; Git and Docker resolve a name only once configured; NuGet runs the `nuget-plugin-*` it finds on `PATH`, which [Trust](phase-1a-token-helper.md#trust) rules out, and otherwise leaves finding plugins to a search the user starts.
 
 ### Why no `refresh` request?
 
@@ -764,7 +764,7 @@ Registries disagree on the tiers, as the table under [Operations](#4-operations)
 
 ## Implementation
 
-This section is informative: it describes one way to meet the requirements above. Where helper and provider code meet, the [Phase 1a implementation](phase-1-token-helper.md#implementation) comes first.
+This section is informative: it describes one way to meet the requirements above. Where helper and provider code meet, the [Phase 1a implementation](phase-1a-token-helper.md#implementation) comes first.
 
 - **Debugging.** At `--loglevel verbose` npm logs, for each registry, the chain it resolved, each provider it asked and the kind of each answer (`Ok`, `url-not-supported`, `not-found`, an error kind), with the provider's own stderr; never a credential.
 
@@ -772,8 +772,8 @@ This section is informative: it describes one way to meet the requirements above
 - **Hooks the commands need.** npm-registry-fetch reports which source served a registry (a provider, a helper, `npm:token`, none), so `stage approve` and `reject` know whether to look the stage up; the context learned from a stage record travels in a credential-context option of its own, never as `spec` or `scope`, which would change routing and the `npm-scope` header; and an OIDC exchange masks the chain for its registry key with an internal option, as the Phase 1a prototype masks a helper, not with an empty provider list, which the RFC gives no meaning.
 - **Operation hint.** Commands pass the npm action to `npm-registry-fetch` with the request options; installs default to `read`. The dry-run mapping follows each of `publish`, `unpublish` and `deprecate`'s own dryRun branch, not the config value. `trust`, `access list collaborators` and `access get status` pass no `spec` today, so their package reaches the provider through the credential-context option, never as `spec`, and their requests keep going to the default registry even for a scoped package whose scope names another registry, as they do today. The tab completion of `deprecate` and `unpublish` lists packages through the access endpoints under its command's operation; a provider that does not serve it only costs the suggestions.
 - **Interactive requests.** npm already brackets prompts with `proc-log`'s `input.start()`/`input.end()`, which pause logging and the progress bar (`lib/utils/display.js`); an interactive provider request goes through the same bracket, after the one line that names the provider and the registry and says that Ctrl-C stops it, which is printed first so that it is not paused with the rest.
-- **Config.** `@npmcli/config` gains the `credentialProvider` keys, filtered by source as the [trust rule](phase-1-token-helper.md#trust) requires. @npmcli/config leaves an untyped list unexpanded, and a per-registry key cannot be typed, so npm applies `${VAR}` expansion to each element of a per-registry `credentialProvider[]` list itself; the single-string form and the global list are already expanded.
-- **Where trust is enforced.** As for helpers ([Phase 1a](phase-1-token-helper.md#implementation)), npm-registry-fetch takes no provider from the config-key namespace a caller passes.
+- **Config.** `@npmcli/config` gains the `credentialProvider` keys, filtered by source as the [trust rule](phase-1a-token-helper.md#trust) requires. @npmcli/config leaves an untyped list unexpanded, and a per-registry key cannot be typed, so npm applies `${VAR}` expansion to each element of a per-registry `credentialProvider[]` list itself; the single-string form and the global list are already expanded.
+- **Where trust is enforced.** As for helpers ([Phase 1a](phase-1a-token-helper.md#implementation)), npm-registry-fetch takes no provider from the config-key namespace a caller passes.
 - **Who owns the provider process.** npm/cli, not the library. It creates provider session objects from trusted config and passes them to npm-registry-fetch in a dedicated option of their own, as helpers are passed in `tokenHelpers`; npm-registry-fetch starts no provider unless handed a session, so another tool that uses it is never left with a child.
 - **Session lifetime.** A session spawns its process on first use. npm ends it at the end of the command by closing stdin in its exit handler, or kills it there when a request is outstanding, so an error path ends it too, and the OS closes the pipe if npm dies. A session's child and pipes keep the event loop alive only while a request is outstanding, so an open session cannot keep npm from exiting, and npm does not exit while it awaits an answer.
 - **Libraries between the commands and npm-registry-fetch.** pacote, @npmcli/arborist, libnpmaccess, libnpmpublish, libnpmteam, libnpmorg and npm-profile spread the options they receive into its calls, so the option and the operation hint pass through unchanged; a call that builds its options afresh needs them added.
@@ -824,7 +824,7 @@ NuGet's plugins are the closest prior art to Phase 2: one long-lived process, a 
 
 ## Migration Plan
 
-No phase changes behavior for anyone who has not configured a provider. Phase 1a ships first ([its plan](phase-1-token-helper.md#migration-plan)); Phase 1b, which hardens how every credential travels, has [its own](phase-1b-credential-hardening.md#migration-plan).
+No phase changes behavior for anyone who has not configured a provider. Phase 1a ships first ([its plan](phase-1a-token-helper.md#migration-plan)); Phase 1b, which hardens how every credential travels, has [its own](phase-1b-credential-hardening.md#migration-plan).
 
 In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentialProvider` and reads only what `.npmrc` stores, so a stored token that older installs still need keeps working for them; the warning that a newer npm gives for it, under a global chain, goes once the older versions are gone or the token is moved to a per-registry list that names `npm:token`.
 
@@ -840,7 +840,7 @@ Two decisions this document makes that the npm team may want to take differently
 1. **The global chain.** We propose shipping it in version 1, so that a provider serving several registries is one line of config. Per-registry lists alone are a smaller protocol, in which a provider applies only where the user names the registry ([Session lifecycle](#session-lifecycle)).
 2. **The operation catalogue.** We propose twelve operations, so that a registry can scope a token to the action. `read` and `publish`, with open names for the rest, are a smaller catalogue ([Operations](#4-operations)).
 
-Phase 1a has one of its own: [Phase 1a's open decisions](phase-1-token-helper.md#open-decisions-for-the-npm-maintainers).
+Phase 1a has one of its own: [Phase 1a's open decisions](phase-1a-token-helper.md#open-decisions-for-the-npm-maintainers).
 
 ## Appendix A: Operations in detail
 
@@ -900,7 +900,7 @@ Notes on npmjs.com:
 - **Tiers.** Read-only; read and write, either publish-and-stage or stage-only, which keeps dist-tag and deprecate ([changelog](https://github.blog/changelog/2026-09-18-stage-only-npm-tokens-for-safer-automation)).
 - **Interactive 2FA.** Changes to tokens, package access, maintainers, trusted publishers and org or team membership need an interactive 2FA challenge even with a bypass-2FA token ([changelog](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/)), as do `npm stage approve` and `reject` ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)).
 - **What the API documents.** Its API lists granular tokens as the security of every `/-/stage` path (list, record, tarball, stage, approve, delete) without naming a tier, and documents no 403 on the three reads ([API](https://api-docs.npmjs.com/)). Short-lived trusted-publishing tokens can run `npm stage publish` but no other `npm stage` subcommand ([npm-stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/)).
-- **Live test.** A live test on 2026-10-17 ([stage-tiers-test.md](stage-tiers-test.md); npm 11.19.0, the account's default publishing setting, the stricter setting that disallows tokens not tried) found, for one account and one package, that a read-only token selected to the package, and stage-only, publish-and-stage and session tokens, were each answered 200 on the stage list, a staged record and its tarball (plain HTTP GETs; the `npm stage` read commands were not run with them). The test covers npm 11.19.0, one account, one package and plain HTTP GETs, and nothing wider. Within that scope a provider could answer `stage-read` with a separate read-only token and no presence check.
+- **Live test.** A live test on 2026-10-17 ([the live token test](phase-2-implementation.md#the-npmjscom-stage-token-test); npm 11.19.0, the account's default publishing setting, the stricter setting that disallows tokens not tried) found, for one account and one package, that a read-only token selected to the package, and stage-only, publish-and-stage and session tokens, were each answered 200 on the stage list, a staged record and its tarball (plain HTTP GETs; the `npm stage` read commands were not run with them). The test covers npm 11.19.0, one account, one package and plain HTTP GETs, and nothing wider. Within that scope a provider could answer `stage-read` with a separate read-only token and no presence check.
 - **Package selection.** The record and the tarball honour the token's package selection, a read-only token selected to another package getting 404, but the list does not: it showed the staged version to that token too, filtered by the account rather than the token.
 
 ## Appendix B: Comparison with RFC #850
