@@ -250,6 +250,10 @@ const main = async () => {
       '--loglevel=verbose',
     ], { cwd: path.join(dir, cwd), timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
+    // E2E_SHOW=<scenario name> prints everything npm said in that scenario
+    if (process.env.E2E_SHOW === name) {
+      console.log(`--- ${name}\n${stdout}${stderr}\n---`)
+    }
     return {
       name,
       failed,
@@ -498,8 +502,10 @@ const main = async () => {
     const pastedLogin = await run('pasted-token-login', { args: ['login', '--auth-type=web'], user: `${nerf}:tokenHelper=${pasted}\n` })
     expect(pastedLogin, 'login refuses without printing it', pastedLogin.failed && pastedLogin.output.includes('(the value is not shown)') && !pastedLogin.output.includes('4AAQSkZJRg'))
 
-    // NODE_ENV and COLOR are what a parent npm set from its config, not the
-    // user's: the helper of a nested npm gets neither
+    // NODE_ENV and COLOR are not taken out of a helper's environment: neither
+    // carries code or a credential into it, so the helper of a nested npm gets
+    // them as its npm has them (and NODE_ENV is production here because the
+    // parent was run with --omit=dev)
     const probe = writeHelper(root, 'probe', [
       "process.stderr.write('probe NODE_ENV=' + process.env.NODE_ENV + ' COLOR=' + process.env.COLOR + '\\n')",
       "process.stdout.write('helper-token\\n')",
@@ -511,7 +517,8 @@ const main = async () => {
       pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --userconfig="${probeUser}" --globalconfig="${probeUser}.global" --cache="${probeUser}.cache" --loglevel=verbose` } },
     })
     expect(probed, 'the helper of the nested npm ran', probed.output.includes('probe NODE_ENV='))
-    expect(probed, 'and got neither the NODE_ENV nor the COLOR its parent set', probed.output.includes('probe NODE_ENV=undefined COLOR=undefined'))
+    expect(probed, 'and got the NODE_ENV and the COLOR its environment holds, which npm does not remove', /probe NODE_ENV=production COLOR=\S+/.test(probed.output) &&
+      !probed.output.includes('COLOR=undefined'))
 
     // what a child npm started by a script in another repository sees: the
     // parent's globalconfig in the environment, the repository's in .npmrc
@@ -524,8 +531,9 @@ const main = async () => {
     expect(child, 'the helper is reported as ignored', child.notices.some(l => l.includes('project config sets userconfig')))
 
     // the same through a real parent: npm runs a script that starts npm in a
-    // directory with no .npmrc, which can only know that the userconfig it
-    // inherits was chosen by the parent's project from the marker npm exports
+    // directory with no .npmrc. The userconfig it inherits is an environment
+    // value that names a file in the repository, which the location rule
+    // refuses for the child as it does for the parent
     const parent = await run('parent-runs-child', {
       args: ['run', 'child'],
       project: 'userconfig=<dir>/repo-user.npmrc\n',
@@ -535,13 +543,12 @@ const main = async () => {
     expect(parent, 'the child npm reaches the registry', !parent.failed && parent.requests.length)
     expect(parent, 'the repository file supplies no credential to it', auths(parent).join() === '-')
 
-    // Other ways a repository's scripts start npm. A script that drops the
-    // marker but stays in the project is still refused: the project's own
-    // .npmrc sets userconfig for the child as well.
-    const childScript = (cwd, dropMarker) => [
+    // Other ways a repository's scripts start npm. A child that stays in the
+    // project is refused: it reads the project's own .npmrc, which sets
+    // userconfig for it as well.
+    const childScript = (cwd) => [
       "const { spawnSync } = require('child_process')",
       'const env = { ...process.env }',
-      dropMarker ? 'delete env.npm_config_token_helper_untrusted' : '',
       `spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(npmCli)}, 'view', 'demo', 'version', ` +
         `${JSON.stringify(`--registry=${registry}`)}], { cwd: ${cwd}, env, stdio: 'inherit' })`,
     ].join('\n')
@@ -551,23 +558,18 @@ const main = async () => {
       ['child-in-the-repository', {
         args: ['run', 'child'],
         pkg: { scripts: { child: `"${process.execPath}" child.js` } },
-        files: { 'child.js': childScript('__dirname', false) },
-      }],
-      ['child-without-the-marker', {
-        args: ['run', 'child'],
-        pkg: { scripts: { child: `"${process.execPath}" child.js` } },
-        files: { 'child.js': childScript('__dirname', true) },
+        files: { 'child.js': childScript('__dirname') },
       }],
       ['child-of-npm-exec', {
         args: ['exec', '-c', `"${process.execPath}" child.js`],
-        files: { 'child.js': childScript('__dirname', false) },
+        files: { 'child.js': childScript('__dirname') },
       }],
       ['child-of-a-workspace-script', {
         args: ['run', 'child', '--workspace', 'a'],
         pkg: { workspaces: ['packages/*'] },
         files: {
           'packages/a/package.json': JSON.stringify({ name: 'a', version: '1.0.0', scripts: { child: `"${process.execPath}" child.js` } }),
-          'packages/a/child.js': childScript('__dirname', false),
+          'packages/a/child.js': childScript('__dirname'),
         },
       }],
     ]) {
@@ -576,45 +578,48 @@ const main = async () => {
       expect(result, 'the child npm reaches the registry', result.requests.length > 0)
       expect(result, 'the repository file supplies no credential to it', auths(result).join() === '-')
     }
-    // A script that drops the marker and leaves the project is refused as
-    // well: the file the repository's userconfig names lies in the repository,
-    // and the location rule needs no marker to see that.
-    const outside = await run('child-without-the-marker-outside', {
+    // A child that leaves the project is refused as well when the file the
+    // repository's userconfig names lies in the repository: the child sees an
+    // environment value that names a file the location rule marks.
+    const outside = await run('child-outside-the-project-file-in-the-repository', {
       ...chosenUserconfig,
       args: ['run', 'child'],
       pkg: { scripts: { child: `"${process.execPath}" child.js` } },
-      files: { 'child.js': childScript(JSON.stringify(elsewhereDir), true) },
+      files: { 'child.js': childScript(JSON.stringify(elsewhereDir)) },
     })
     children.push(outside)
-    expect(outside, 'a script that drops the marker and starts npm outside the project reaches the registry', outside.requests.length > 0)
-    expect(outside, 'and gets no credential from the repository file: it lies in the repository, which no marker is needed to see', auths(outside).join() === '-')
+    expect(outside, 'a child that starts npm outside the project reaches the registry', outside.requests.length > 0)
+    expect(outside, 'and gets no credential from the repository file: it lies in the repository, which the location rule sees from the file', auths(outside).join() === '-')
 
-    // What the marker is for: a project whose `userconfig` names a file that
-    // is not in the repository, which the child can only know the project
-    // chose from the marker. The helpers leave a file when they run, so that
-    // "not run" is seen against a run of the same helper.
+    // A project whose `userconfig` names a file that is not in the repository.
+    // A child that stays in the project reads the same `userconfig=` and refuses
+    // the file. A child that leaves the project sees only an environment value
+    // for a file no mark surrounds, and runs its helper: the one limit of this
+    // rule (the repository's own script did that, and runs as the user anyway).
+    // The helpers leave a file when they run, so that "not run" is seen against
+    // a run of the same helper.
     const picked = { project: 'userconfig=<outside>/picked.npmrc\n', userconfigFlag: false }
-    const pickedScripts = dropMarker => ({
+    const pickedScripts = cwd => ({
       args: ['run', 'child'],
       pkg: { scripts: { child: `"${process.execPath}" child.js` } },
-      files: { 'child.js': childScript(JSON.stringify(elsewhereDir), dropMarker) },
+      files: { 'child.js': childScript(cwd) },
     })
     const markedKept = markedHelper('picked-kept')
     const pickedKept = await run('project-picked-file-outside', {
-      ...picked, ...pickedScripts(false), outsideFiles: { 'picked.npmrc': markedKept.line },
+      ...picked, ...pickedScripts('__dirname'), outsideFiles: { 'picked.npmrc': markedKept.line },
     })
     children.push(pickedKept)
     expect(pickedKept, 'the child npm reaches the registry', pickedKept.requests.length > 0)
-    expect(pickedKept, 'the helper of a file the project chose is not run in the child, though the file is outside the repository', !markedKept.ran() && auths(pickedKept).join() === '-')
-    const markedDropped = markedHelper('picked-dropped')
-    const pickedDropped = await run('project-picked-file-outside-without-the-marker', {
-      ...picked, ...pickedScripts(true), outsideFiles: { 'picked.npmrc': markedDropped.line },
+    expect(pickedKept, 'the helper of a file the project chose is not run in a child that stays in the project, though the file is outside the repository', !markedKept.ran() && auths(pickedKept).join() === '-')
+    const markedAway = markedHelper('picked-away')
+    const pickedAway = await run('project-picked-file-outside-child-leaves', {
+      ...picked, ...pickedScripts(JSON.stringify(elsewhereDir)), outsideFiles: { 'picked.npmrc': markedAway.line },
     })
-    children.push(pickedDropped)
+    children.push(pickedAway)
     // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
-    expect(pickedDropped, 'control: with the marker dropped the same helper runs, so the file it leaves is where a run leaves it', markedDropped.ran())
-    expect(pickedDropped, 'a script that drops the marker and starts npm outside the project gets the helper of a file outside the repository that the project chose, the one limit of the marker (accepted)', auths(pickedDropped).includes('Bearer helper-token'))
-    notes.push(`a script that drops the marker and starts npm outside the project, with a project-chosen file outside the repository: ${auths(pickedDropped).join(', ')} (accepted: the repository's code is already running)`)
+    expect(pickedAway, 'control: a child that leaves the project runs the same helper, so the file it leaves is where a run leaves it', markedAway.ran())
+    expect(pickedAway, 'a child that starts npm outside the project gets the helper of a file outside the repository that the project chose, the one limit of the location rule here (accepted)', auths(pickedAway).includes('Bearer helper-token'))
+    notes.push(`a child that starts npm outside the project, with a project-chosen file outside the repository: ${auths(pickedAway).join(', ')} (accepted: the repository's code is already running)`)
 
     // a repository's node-options would reach a node-based helper through
     // NODE_OPTIONS and could read the credential it prints
@@ -724,27 +729,103 @@ const main = async () => {
       envProxyMarked.ran() && carried(envProxy).length > 0)
     parity.push(envHttps, flagHttps, envProxy)
 
-    // a child npm: the parent took `https-proxy` from the project and exports it as the user's own
-    // value, so the marker is what tells the child (a parent with the key in its own environment sends no marker)
+    // a child npm that a script of the repository starts (`npm run`): the
+    // parent exports what it took from the project's .npmrc as npm_config_*
+    // values, which the child reads as the user's own. The child, in the
+    // repository, reads the same .npmrc, and a value in its environment that
+    // equals the project's value for the key is the project's. A value that
+    // differs is the user's.
     const childRoute = (name, options) => {
       const marked = markedHelper(name)
       return run(name, {
         args: ['run', 'child', '--fetch-retries=0'],
         user: marked.line,
-        pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --fetch-retries=0` } },
+        // `cd .` keeps the child in the repository; cmd.exe cannot start a
+        // command line that begins with a quoted path
+        pkg: { scripts: { child: `cd . && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --fetch-retries=0` } },
         ...options,
       }).then(result => ({ result, marked }))
     }
     const childControl = await childRoute('child-route-control', {})
     expect(childControl.result, 'control: with no route in the project the child npm runs the helper and sends its token',
       !childControl.result.failed && childControl.marked.ran() && auths(childControl.result).join() === 'Bearer helper-token')
-    const childProject = await childRoute('child-route-from-the-project', { project: `https-proxy=${proxyUrl}\n` })
-    expect(childProject.result, 'a child npm started with the project\'s https-proxy refuses the helper, which is not run',
-      refused(childProject.result, '"https-proxy" comes from') && !childProject.marked.ran() && childProject.result.requests.length === 0)
-    const childUser = await childRoute('child-route-from-the-user', { env: { npm_config_https_proxy: proxyUrl } })
-    expect(childUser.result, 'the same key in the parent\'s own environment is the user\'s, and the child runs the helper, its token going to that proxy',
-      !refused(childUser.result, 'route') && childUser.marked.ran() && carried(childUser.result).length > 0)
-    parity.push(childControl.result, childProject.result, childUser.result)
+    const childProject = await childRoute('child-route-from-the-project', { project: 'ca=project-ca\n' })
+    expect(childProject.result, 'a child npm started with the project\'s ca refuses the helper, which is not run: its environment holds the value the project\'s .npmrc sets',
+      refused(childProject.result, '"ca" comes from') && !childProject.marked.ran() && childProject.result.requests.length === 0)
+    const childUserCa = await childRoute('child-route-from-the-user', { project: 'ca=project-ca\n', env: { npm_config_ca: 'user-ca' } })
+    expect(childUserCa.result, 'control: a ca the user put in the environment, which differs from the project\'s, is the user\'s: the child runs the helper and sends its token',
+      !childUserCa.result.failed && childUserCa.marked.ran() && auths(childUserCa.result).join() === 'Bearer helper-token')
+    const childUserProxy = await childRoute('child-route-from-the-user-proxy', { env: { npm_config_https_proxy: proxyUrl } })
+    expect(childUserProxy.result, 'the same key in the parent\'s own environment, with none in the project, is the user\'s, and the child runs the helper, its token going to that proxy',
+      !refused(childUserProxy.result, 'route') && childUserProxy.marked.ran() && carried(childUserProxy.result).length > 0)
+    parity.push(childControl.result, childProject.result, childUserCa.result, childUserProxy.result)
+
+    // a user or global file that the command line or the environment chose
+    // inside the repository (GitLab's NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc)
+    // is the project's layer for the route too: `ca` or `strict-ssl=false` in it
+    // refuses a helper that a trusted file names. The helper is in the global
+    // file, which the command line chose outside the repository.
+    const inRepo = markedHelper('userconfig-in-repo-route')
+    const inRepoRun = await run('env-userconfig-in-the-checkout-route', {
+      args: NO_RETRY, userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<dir>/ci.npmrc' },
+      files: { 'ci.npmrc': 'ca=ci-ca\nstrict-ssl=false\n' }, homeFiles: { 'global.npmrc': inRepo.line },
+    })
+    expect(inRepoRun, 'a file the environment chose inside the repository is the project\'s: its ca and strict-ssl refuse the helper, naming the file, and it is not run',
+      refused(inRepoRun, '"ca" comes from', '"strict-ssl" comes from', 'ci.npmrc') && !inRepo.ran() && inRepoRun.requests.length === 0)
+    const outOfRepo = markedHelper('userconfig-outside-route')
+    const outOfRepoRun = await run('env-userconfig-outside-route', {
+      args: NO_RETRY, userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<home>/ci.npmrc' },
+      homeFiles: { 'ci.npmrc': 'ca=ci-ca\nstrict-ssl=false\n', 'global.npmrc': outOfRepo.line },
+    })
+    expect(outOfRepoRun, 'control: the same file outside the repository is the user\'s: the helper runs and its token is sent',
+      !outOfRepoRun.failed && outOfRepo.ran() && auths(outOfRepoRun).join() === 'Bearer helper-token')
+    parity.push(inRepoRun, outOfRepoRun)
+
+    // a project's proxy refuses a helper for an http: request, which npm sends
+    // to the proxy itself, and not for an https: one: there the proxy sees a
+    // CONNECT tunnel and the credential travels inside it. No registry here
+    // answers TLS, so the https: request goes to a name that never resolves;
+    // the proxy is asked for the tunnel and refuses it, and what is seen is
+    // that the helper ran and that nothing but the tunnel's host reached the
+    // proxy. `ca` is refused for https: as well, beside it.
+    const tlsRegistry = 'https://registry.example.invalid/'
+    const tlsNerf = '//registry.example.invalid/'
+    const tlsProxyMarked = markedHelper('project-proxy-https', tlsNerf)
+    const tlsProxy = await run('project-proxy-https-helper', {
+      args: NO_RETRY, registryUrl: tlsRegistry, user: tlsProxyMarked.line, project: `https-proxy=${proxyUrl}\nproxy=${proxyUrl}\n`,
+    })
+    expect(tlsProxy, 'control: a project\'s proxy does not refuse the helper for an https: request: the helper runs, and the proxy is asked for a CONNECT tunnel',
+      !refused(tlsProxy, 'route') && tlsProxyMarked.ran() && tlsProxy.proxy.some(line => line.startsWith('CONNECT registry.example.invalid:443')))
+    expect(tlsProxy, 'and the credential is not in anything the proxy saw: it would travel inside the tunnel',
+      carried(tlsProxy).length === 0 && tlsProxy.proxy.every(line => line.endsWith(' -')))
+    const tlsCaMarked = markedHelper('project-ca-https', tlsNerf)
+    const tlsCa = await run('project-ca-https-helper', {
+      args: NO_RETRY, registryUrl: tlsRegistry, user: tlsCaMarked.line, project: 'ca=project-ca\n',
+    })
+    expect(tlsCa, 'a project\'s ca refuses the helper for an https: request, which is not run',
+      refused(tlsCa, '"ca" comes from') && !tlsCaMarked.ran())
+    parity.push(tlsProxy, tlsCa)
+
+    // publishConfig is a project setting too: publish registers the route keys
+    // of the manifest, and the per-request check sees them. The control is the
+    // same publish without the key, which runs the helper and sends the PUT.
+    const pcMarked = markedHelper('publishconfig-ca')
+    const pcRefused = await run('publishConfig-ca-helper', {
+      args: ['publish', '--fetch-retries=0'], user: pcMarked.line, pkg: { publishConfig: { ca: 'publish-ca' } },
+    })
+    expect(pcRefused, 'a publishConfig ca refuses the helper, naming the publishConfig, and it is not run',
+      refused(pcRefused, '"ca" comes from the publishConfig of package.json') && !pcMarked.ran() && pcRefused.requests.length === 0)
+    const pcControl = markedHelper('publishconfig-none')
+    const pcAllowed = await run('publishConfig-without-route-helper', { args: ['publish'], user: pcControl.line })
+    expect(pcAllowed, 'control: the same publish without a route key in publishConfig runs the helper, and the PUT carries its token',
+      pcControl.ran() && pcAllowed.requests.some(r => r === 'PUT Bearer helper-token'))
+    const pcProxyMarked = markedHelper('publishconfig-proxy')
+    const pcProxy = await run('publishConfig-proxy-helper', {
+      args: ['publish', '--fetch-retries=0'], user: pcProxyMarked.line, pkg: { publishConfig: { proxy: proxyUrl } },
+    })
+    expect(pcProxy, 'a publishConfig proxy refuses the helper for the http: registry, which is not run',
+      refused(pcProxy, '"proxy" comes from the publishConfig of package.json') && !pcProxyMarked.ran() && pcProxy.proxy.length === 0)
+    parity.push(pcRefused, pcAllowed, pcProxy)
 
     // plain http: to a host that is not this machine is refused whether or
     // not anything answers there (the name never resolves), and a loopback
