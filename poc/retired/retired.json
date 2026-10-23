@@ -2,13 +2,6 @@
   "comment": "The retired mechanisms of the Phase 1a prototype. One entry per patch in this folder. README.md says what each protected and why it was retired; .github/workflows/retired.yml applies each patch to the prototype and runs the tap files listed here; poc/claims/check.js compares this list with the folder and with the README table. `tests` maps a directory of npm/cli, relative to its root, to the tap files the patch restores, relative to that directory.",
   "retired": [
     {
-      "name": "child-untrusted-marker",
-      "patch": "child-untrusted-marker.patch",
-      "tests": {
-        "workspaces/config": ["test/index.js", "test/set-envs.js"]
-      }
-    },
-    {
       "name": "child-env-equals-project",
       "patch": "child-env-equals-project.patch",
       "tests": {

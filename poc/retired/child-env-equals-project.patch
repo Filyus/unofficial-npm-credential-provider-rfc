@@ -1,5 +1,5 @@
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index 4bac3ca..013aa99 100644
+index a0d513c..0ecf136 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -181,9 +181,9 @@ Two things a stored token would be sent over are refused for the helper's creden
@@ -11,11 +11,11 @@ index 4bac3ca..013aa99 100644
  The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
 -An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
 +An `npm` that another `npm` started (a script that runs `npm publish`) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats them the same way.
+ The same child also inherits the paths of the user and global files as `npm_config_userconfig`, `npm_config_globalconfig` and `npm_config_prefix`, which a project's `.npmrc` may have chosen in the parent, so the parent names the files it did not trust and that hold a `tokenHelper` key in `npm_config_token_helper_untrusted`, and the child does not trust them whatever the path in its environment says and whatever directory it runs in.
+ The weekly check for a newer npm, which any command may start, sends no credential from a helper.
  Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
- 
- ### Unsupported Custom Configuration Keys
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index c6b252f..69291d3 100644
+index 89e21f6..1121fc6 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -7,6 +7,7 @@ const { log, time } = require('proc-log')
@@ -26,7 +26,7 @@ index c6b252f..69291d3 100644
  const {
    readFile,
    writeFile,
-@@ -1063,12 +1064,11 @@ class Config {
+@@ -1080,12 +1081,11 @@ class Config {
    // - the project .npmrc, or a user or global file that #trustTokenHelpers did
    //   not trust, which the repository chose or can have written: it is the
    //   project's layer for this rule as for the tokenHelper key;
@@ -44,7 +44,7 @@ index c6b252f..69291d3 100644
    // - the publishConfig of the manifest, which publish and unpublish give to
    //   setPublishConfigRoute.
    // Only strict-ssl=false is a choice; a null is the default. Whether the
-@@ -1080,6 +1080,7 @@ class Config {
+@@ -1097,6 +1097,7 @@ class Config {
      if (!inherited.length && !configured) {
        return []
      }
@@ -52,7 +52,7 @@ index c6b252f..69291d3 100644
      const found = []
      for (const key of ROUTE_KEYS) {
        const overridden = Object.hasOwn(this.#publishConfigRoute, key)
-@@ -1094,6 +1095,9 @@ class Config {
+@@ -1111,6 +1112,9 @@ class Config {
          found.push({ key, source: this.data.get(where).source })
        } else if (where === 'env' && inherited.includes(key)) {
          found.push({ key, source: 'the environment, where a parent npm put its project config' })
@@ -63,10 +63,10 @@ index c6b252f..69291d3 100644
      }
      return found
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index e3400bc..d0dc25c 100644
+index f678156..0f1f4d0 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
-@@ -2967,32 +2967,26 @@ t.test('a child npm\'s environment holding its parent\'s project values', async
+@@ -3021,32 +3021,26 @@ t.test('a child npm\'s environment holding its parent\'s project values', async
    const project = 'https-proxy=http://project-proxy:3128\nca=project-ca\nstrict-ssl=false\ncafile=<path>/project/ca.pem\n'
    const parent = await loadHelperConfig(t, { user: keyed, project })
    const exported = Object.fromEntries(Object.entries(parent.config.env)

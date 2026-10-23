@@ -1,6 +1,6 @@
-From 6d2007ab62489e6e45fe59ef905e46c6e4dd0fc9 Mon Sep 17 00:00:00 2001
+From 27305d0e524e27d6246dcf301ab892f1d4578f45 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
-Date: Fri, 23 Oct 2026 21:23:51 +0500
+Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
  token
 
@@ -58,6 +58,17 @@ which is not run, with one warning per registry; one in a file loses to the
 helper as before. getCredentialsByURI reports the same, so whoami and publish
 agree with the request path.
 
+A child npm also inherits the paths of the user and global files as npm_config_userconfig,
+npm_config_globalconfig and npm_config_prefix, which its parent's project .npmrc may have
+chosen, and finds no .npmrc of the parent's project (a clone of a git dependency has
+another project or none) to tell it so. The parent therefore names the user and global
+files it did not trust that hold a tokenHelper key in npm_config_token_helper_untrusted,
+and a child does not trust them, whatever path its environment gives and wherever it
+runs, and passes the list on. Nothing is exported unless a file holds a helper key.
+
+The update check that any command may start once a week asks no helper: its request
+for the public npm package carries no credential from one.
+
 Only the user and global config files may set it. In project config,
 publishConfig, the environment and on the command line it is ignored with a
 warning, and so is the user file when project config sets userconfig, the global
@@ -85,7 +96,8 @@ says that the setting has to be removed and names a token stored beside it
 without revoking it, instead of revoking a token the helper's credential
 replaces.
 ---
- docs/lib/content/configuring-npm/npmrc.md  |  81 ++-
+ docs/lib/content/configuring-npm/npmrc.md  |  83 ++-
+ lib/cli/update-notifier.js                 |   2 +
  lib/commands/login.js                      |  13 +
  lib/commands/logout.js                     |  23 +
  lib/commands/publish.js                    |  11 +-
@@ -100,6 +112,7 @@ replaces.
  test/fixtures/token-helper/helper          |   2 +
  test/fixtures/token-helper/helper.cmd      |   1 +
  test/fixtures/token-helper/index.js        |   5 +
+ test/lib/cli/update-notifier.js            |  18 +
  test/lib/commands/login.js                 |  42 ++
  test/lib/commands/logout.js                |  44 ++
  test/lib/commands/publish.js               |  78 +++
@@ -110,11 +123,11 @@ replaces.
  test/lib/utils/publish-config.js           |  26 +
  test/lib/utils/token-helper.js             | 746 +++++++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 267 ++++++++
- workspaces/config/lib/set-envs.js          |  13 +
- workspaces/config/test/index.js            | 629 ++++++++++++++++-
- workspaces/config/test/set-envs.js         |  51 ++
- 29 files changed, 2723 insertions(+), 9 deletions(-)
+ workspaces/config/lib/index.js             | 284 ++++++++
+ workspaces/config/lib/set-envs.js          |  22 +
+ workspaces/config/test/index.js            | 699 ++++++++++++++++++-
+ workspaces/config/test/set-envs.js         |  76 +++
+ 31 files changed, 2866 insertions(+), 9 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -124,7 +137,7 @@ replaces.
  create mode 100644 test/lib/utils/token-helper.js
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index b1e7d16..92e532a 100644
+index b1e7d16..0a3b90c 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -87,7 +87,7 @@ This is primarily for distribution maintainers to override default configs in a
@@ -136,7 +149,7 @@ index b1e7d16..92e532a 100644
  This ensures that `npm` will never send credentials to the wrong host.
  
  The full list is:
-@@ -99,12 +99,91 @@ The full list is:
+@@ -99,12 +99,93 @@ The full list is:
   - `cafile` (path to certificate authority file)
   - `certfile` (path to certificate file)
   - `keyfile` (path to key file)
@@ -223,11 +236,26 @@ index b1e7d16..92e532a 100644
 +The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that a parent `npm` named as taken from its project (see below); and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
 +The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
 +An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
++The same child also inherits the paths of the user and global files as `npm_config_userconfig`, `npm_config_globalconfig` and `npm_config_prefix`, which a project's `.npmrc` may have chosen in the parent, so the parent names the files it did not trust and that hold a `tokenHelper` key in `npm_config_token_helper_untrusted`, and the child does not trust them whatever the path in its environment says and whatever directory it runs in.
++The weekly check for a newer npm, which any command may start, sends no credential from a helper.
 +Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
 +
  ### Unsupported Custom Configuration Keys
  
  Starting in npm v11.2.0, npm warns when unknown configuration keys are defined in `.npmrc`. In a future major version of npm, these unknown keys may no longer be accepted.
+diff --git a/lib/cli/update-notifier.js b/lib/cli/update-notifier.js
+index 893a6f0..a09a68d 100644
+--- a/lib/cli/update-notifier.js
++++ b/lib/cli/update-notifier.js
+@@ -23,6 +23,8 @@ const updateCheck = async (npm, spec, version, current) => {
+     defaultTag: 'latest',
+     ...npm.flatOptions,
+     cache: false,
++    // a public package: the request carries no configured helper's credential
++    getAuthorization: undefined,
+   }).catch(() => null)
+ 
+   // if pacote failed, give up
 diff --git a/lib/commands/login.js b/lib/commands/login.js
 index 630abf9..a8b07d3 100644
 --- a/lib/commands/login.js
@@ -979,6 +1007,56 @@ index 0000000..abeaea4
 +const { join } = require('node:path')
 +
 +module.exports = join(__dirname, process.platform === 'win32' ? 'helper.cmd' : 'helper')
+diff --git a/test/lib/cli/update-notifier.js b/test/lib/cli/update-notifier.js
+index 023a442..0af68a2 100644
+--- a/test/lib/cli/update-notifier.js
++++ b/test/lib/cli/update-notifier.js
+@@ -59,6 +59,7 @@ const runUpdateNotifier = async (t, {
+   mocks: _mocks = {},
+   command = 'help',
+   prefixDir,
++  homeDir,
+   version = CURRENT_VERSION,
+   argv = [],
+   wroteFile = false,
+@@ -102,6 +103,7 @@ const runUpdateNotifier = async (t, {
+     config,
+     exec: true,
+     prefixDir,
++    homeDir,
+     argv,
+   })
+   const registry = new MockRegistry({
+@@ -120,6 +122,7 @@ const runUpdateNotifier = async (t, {
+   return {
+     wroteFile,
+     result,
++    npm: mock.npm,
+   }
+ }
+ 
+@@ -129,6 +132,21 @@ t.test('duration has elapsed, no updates', async t => {
+   t.not(result)
+ })
+ 
++t.test('the check does not ask a token helper', async t => {
++  let seen
++  const home = { '.npmrc': '//registry.npmjs.org/:tokenHelper=/not/run\n' }
++  const pacote = { manifest: async (spec, opts) => {
++    seen = opts
++    return { version: CURRENT_VERSION }
++  } }
++  const { npm } = await runUpdateNotifier(t, {
++    homeDir: home, PACOTE_MOCK_REQ_COUNT: 0, mocks: { pacote },
++  })
++  t.type(npm.flatOptions.getAuthorization, 'function', 'the helper is configured')
++  t.ok(seen, 'the check ran')
++  t.equal(seen.getAuthorization, undefined, 'and carries no helper')
++})
++
+ t.test('situations in which we do not notify', t => {
+   t.test('nothing to do if notifier disabled', async t => {
+     const { wroteFile, result } = await runUpdateNotifier(t, {
 diff --git a/test/lib/commands/login.js b/test/lib/commands/login.js
 index 623bc58..66f51f5 100644
 --- a/test/lib/commands/login.js
@@ -2209,7 +2287,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..c6b252f 100644
+index 37dfecf..89e21f6 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -5,6 +5,7 @@ const nopt = require('nopt')
@@ -2220,11 +2298,12 @@ index 37dfecf..c6b252f 100644
  const { homedir } = require('node:os')
  const {
    readFile,
-@@ -20,8 +21,20 @@ const internalEnv = [
+@@ -20,8 +21,21 @@ const internalEnv = [
    'npm-version',
    'global-prefix',
    'local-prefix',
 +  'token-helper-project-transport',
++  'token-helper-untrusted',
  ]
  
 +// the settings that choose where a request goes and whom it trusts
@@ -2241,7 +2320,7 @@ index 37dfecf..c6b252f 100644
  const fileExists = (...p) => stat(resolve(...p))
    .then((st) => st.isFile())
    .catch(() => false)
-@@ -64,6 +77,13 @@ class Config {
+@@ -64,6 +78,13 @@ class Config {
    // Entries: { where, key, baseKey, source }. `baseKey` is non-null only for scoped keys (e.g. `<nerfdart>:foo`) and holds the trailing segment.
    // `env` and `publishConfig` entries warn instead of error.
    #unknownConfigs = []
@@ -2255,7 +2334,7 @@ index 37dfecf..c6b252f 100644
  
    static get typeDefs () {
      return typeDefs
-@@ -645,6 +665,18 @@ class Config {
+@@ -645,6 +666,18 @@ class Config {
        conf.raw = obj
        outer: for (const [key, value] of Object.entries(obj)) {
          const k = envReplace(key, this.env)
@@ -2274,7 +2353,7 @@ index 37dfecf..c6b252f 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +710,53 @@ class Config {
+@@ -678,6 +711,53 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -2328,7 +2407,7 @@ index 37dfecf..c6b252f 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -858,13 +937,192 @@ class Config {
+@@ -858,13 +938,208 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2349,9 +2428,11 @@ index 37dfecf..c6b252f 100644
 +  // file only when it sets neither `globalconfig` nor `prefix`; the default
 +  // path of the user file does not depend on the other two. Keys are compared
 +  // as npm applies them, after ${VAR} expansion: `user${UNSET?}config=` is
-+  // `userconfig`. A file that is not trusted is the repository's, and counts as
-+  // the project's layer for the settings of the route of a request too
-+  // (tokenHelperProjectTransport), not only for the tokenHelper key.
++  // `userconfig`. A child npm inherits the chosen paths as environment values,
++  // so its parent passes on which files it did not trust. A file that is not
++  // trusted is the repository's, and counts as the project's layer for the
++  // settings of the route of a request too (tokenHelperProjectTransport), not
++  // only for the tokenHelper key.
 +  #trustTokenHelpers (where) {
 +    const { raw } = this.data.get('project')
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
@@ -2359,6 +2440,8 @@ index 37dfecf..c6b252f 100644
 +    if (chosen) {
 +      this.#tokenHelperRefusals.set(where,
 +        `project config sets ${chosen}, so the ${where} file may not be the user's own`)
++    } else if (this.#inheritedUntrusted().includes(where)) {
++      this.#tokenHelperRefusals.set(where, 'the parent npm process did not trust it')
 +    } else {
 +      const inside = this.#chosenInsideProject(where)
 +      if (inside) {
@@ -2432,6 +2515,18 @@ index 37dfecf..c6b252f 100644
 +      }
 +    }
 +    return null
++  }
++
++  #inheritedUntrusted () {
++    return (this.env.npm_config_token_helper_untrusted || '').split(',')
++  }
++
++  // The files that may not configure a token helper but have a tokenHelper
++  // key, for setEnvs to pass on to child processes. It is empty, and so
++  // sets nothing, for anyone who has no helper configured.
++  get tokenHelperUntrusted () {
++    return ['user', 'global'].filter(where => !this.#tokenHelperTrusted.has(where) &&
++      (this.#tokenHelperSeen.has(where) || this.#inheritedUntrusted().includes(where)))
 +  }
 +
 +  // What publish and unpublish take from the manifest's publishConfig, for the
@@ -2521,7 +2616,7 @@ index 37dfecf..c6b252f 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1234,15 @@ class Config {
+@@ -976,6 +1251,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2538,13 +2633,22 @@ index 37dfecf..c6b252f 100644
      if (tokenReg) {
        creds.token = tokenReg
 diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
-index 12719b5..d3af168 100644
+index 12719b5..04dfd59 100644
 --- a/workspaces/config/lib/set-envs.js
 +++ b/workspaces/config/lib/set-envs.js
-@@ -93,6 +93,19 @@ const setEnvs = (config) => {
+@@ -93,6 +93,28 @@ const setEnvs = (config) => {
    // TODO this may not be the best away to persist these
    env.npm_config_global_prefix = config.globalPrefix
    env.npm_config_local_prefix = config.localPrefix
++  // a child npm inherits a project-chosen userconfig or globalconfig as an
++  // environment value, so it is told which files the parent did not trust for
++  // a token helper; nothing is set unless one of them has a helper
++  const untrusted = config.tokenHelperUntrusted || []
++  if (untrusted.length) {
++    env.npm_config_token_helper_untrusted = untrusted.join(',')
++  } else {
++    delete env.npm_config_token_helper_untrusted
++  }
 +  // The proxy, CA and strict-ssl settings that came from a project .npmrc are
 +  // exported above as the user's own values, and a child npm with a token
 +  // helper must know to refuse them; nothing is set unless a helper is
@@ -2562,7 +2666,7 @@ index 12719b5..d3af168 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..e3400bc 100644
+index 9f83d98..097ef09 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -3,7 +3,7 @@ const t = require('tap')
@@ -2574,7 +2678,7 @@ index 9f83d98..e3400bc 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2468,630 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2468,700 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2658,6 +2762,7 @@ index 9f83d98..e3400bc 100644
 +      'tokenHelper may only be set in user or global config')), `${where} config is reported`)
 +  }
 +  t.same(config.getUnknownConfigs('user'), [], 'tokenHelper is a known nerf-dart key')
++  t.same(config.tokenHelperUntrusted, [], 'and nothing is passed on to child processes')
 +})
 +
 +t.test('a user or global file that project config chose cannot configure a tokenHelper', async t => {
@@ -2682,6 +2787,7 @@ index 9f83d98..e3400bc 100644
 +      t.notOk(helperIn(config.flat, '//other.registry/'), 'not even from the file project config named')
 +      t.ok(warned.some(w => w.includes(`project config sets ${key}, so the ${distrusted} file`)), 'reported')
 +      t.notOk(warned.some(w => w.includes(`so the ${trusted} file`)), 'and only for the file it concerns')
++      t.same(config.tokenHelperUntrusted, [distrusted], 'and passed on to child processes')
 +    })
 +  }
 +
@@ -2717,6 +2823,7 @@ index 9f83d98..e3400bc 100644
 +    for (const part of refusedFor(path, dir, marker)) {
 +      t.ok(warned.some(w => w.includes(part)), `reported: ${part}`)
 +    }
++    t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
 +  }
 +  for (const [name, options, where, dir] of [
 +    ['--userconfig into the checkout', { argv: ['--userconfig=<path>/project/ci.npmrc'] }, 'user', 'project'],
@@ -2821,6 +2928,7 @@ index 9f83d98..e3400bc 100644
 +    t.equal(helperIn(dir.config.flat, '//helper.registry/'), HELPER, 'a directory without a mark, below home, in the current directory')
 +    const chosen = await loadHelperConfig(t, { user: keyed, global: keyed })
 +    t.equal(helperIn(chosen.config.flat, '//helper.registry/'), HELPER, 'both files, chosen outside the project')
++    t.same(chosen.config.tokenHelperUntrusted, [])
 +    const sibling = await loadHelperConfig(t, {
 +      files: false, sub: keyed, tree: { sibling: { 'ci.npmrc': keyed } }, argv: ['--userconfig=<path>/sibling/ci.npmrc'],
 +    })
@@ -2829,6 +2937,8 @@ index 9f83d98..e3400bc 100644
 +      files: false, user: keyed, argv: ['--userconfig=<path>/home/.npmrc', '--prefix=<path>/missing'],
 +    })
 +    t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there holds no file to refuse')
++    const absent = await loadHelperConfig(t, { files: false, argv: ['--userconfig=<path>/project/absent.npmrc'] })
++    t.same(absent.config.tokenHelperUntrusted, [], 'a file that is not there has no key to refuse')
 +  })
 +
 +  t.test('npm -g --prefix with node_modules only', async t => {
@@ -2894,6 +3004,70 @@ index 9f83d98..e3400bc 100644
 +    const prefixOutside = await loadHelperConfig(t, { files: false, global: keyed, env: { npm_config_prefix: '<path>/prefix' } })
 +    t.equal(helperIn(prefixOutside.config.flat, '//helper.registry/'), HELPER, 'a prefix in the environment outside the project')
 +  })
++})
++
++t.test('a child npm keeps distrusting files its parent did not trust', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  const trusting = await loadHelperConfig(t, { user: keyed, env: { npm_config_token_helper_untrusted: '' } })
++  t.equal(helperIn(trusting.config.flat, '//helper.registry/'), HELPER, 'an empty marker distrusts nothing')
++
++  const child = await loadHelperConfig(t, { user: keyed, env: { npm_config_token_helper_untrusted: 'user' } })
++  t.notOk(helperIn(child.config.flat, '//helper.registry/'), 'but not the file the parent marked')
++  t.ok(child.warned.some(w => w.includes('the parent npm process did not trust it')))
++  t.same(child.config.tokenHelperUntrusted, ['user'], 'and the marker is passed on again')
++  t.same(child.config.getUnknownConfigs('env'), [], 'the marker is not unknown config')
++
++  const grandchild = await loadHelperConfig(t, {
++    user: '',
++    global: keyed,
++    env: { npm_config_token_helper_untrusted: 'user,global' },
++  })
++  t.same(grandchild.config.tokenHelperUntrusted, ['user', 'global'],
++    'a marked file is passed on even when its file has no helper any more')
++
++  const nobody = await loadHelperConfig(t, { user: 'save=false\n' })
++  t.same(nobody.config.tokenHelperUntrusted, [], 'a file without a helper is never marked')
++
++  const noProject = await loadHelperConfig(t, { project: null, user: keyed })
++  t.equal(helperIn(noProject.config.flat, '//helper.registry/'), HELPER, 'a project without an .npmrc chose nothing')
++})
++
++t.test('a nested npm in another project trusts what its parent distrusted only with no marker', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  // the child runs in a clone with no .npmrc and no mark above the file, and
++  // its environment holds the paths its parent resolved
++  const tree = { elsewhere: { 'u.npmrc': keyed, etc: { npmrc: keyed } } }
++  const run = (name, env, marker, where) => t.test(name, async t => {
++    const opts = { files: false, outside: true, project: null, tree }
++    const withMarker = await loadHelperConfig(t, {
++      ...opts, env: { ...env, npm_config_token_helper_untrusted: marker },
++    })
++    t.notOk(helperIn(withMarker.config.flat, '//helper.registry/'), 'refused with the marker')
++    t.ok(withMarker.warned.some(w => w.includes('the parent npm process did not trust it')), 'and says why')
++    t.same(withMarker.config.tokenHelperUntrusted, where, 'and passes it on')
++    const without = await loadHelperConfig(t, { ...opts, env })
++    t.equal(helperIn(without.config.flat, '//helper.registry/'), HELPER, 'trusted without it')
++    t.same(without.config.tokenHelperUntrusted, [])
++  })
++  await run('userconfig', { npm_config_userconfig: '<path>/elsewhere/u.npmrc' }, 'user', ['user'])
++  await run('globalconfig', { npm_config_globalconfig: '<path>/elsewhere/u.npmrc' }, 'global', ['global'])
++  await run('prefix', { npm_config_prefix: '<path>/elsewhere' }, 'global', ['global'])
++})
++
++t.test('a child npm with both markers of its parent honours each', async t => {
++  const { config } = await loadHelperConfig(t, {
++    user: `//user.registry/:tokenHelper=${HELPER}\n`,
++    global: `//global.registry/:tokenHelper=${HELPER}\n`,
++    env: {
++      npm_config_token_helper_untrusted: 'user',
++      npm_config_token_helper_project_transport: 'proxy',
++      npm_config_proxy: 'http://proxy.invalid:3128',
++    },
++  })
++  t.notOk(helperIn(config.flat, '//user.registry/'), 'the file the parent distrusted holds no helper')
++  t.equal(helperIn(config.flat, '//global.registry/'), HELPER, 'the file it trusted does')
++  t.same(config.tokenHelperUntrusted, ['user'], 'the list of files is passed on')
++  t.same(config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy'], 'and so is the list of route keys')
 +})
 +
 +t.test('getCredentialsByURI reports a tokenHelper ahead of a stored token', async t => {
@@ -3206,10 +3380,10 @@ index 9f83d98..e3400bc 100644
 +  'a publishConfig key, which has no file behind it, names a placeholder')
 +})
 diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
-index 9426265..ab06cf7 100644
+index 9426265..0798f0d 100644
 --- a/workspaces/config/test/set-envs.js
 +++ b/workspaces/config/test/set-envs.js
-@@ -277,3 +277,54 @@ t.test('does not export persistent allow-scripts config', t => {
+@@ -277,3 +277,79 @@ t.test('does not export persistent allow-scripts config', t => {
    )
    t.end()
  })
@@ -3241,6 +3415,31 @@ index 9426265..ab06cf7 100644
 +  t.end()
 +})
 +
++t.test('a child npm is told which config files the parent did not trust for a token helper', t => {
++  const { definitions, defaults } = mockDefinitions(t)
++  const envConf = Object.create(defaults)
++  const cliConf = Object.create(envConf)
++  const make = (tokenHelperUntrusted, env) => ({
++    env,
++    defaults,
++    definitions,
++    list: [cliConf, envConf],
++    globalPrefix,
++    localPrefix,
++    npmBin,
++    execPath,
++    tokenHelperUntrusted,
++  })
++  const env = { npm_config_token_helper_untrusted: 'stale' }
++  setEnvs(make(['user'], env))
++  t.equal(env.npm_config_token_helper_untrusted, 'user')
++  setEnvs(make(['user', 'global'], env))
++  t.equal(env.npm_config_token_helper_untrusted, 'user,global', 'every untrusted file is passed on')
++  setEnvs(make([], env))
++  t.notOk('npm_config_token_helper_untrusted' in env, 'cleared when every file was trusted')
++  t.end()
++})
++
 +t.test('a nerf-darted credential in config is not exported, so it cannot reach a child as an environment value', t => {
 +  const { definitions, defaults } = mockDefinitions(t)
 +  const envConf = Object.create(defaults)
@@ -3268,7 +3467,7 @@ index 9426265..ab06cf7 100644
 2.52.0.windows.1
 
 
-From f113867792c47beec948c7c9ad510e8fc426c684 Mon Sep 17 00:00:00 2001
+From afbe912952484a00729bd9b642cc7554fb2df077 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
@@ -3298,7 +3497,7 @@ not start directly, is refused with a pointer to a .cmd wrapper.
  7 files changed, 165 insertions(+), 5 deletions(-)
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index 92e532a..4bac3ca 100644
+index 0a3b90c..a0d513c 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
 @@ -125,7 +125,7 @@ For example, for AWS CodeArtifact, on Linux and macOS (`chmod +x` it):

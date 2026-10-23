@@ -1,10 +1,10 @@
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index 4bac3ca..608fc08 100644
+index a0d513c..8b48131 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
-@@ -185,6 +185,7 @@ The project's configuration is, for these settings as for `tokenHelper`: a proje
- The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
- An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
+@@ -187,6 +187,7 @@ An `npm` that another `npm` started (a script that runs `npm publish`, or the in
+ The same child also inherits the paths of the user and global files as `npm_config_userconfig`, `npm_config_globalconfig` and `npm_config_prefix`, which a project's `.npmrc` may have chosen in the parent, so the parent names the files it did not trust and that hold a `tokenHelper` key in `npm_config_token_helper_untrusted`, and the child does not trust them whatever the path in its environment says and whatever directory it runs in.
+ The weekly check for a newer npm, which any command may start, sends no credential from a helper.
  Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
 +The same goes for the `publishConfig` of `package.json`: when it sets one of them and a helper serves the registry that `npm publish` or `npm unpublish` targets, the command is refused with `ETOKENHELPER`, naming `publishConfig.<key>`; remove it from `publishConfig`, or set it on the command line, which overrides `publishConfig`.
  

@@ -205,6 +205,8 @@ const main = async () => {
     return { line: `${regKey}:tokenHelper=${script}\n`, ran: () => fs.existsSync(marker) }
   }
 
+  const allResults = []
+
   // `<dir>` is the repository and `<home>` the user's home in every value a
   // scenario gives; `<root>/<name>` holds both, and `<outside>` is a directory
   // beside them that belongs to neither
@@ -254,18 +256,24 @@ const main = async () => {
     if (process.env.E2E_SHOW === name) {
       console.log(`--- ${name}\n${stdout}${stderr}\n---`)
     }
-    return {
+    const result = {
       name,
       failed,
       code,
       output: stdout + stderr,
       stdout: stdout.trim(),
-      requests: seen.map(s => `${s.method} ${s.authorization || '-'}`),
-      proxy: proxySeen.map(s => `${s.method} ${s.url} ${s.authorization || '-'}`),
+      // the weekly check for a newer npm asks the registry for the packument of
+      // `npm`; it is kept apart, and no scenario's request count includes it
+      requests: seen.filter(s => s.url !== '/npm').map(s => `${s.method} ${s.authorization || '-'}`),
+      updateCheck: [...seen.filter(s => s.url === '/npm'), ...proxySeen.filter(s => s.url.endsWith('/npm'))]
+        .map(s => s.authorization || '-'),
+      proxy: proxySeen.filter(s => !s.url.endsWith('/npm')).map(s => `${s.method} ${s.url} ${s.authorization || '-'}`),
       elsewhere: elsewhereSeen.map(s => `${s.method} ${s.url} ${s.authorization || "-"}`),
       notices: stderr.split(/\r?\n/).filter(l =>
         /tokenHelper|token-helper|ETOKENHELPER|ENEEDAUTH|Ignoring|helper says|helper-token/.test(l)),
     }
+    allResults.push(result)
+    return result
   }
 
   // Each check names the scenario and what must hold; a scenario that never
@@ -604,10 +612,11 @@ const main = async () => {
     // A project whose `userconfig` names a file that is not in the repository.
     // A child that stays in the project reads the same `userconfig=` and refuses
     // the file. A child that leaves the project sees only an environment value
-    // for a file no mark surrounds, and runs its helper: the one limit of this
-    // rule (the repository's own script did that, and runs as the user anyway).
-    // The helpers leave a file when they run, so that "not run" is seen against
-    // a run of the same helper.
+    // for a file no mark surrounds; the parent, which refused the file, names it
+    // in npm_config_token_helper_untrusted and the child refuses it too (this was
+    // a limit while that marker was retired). The helpers leave a file when they
+    // run, so that "not run" is seen against a run of the same helper
+    // (child-route-control).
     const picked = { project: 'userconfig=<outside>/picked.npmrc\n', userconfigFlag: false }
     const pickedScripts = cwd => ({
       args: ['run', 'child'],
@@ -626,10 +635,8 @@ const main = async () => {
       ...picked, ...pickedScripts(JSON.stringify(elsewhereDir)), outsideFiles: { 'picked.npmrc': markedAway.line },
     })
     children.push(pickedAway)
-    // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
-    expect(pickedAway, 'control: a child that leaves the project runs the same helper, so the file it leaves is where a run leaves it', markedAway.ran())
-    expect(pickedAway, 'a child that starts npm outside the project gets the helper of a file outside the repository that the project chose, the one limit of the location rule here (accepted)', auths(pickedAway).includes('Bearer helper-token'))
-    notes.push(`a child that starts npm outside the project, with a project-chosen file outside the repository: ${auths(pickedAway).join(', ')} (accepted: the repository's code is already running)`)
+    expect(pickedAway, 'the child that starts npm outside the project reaches the registry', pickedAway.requests.length > 0)
+    expect(pickedAway, 'and does not run the helper of a file outside the repository that the project chose: the parent refused it and said so in the environment', !markedAway.ran() && auths(pickedAway).join() === '-')
 
     // a repository's node-options would reach a node-based helper through
     // NODE_OPTIONS and could read the credential it prints
@@ -778,7 +785,13 @@ const main = async () => {
     // values and the child reads them as the user's. The child cannot compare
     // them with the .npmrc of its own directory, the clone's, which does not
     // hold them; the marker the parent exports says which came from the project.
-    const gitDependency = async (name, projectLines) => {
+    // The same holds for the user and global files: a project that chose one
+    // with `userconfig=` leaves the child an environment value for a file the
+    // clone's project knows nothing about, so the parent also names the files
+    // it did not trust that hold a helper (npm_config_token_helper_untrusted).
+    // `options` are the scenario's own (files, home files, no package.json);
+    // `spec` installs the dependency by name where the tree has no package.json.
+    const gitDependency = async (name, projectLines, options = {}, spec = false, helperAt = 'user') => {
       const marked = markedHelper(name)
       const dep = path.join(root, name, 'dep')
       fs.mkdirSync(dep, { recursive: true })
@@ -791,10 +804,11 @@ const main = async () => {
       git('commit', '-q', '-m', 'i')
       const url = `git+file://${process.platform === 'win32' ? '/' : ''}${dep.replaceAll('\\', '/')}`
       const result = await run(name, {
-        args: ['install', '--allow-git=all', '--no-audit', '--no-fund', '--fetch-retries=0'],
-        user: marked.line,
+        args: ['install', ...(spec ? [url] : []), '--allow-git=all', '--no-audit', '--no-fund', '--fetch-retries=0'],
+        ...(helperAt === 'user' ? { user: marked.line } : {}),
         project: projectLines,
-        pkg: { dependencies: { gitdep: url } },
+        pkg: spec ? {} : { dependencies: { gitdep: url } },
+        ...(typeof options === 'function' ? options(marked) : options),
       })
       return { result, marked }
     }
@@ -812,6 +826,40 @@ const main = async () => {
       parity.push(prepared.result)
     }
     parity.push(gitControl.result)
+
+    // R28': the project chooses the user's own file and names a proxy. The
+    // parent distrusts ~/.npmrc and does not run the helper; the nested npm in
+    // the clone reads the same file from npm_config_userconfig and, with no
+    // project .npmrc of its own, would trust it and send the token through
+    // the project's proxy. The parent's marker keeps it distrusted.
+    const homeUser = await gitDependency('git-dependency-user-file',
+      `userconfig=\${HOME}/.npmrc\nproxy=${proxyUrl}\n`,
+      marked => ({ userconfigFlag: false, homeFiles: { '.npmrc': marked.line } }), false, 'home')
+    expect(homeUser.result, 'a project .npmrc with userconfig=${HOME}/.npmrc and a proxy, and a git dependency: neither the parent nor the nested npm in the clone runs the helper, and its token reaches neither the proxy nor the registry',
+      !homeUser.marked.ran() && homeUser.result.proxy.every(l => !l.includes('helper-token')) && !auths(homeUser.result).includes('Bearer helper-token'))
+    parity.push(homeUser.result)
+
+    // R29: a tree with no package.json and no .git (an unpacked archive) whose
+    // .npmrc chooses ./u.npmrc, a file in the tree that holds a helper. The
+    // parent refuses it. The nested npm in the clone gets the path from the
+    // environment and finds no mark above it, so without the marker it would
+    // trust the file and run the repository's program. The same for
+    // globalconfig= and prefix=.
+    for (const [scenario, key] of [
+      ['git-dependency-userconfig', 'userconfig=./u.npmrc'],
+      ['git-dependency-globalconfig', 'globalconfig=./u.npmrc'],
+      ['git-dependency-prefix', 'prefix=./pfx'],
+    ]) {
+      const planted = await gitDependency(scenario, `${key}\n`, marked => ({
+        userconfigFlag: false,
+        globalconfigFlag: false,
+        packageJson: false,
+        files: key.startsWith('prefix=') ? { 'pfx/etc/npmrc': marked.line } : { 'u.npmrc': marked.line },
+      }), true, 'file')
+      expect(planted.result, `a tree with no marks whose .npmrc chooses a file with a helper (${key}), and a git dependency: the helper is run by neither the npm in the tree nor the nested npm in the clone`,
+        !planted.marked.ran() && !auths(planted.result).includes('Bearer helper-token') && planted.result.requests.length > 0)
+      parity.push(planted.result)
+    }
 
     // a user or global file that the command line or the environment chose
     // inside the repository (GitLab's NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc)
@@ -941,6 +989,17 @@ const main = async () => {
     expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
     expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
 
+    // U22: the update check that any command may start asks no helper. Each
+    // scenario runs on a fresh cache, so the check is due in all of them where
+    // npm does not see a CI (it does not check in one, and then none is seen);
+    // it races with commands that end at once, so how many were seen is said.
+    // The controls named `...-token` store the same string as a token of their
+    // own, which the check rightly sends; they are left out.
+    const checked = allResults.filter(r => r.updateCheck.length)
+    expect(
+      { name: 'update-check' },
+      `the weekly check for a newer npm sends no credential from a helper (seen in ${checked.length} of ${allResults.length} runs${process.env.CI ? ', CI set: npm does not check' : ''})`,
+      allResults.every(r => r.name.endsWith('-token') || r.updateCheck.every(a => a !== 'Bearer helper-token')) && (process.env.CI || checked.length > 0))
     const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
