@@ -12,7 +12,10 @@ on:
       - 'tests/**'
       - 'spec/**'
       - 'sources.md'
+      - 'phase-1-token-helper.md'
+      - 'phase-1b-credential-hardening.md'
       - 'phase-1-implementation.md'
+      - 'phase-2-credential-provider.md'
       - 'phase-2-conformance.md'
       - '.github/workflows/prototype.yml'
   workflow_dispatch:
@@ -90,6 +93,23 @@ jobs:
       - name: Test @npmcli/config
         working-directory: npm-cli
         run: node . test --ignore-scripts --workspace @npmcli/config
+      # tap reports a test that skips itself as a pass. The tests of the
+      # location rule that need a link (a file outside the project that links
+      # to one inside it) skip where links cannot be made, which is not the case
+      # on Linux or macOS: there a skip means the test no longer ran, and the
+      # run fails. The Windows runner may or may not be allowed to make links.
+      - name: The tests that need a link did not skip
+        if: runner.os != 'Windows'
+        working-directory: npm-cli/workspaces/config
+        run: |
+          node ../../node_modules/tap/bin/run.js --no-coverage -R tap test/index.js > config-tap.txt 2>&1 || { tail -n 80 config-tap.txt; exit 1; }
+          if grep -q '# SKIP' config-tap.txt; then
+            echo "tap reports skipped tests; each must have run here:"
+            grep -n '# SKIP' config-tap.txt
+            exit 1
+          fi
+          # the check itself: the test it exists for is in the output, and as a pass
+          grep -q 'ok [0-9]* - a link from outside the project to a file inside it' config-tap.txt
       - name: Test the npm-cli files the prototype changes
         working-directory: npm-cli
         run: >-
