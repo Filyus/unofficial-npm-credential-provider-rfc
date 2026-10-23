@@ -1,10 +1,10 @@
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index fe705c2..317c947 100644
+index 4bac3ca..608fc08 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
-@@ -184,6 +184,7 @@ So it is when `proxy` or `https-proxy` does and the request is over plain `http:
- The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
+@@ -185,6 +185,7 @@ The project's configuration is, for these settings as for `tokenHelper`: a proje
  The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
+ An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
  Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
 +The same goes for the `publishConfig` of `package.json`: when it sets one of them and a helper serves the registry that `npm publish` or `npm unpublish` targets, the command is refused with `ETOKENHELPER`, naming `publishConfig.<key>`; remove it from `publishConfig`, or set it on the command line, which overrides `publishConfig`.
  

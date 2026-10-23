@@ -1,19 +1,19 @@
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
-index 0db7840..6607e2c 100644
+index 4bac3ca..07c0a0c 100644
 --- a/docs/lib/content/configuring-npm/npmrc.md
 +++ b/docs/lib/content/configuring-npm/npmrc.md
-@@ -180,8 +180,7 @@ npm refuses to start a command that makes requests while a helper is configured
+@@ -179,8 +179,7 @@ npm refuses to start a command that makes requests while a helper is configured
  The credential is sent as a stored `_authToken` for the same registry is: with the same proxy and certificate settings and the same redirects.
  Two things a stored token would be sent over are refused for the helper's credential, with `ETOKENHELPER` and without running the helper.
  A request over plain `http:` to a host that is not this machine (`localhost`, `127.0.0.0/8`, `[::1]`) is refused: use `https:`.
 -A request is also refused when `ca` or `cafile` has its value from the project's configuration, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and where it comes from.
 -So it is when `proxy` or `https-proxy` does and the request is over plain `http:` (only a loopback one is allowed at all), which npm sends to the proxy itself; over `https:` a proxy only tunnels the connection, and the setting does not matter.
 +A request is also refused when `proxy`, `https-proxy`, `ca` or `cafile` has its value from the project's configuration, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and where it comes from.
- The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
+ The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that a parent `npm` named as taken from its project (see below); and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
  The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
- Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
+ An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
-index 3f1208e..9075519 100644
+index c14a97e..b12c750 100644
 --- a/lib/utils/token-helper.js
 +++ b/lib/utils/token-helper.js
 @@ -32,10 +32,6 @@ const MAX_WIN_CWD = 258
@@ -27,7 +27,7 @@ index 3f1208e..9075519 100644
  
  const isFile = (name) => {
    try {
-@@ -434,7 +430,6 @@ module.exports = (
+@@ -425,7 +421,6 @@ module.exports = (
          `to ${hostname}; use https`)
      }
      const transport = config.tokenHelperProjectTransport
@@ -79,10 +79,10 @@ index b167264..731262c 100644
  
    t.test('publishConfig and an OIDC token', async t => {
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
-index ba32aa7..273a732 100644
+index 0cb51ac..c54d3a4 100644
 --- a/test/lib/utils/token-helper.js
 +++ b/test/lib/utils/token-helper.js
-@@ -488,27 +488,20 @@ t.test('the helper\'s credential is not sent over plain http, except to this mac
+@@ -480,27 +480,20 @@ t.test('the helper\'s credential is not sent over plain http, except to this mac
  t.test('the helper\'s credential is not sent over a route that a project chose', async t => {
    const FILE = join('proj', '.npmrc')
    const refused = (key, source = FILE) => ({ transport: [{ key, source }] })
@@ -112,7 +112,7 @@ index ba32aa7..273a732 100644
      { message: /"proxy" comes from a.npmrc, "ca" comes from b.npmrc/ }, 'every setting is named')
    t.equal(calls.length, 0)
  
-@@ -520,24 +513,6 @@ t.test('the helper\'s credential is not sent over a route that a project chose',
+@@ -512,24 +505,6 @@ t.test('the helper\'s credential is not sent over a route that a project chose',
      'a registry without a helper has no credential to protect')
  })
  

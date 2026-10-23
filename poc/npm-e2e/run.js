@@ -11,7 +11,7 @@
 // patches of poc/patches applied, as CI does). The overlay is
 // undone before the script exits, including on Ctrl+C.
 
-const { execFile } = require('child_process')
+const { execFile, execFileSync } = require('child_process')
 const fs = require('fs')
 const http = require('http')
 const os = require('os')
@@ -741,10 +741,11 @@ const main = async () => {
 
     // a child npm that a script of the repository starts (`npm run`): the
     // parent exports what it took from the project's .npmrc as npm_config_*
-    // values, which the child reads as the user's own. The child, in the
-    // repository, reads the same .npmrc, and a value in its environment that
-    // equals the project's value for the key is the project's. A value that
-    // differs is the user's.
+    // values, which the child reads as the user's own, and it names the keys
+    // that came from the project in npm_config_token_helper_project_transport.
+    // A listed key whose value is in the child's environment is the project's,
+    // in whatever directory the child runs. A value the parent did not list
+    // is the user's.
     const childRoute = (name, options) => {
       const marked = markedHelper(name)
       return run(name, {
@@ -769,6 +770,48 @@ const main = async () => {
     expect(childUserProxy.result, 'the same key in the parent\'s own environment, with none in the project, is the user\'s, and the child runs the helper, its token going to that proxy',
       !refused(childUserProxy.result, 'route') && childUserProxy.marked.ran() && carried(childUserProxy.result).length > 0)
     parity.push(childControl.result, childProject.result, childUserCa.result, childUserProxy.result)
+
+    // The install that prepares a git dependency: pacote clones the repository
+    // and runs `npm install --force` with its cwd in the clone, which is
+    // another project (it has a .git and a package.json, and here a devDependency
+    // from this registry). The parent exports its project's route as npm_config_*
+    // values and the child reads them as the user's. The child cannot compare
+    // them with the .npmrc of its own directory, the clone's, which does not
+    // hold them; the marker the parent exports says which came from the project.
+    const gitDependency = async (name, projectLines) => {
+      const marked = markedHelper(name)
+      const dep = path.join(root, name, 'dep')
+      fs.mkdirSync(dep, { recursive: true })
+      fs.writeFileSync(path.join(dep, 'package.json'), JSON.stringify({
+        name: 'gitdep', version: '1.0.0', devDependencies: { demo: '1.0.0' }, scripts: { prepare: 'echo prepared' },
+      }))
+      const git = (...a) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=a', '-c', 'commit.gpgsign=false', ...a], { cwd: dep, stdio: 'ignore' })
+      git('init', '-q')
+      git('add', '-A')
+      git('commit', '-q', '-m', 'i')
+      const url = `git+file://${process.platform === 'win32' ? '/' : ''}${dep.replaceAll('\\', '/')}`
+      const result = await run(name, {
+        args: ['install', '--allow-git=all', '--no-audit', '--no-fund', '--fetch-retries=0'],
+        user: marked.line,
+        project: projectLines,
+        pkg: { dependencies: { gitdep: url } },
+      })
+      return { result, marked }
+    }
+    const gitControl = await gitDependency('git-dependency-control', '')
+    expect(gitControl.result, 'control: with no route in the project the install that prepares a git dependency runs the helper in the clone and sends its token',
+      gitControl.marked.ran() && auths(gitControl.result).includes('Bearer helper-token'))
+    for (const [scenario, key, line, onWire] of [
+      ['git-dependency-proxy', 'proxy', `proxy=${proxyUrl}\n`, r => r.proxy.some(l => l.includes('helper-token'))],
+      ['git-dependency-ca', 'ca', 'ca=project-ca\n', () => false],
+    ]) {
+      const prepared = await gitDependency(scenario, line)
+      expect(prepared.result, `a project .npmrc with ${key} and a git dependency: the nested npm in the clone refuses the helper, which is not run, and its token reaches neither the proxy nor the registry`,
+        !prepared.marked.ran() && !onWire(prepared.result) && !auths(prepared.result).includes('Bearer helper-token') &&
+        prepared.result.output.includes(`"${key}" comes from`))
+      parity.push(prepared.result)
+    }
+    parity.push(gitControl.result)
 
     // a user or global file that the command line or the environment chose
     // inside the repository (GitLab's NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc)

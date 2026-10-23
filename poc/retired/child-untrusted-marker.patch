@@ -1,37 +1,16 @@
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index d07a486..83c6876 100644
+index c6b252f..89e21f6 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -22,6 +22,7 @@ const internalEnv = [
-   'npm-version',
    'global-prefix',
    'local-prefix',
+   'token-helper-project-transport',
 +  'token-helper-untrusted',
  ]
  
  // the settings that choose where a request goes and whom it trusts
-@@ -78,9 +79,11 @@ class Config {
-   // `env` and `publishConfig` entries warn instead of error.
-   #unknownConfigs = []
-   // The user and global files that may configure a token helper (see
--  // #trustTokenHelpers) and why the others may not.
-+  // #trustTokenHelpers), why the others may not, and the ones whose file has a
-+  // tokenHelper key at all.
-   #tokenHelperTrusted = new Set()
-   #tokenHelperRefusals = new Map()
-+  #tokenHelperSeen = new Set()
-   #publishConfigRoute = {}
- 
-   static get typeDefs () {
-@@ -667,6 +670,7 @@ class Config {
-         // the machine owner may configure one: a project .npmrc comes with
-         // the repository, and env and cli values can be set by scripts.
-         if (/(^|:)tokenHelper$/.test(k)) {
-+          this.#tokenHelperSeen.add(where)
-           if (!this.#tokenHelperTrusted.has(where)) {
-             const why = this.#tokenHelperRefusals.get(where) ||
-               'tokenHelper may only be set in user or global config'
-@@ -951,9 +955,11 @@ class Config {
+@@ -954,9 +955,11 @@ class Config {
    // file only when it sets neither `globalconfig` nor `prefix`; the default
    // path of the user file does not depend on the other two. Keys are compared
    // as npm applies them, after ${VAR} expansion: `user${UNSET?}config=` is
@@ -46,7 +25,7 @@ index d07a486..83c6876 100644
    #trustTokenHelpers (where) {
      const { raw } = this.data.get('project')
      const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
-@@ -961,6 +967,8 @@ class Config {
+@@ -964,6 +967,8 @@ class Config {
      if (chosen) {
        this.#tokenHelperRefusals.set(where,
          `project config sets ${chosen}, so the ${where} file may not be the user's own`)
@@ -55,7 +34,7 @@ index d07a486..83c6876 100644
      } else {
        const inside = this.#chosenInsideProject(where)
        if (inside) {
-@@ -1036,6 +1044,18 @@ class Config {
+@@ -1039,6 +1044,18 @@ class Config {
      return null
    }
  
@@ -75,7 +54,7 @@ index d07a486..83c6876 100644
    // settings that choose the route of a request (see tokenHelperProjectTransport).
    // They replace what the layers say, as flatten() does for the request, and
 diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
-index 12719b5..0338354 100644
+index d3af168..04dfd59 100644
 --- a/workspaces/config/lib/set-envs.js
 +++ b/workspaces/config/lib/set-envs.js
 @@ -93,6 +93,15 @@ const setEnvs = (config) => {
@@ -91,11 +70,11 @@ index 12719b5..0338354 100644
 +  } else {
 +    delete env.npm_config_token_helper_untrusted
 +  }
-   if (cliConf.editor) {
-     env.EDITOR = cliConf.editor
-   }
+   // The proxy, CA and strict-ssl settings that came from a project .npmrc are
+   // exported above as the user's own values, and a child npm with a token
+   // helper must know to refuse them; nothing is set unless a helper is
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index d67d9eb..4bb5224 100644
+index 80ff50b..01f1e66 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2548,6 +2548,7 @@ t.test('tokenHelper is honored only from user and global config', async t => {
@@ -173,10 +152,10 @@ index d67d9eb..4bb5224 100644
    const { config } = await loadHelperConfig(t, {
      user: [
 diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
-index 3a63fe7..5936e87 100644
+index ab06cf7..0798f0d 100644
 --- a/workspaces/config/test/set-envs.js
 +++ b/workspaces/config/test/set-envs.js
-@@ -278,6 +278,31 @@ t.test('does not export persistent allow-scripts config', t => {
+@@ -305,6 +305,31 @@ t.test('a child npm is told which project settings choose the route of a request
    t.end()
  })
  

@@ -9,10 +9,10 @@
       }
     },
     {
-      "name": "child-transport-marker",
-      "patch": "child-transport-marker.patch",
+      "name": "child-env-equals-project",
+      "patch": "child-env-equals-project.patch",
       "tests": {
-        "workspaces/config": ["test/index.js", "test/set-envs.js"]
+        "workspaces/config": ["test/index.js"]
       }
     },
     {

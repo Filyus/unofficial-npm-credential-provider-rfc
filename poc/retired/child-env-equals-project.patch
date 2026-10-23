@@ -1,0 +1,116 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 4bac3ca..013aa99 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -181,9 +181,9 @@ Two things a stored token would be sent over are refused for the helper's creden
+ A request over plain `http:` to a host that is not this machine (`localhost`, `127.0.0.0/8`, `[::1]`) is refused: use `https:`.
+ A request is also refused when `ca` or `cafile` has its value from the project's configuration, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and where it comes from.
+ So it is when `proxy` or `https-proxy` does and the request is over plain `http:` (only a loopback one is allowed at all), which npm sends to the proxy itself; over `https:` a proxy only tunnels the connection, and the setting does not matter.
+-The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that a parent `npm` named as taken from its project (see below); and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
++The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
+ The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
+-An `npm` that another `npm` started (a script that runs `npm publish`, or the install that prepares a git dependency in its own clone, which has another project or none) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats a listed key with a value in its environment as the project's, whatever directory it runs in, and names it for its own children. The child compares nothing with a `.npmrc` of its own directory. An environment value that the parent did not list is the user's own, even when a project's `.npmrc` holds the same value.
++An `npm` that another `npm` started (a script that runs `npm publish`) gets the project's settings as `npm_config_*` variables, so the parent also names the keys that came from the project in `npm_config_token_helper_project_transport` and the child treats them the same way.
+ Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
+ 
+ ### Unsupported Custom Configuration Keys
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index c6b252f..69291d3 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -7,6 +7,7 @@ const { log, time } = require('proc-log')
+ const { resolve, dirname, join } = require('node:path')
+ const { realpathSync, statSync, existsSync } = require('node:fs')
+ const { homedir } = require('node:os')
++const { isDeepStrictEqual } = require('node:util')
+ const {
+   readFile,
+   writeFile,
+@@ -1063,12 +1064,11 @@ class Config {
+   // - the project .npmrc, or a user or global file that #trustTokenHelpers did
+   //   not trust, which the repository chose or can have written: it is the
+   //   project's layer for this rule as for the tokenHelper key;
+-  // - the environment, for a key that a parent npm listed in
+-  //   npm_config_token_helper_project_transport: a parent exports its project
+-  //   config to a child as npm_config_* values, which the child reads as the
+-  //   user's own, wherever the child runs (a nested npm in a git dependency's
+-  //   clone has another project, or none), so the parent says which came from
+-  //   its project and the child does not compare with any file;
++  // - the environment, where the project .npmrc holds the same value: a parent
++  //   npm exports its project config to a child as npm_config_* values, which
++  //   the child reads as the user's own, and the child re-reads the project
++  //   .npmrc from its own cwd. The values are compared as npm parsed them, so
++  //   the same setting written in the file and in the environment is equal;
+   // - the publishConfig of the manifest, which publish and unpublish give to
+   //   setPublishConfigRoute.
+   // Only strict-ssl=false is a choice; a null is the default. Whether the
+@@ -1080,6 +1080,7 @@ class Config {
+     if (!inherited.length && !configured) {
+       return []
+     }
++    const project = this.data.get('project')
+     const found = []
+     for (const key of ROUTE_KEYS) {
+       const overridden = Object.hasOwn(this.#publishConfigRoute, key)
+@@ -1094,6 +1095,9 @@ class Config {
+         found.push({ key, source: this.data.get(where).source })
+       } else if (where === 'env' && inherited.includes(key)) {
+         found.push({ key, source: 'the environment, where a parent npm put its project config' })
++      } else if (where === 'env' && hasOwnProperty(project.data, key) &&
++        isDeepStrictEqual(project.data[key], value)) {
++        found.push({ key, source: `the environment, which holds the value that ${project.source} sets` })
+       }
+     }
+     return found
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index e3400bc..d0dc25c 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -2967,32 +2967,26 @@ t.test('a child npm\'s environment holding its parent\'s project values', async
+   const project = 'https-proxy=http://project-proxy:3128\nca=project-ca\nstrict-ssl=false\ncafile=<path>/project/ca.pem\n'
+   const parent = await loadHelperConfig(t, { user: keyed, project })
+   const exported = Object.fromEntries(Object.entries(parent.config.env)
+-    .filter(([key]) => /^npm_config_(https_proxy|ca|strict_ssl|cafile|token_helper_project_transport)$/.test(key)))
+-  t.same(Object.keys(exported).sort(),
+-    ['npm_config_ca', 'npm_config_cafile', 'npm_config_https_proxy', 'npm_config_strict_ssl', 'npm_config_token_helper_project_transport'],
+-    'the parent exports its project values like any other, and names them')
++    .filter(([key]) => /^npm_config_(https_proxy|ca|strict_ssl|cafile)$/.test(key)))
++  t.same(Object.keys(exported).sort(), ['npm_config_ca', 'npm_config_cafile', 'npm_config_https_proxy', 'npm_config_strict_ssl'],
++    'the parent exports its project values like any other')
+   const keys = (child) => child.config.tokenHelperProjectTransport.map(({ key }) => key)
+-  // strict-ssl=false is exported as an empty string, which a child reads as
+-  // true, so it never reaches a child as a value that skips verification
+-  const all = ['https-proxy', 'ca', 'cafile']
+-
+-  t.same(keys(await loadHelperConfig(t, { user: keyed, project, env: exported })), [...all, 'strict-ssl'],
+-    'a child in the same project refuses them, and its own file\'s strict-ssl=false')
+-  t.same(keys(await loadHelperConfig(t, { user: keyed, project: null, env: exported })), all,
+-    'and one with no project .npmrc')
+-  t.same(keys(await loadHelperConfig(t, { user: keyed, project: 'save=false\n', env: exported })), all,
+-    'and one whose project .npmrc holds other values')
+-
+-  const plain = Object.fromEntries(Object.entries(exported).filter(([key]) => key !== 'npm_config_token_helper_project_transport'))
+-  const noSsl = project.replace('strict-ssl=false\n', '')
+-  t.same(keys(await loadHelperConfig(t, { user: keyed, project: noSsl, env: plain })), [],
+-    'an environment value equal to the project .npmrc\'s that the parent did not name is the user\'s own')
++
++  const child = await loadHelperConfig(t, { user: keyed, project, env: exported })
++  t.same(keys(child), ['https-proxy', 'ca', 'cafile', 'strict-ssl'], 'the same values in the child\'s project .npmrc')
++  t.match(child.config.tokenHelperProjectTransport[0].source, /the environment/, 'the source says where it is from')
++
++  t.same(keys(await loadHelperConfig(t, { user: keyed, project: null, env: exported })), [],
++    'with no project .npmrc in the child there is nothing to compare with')
+   t.same(keys(await loadHelperConfig(t, {
+-    user: keyed, project: noSsl, env: { ...exported, npm_config_https_proxy: 'http://mine:1' },
+-  })), all, 'a listed key is the project\'s whatever value the environment holds')
++    user: keyed, project, env: { ...exported, npm_config_https_proxy: 'http://mine:1', npm_config_strict_ssl: 'true' },
++  })), ['ca', 'cafile'], 'a value of the user\'s own that differs from the file\'s is the user\'s')
+   t.same(keys(await loadHelperConfig(t, {
+     user: keyed, project, env: exported, argv: ['--https-proxy=http://project-proxy:3128', '--strict-ssl'],
+   })), ['ca', 'cafile'], 'the command line is the user\'s even when it holds the same value')
++  t.same(keys(await loadHelperConfig(t, {
++    user: keyed, project: 'save=false\n', env: exported,
++  })), [], 'values that the project .npmrc does not hold are the user\'s')
+ })
+ 
+ t.test('a nested npm in another project keeps refusing its parent\'s project route', async t => {
