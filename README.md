@@ -2,32 +2,55 @@
 
 An independent proposal for letting npm get registry credentials from a user-configured program at the moment it needs them, instead of reading a long-lived secret from `.npmrc` or the environment. It builds on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion and answers [npm/cli#8141](https://github.com/npm/cli/issues/8141). It is not an accepted npm RFC.
 
-## The proposal
+## Roadmap
 
-| Document | What it is |
-|---|---|
-| [Phase 1a: `tokenHelper`](phase-1a-token-helper.md) | pnpm's per-registry `tokenHelper` for npm: an executable prints a token, npm sends it as a stored token is sent. The motivation, and the trust rule both phases follow. Lands on its own, without 1b or Phase 2 |
-| [Phase 1b: credential hardening](phase-1b-credential-hardening.md) | How every credential travels, stored tokens, helpers and providers alike: `https:` or loopback only, transport from config a project cannot write, redirects, the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major |
-| [Phase 2: credential provider protocol](phase-2-credential-provider.md) | A versioned JSON protocol modelled on Cargo's: npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login`/`logout` delegation, the security model, prior art |
-| [Examples](examples/README.md) | How providers for real registries would answer, and where each is easy to get wrong |
+The proposal goes upstream in three phases. Each phase has two documents. The **proposal** says what and why, in the sections of the npm/rfcs template. The **implementation** document says what is submitted where, which submission carries each rule and which test pins it, what is not claimed, how to run the checks, and what the reviews found.
 
-The old address, [rfc-credential-provider.md](rfc-credential-provider.md), says where each of its sections went.
+Phase 1a lands on its own: it does not wait for 1b, and the helper needs no change when 1b lands. Phase 2 builds on the seam that 1a adds to npm-registry-fetch.
 
-Phase 1a changes nothing for anyone who has not configured a helper, Phase 1b nothing until its setting is turned on, Phase 2 nothing for anyone who has not configured a provider, and both are configured only in the user's own user or global npm config.
+Phase 1a changes nothing for anyone who has not configured a helper, and Phase 2 nothing for anyone who has not configured a provider; both are configured only in the user's own user or global npm config. Phase 1b changes nothing that npm sends while its setting, `strict-credentials`, is off, but does warn at the default level wherever the setting would change something ([The setting](phase-1b-credential-hardening.md#the-setting)); the next major turns it on.
 
-## Evidence
+### Phase 1a: `tokenHelper`
 
-| Document | What it holds |
-|---|---|
-| [sources.md](sources.md) | Is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are |
-| [phase-1a-implementation.md](phase-1a-implementation.md) | Does the npm patch do what Phase 1a says, and how do we know? The code, the checks, each Phase 1 rule with its test, the review rounds and the limits |
-| [phase-2-implementation.md](phase-2-implementation.md) | What does the conformance material check, rule by rule, and what can only an npm client show? The artifacts, each Phase 2 rule with its test, the fuzzing history |
-| [the live token test](phase-2-implementation.md#the-npmjscom-stage-token-test) | The live test of which npmjs.com tokens read `/-/stage`, and its result |
-| [poc/patches](poc/patches) | The prototype as patches against upstream npm/cli and npm-registry-fetch |
+[Proposal](phase-1a-token-helper.md): pnpm's per-registry `tokenHelper` for npm. An executable prints a token and npm sends it as a stored token is sent. It holds the motivation and the trust rule that every phase follows. [Implementation](phase-1a-implementation.md). Done when one helper serves npm and pnpm from the same `~/.npmrc`.
+
+| Submission | State | Condition to move on |
+|---|---|---|
+| [1. npm-registry-fetch: `opts.getAuthorization`](phase-1a-implementation.md#1-npm-registry-fetch-optsgetauthorization) | Ready for review | Released as 20.1.0 |
+| [2. npm/cli: the token helper](phase-1a-implementation.md#2-npmcli-the-token-helper) | Draft until npm-registry-fetch 20.1.0 is published | Merged and released |
+| [3. npm/cli: the `profile` guard, the 401 hint and the runner's diagnostics](phase-1a-implementation.md#3-npmcli-the-profile-guard-the-401-hint-and-the-runners-diagnostics) | Written; opened after 2 | Merged |
+
+### Phase 1b: credential hardening
+
+[Proposal](phase-1b-credential-hardening.md): how every credential travels, stored tokens, helpers and providers alike. `https:` or loopback only, transport from config a project cannot write, redirects, the cache index, error responses, and no project-chosen user or global file. One opt-in setting, `strict-credentials`, the default in the next major. [Implementation](phase-1b-implementation.md). Done when no credential travels outside the rules unless the user turned them off.
+
+| Submission | State | Condition to move on |
+|---|---|---|
+| [1. make-fetch-happen: `Authorization` never in the cache index](phase-1b-implementation.md#1-make-fetch-happen-authorization-never-in-the-cache-index) | Design only | Released |
+| [2. npm-registry-fetch: the route and the answer of a credentialed request](phase-1b-implementation.md#2-npm-registry-fetch-the-route-and-the-answer-of-a-credentialed-request) | Design only | Released |
+| [3. npm/cli: `strict-credentials`](phase-1b-implementation.md#3-npmcli-strict-credentials) | Design only | Submission 2 released; then shipped in a minor |
+| [4. npm/cli, next major: on by default](phase-1b-implementation.md#4-npmcli-next-major-strict-credentials-on-by-default) | Design only | Submission 3 shipped in a minor |
+
+### Phase 2: credential provider protocol
+
+[Proposal](phase-2-credential-provider.md): a versioned JSON protocol modelled on Cargo's. npm says which registry, package and action it needs a credential for, the provider answers with the credential and how long to cache it, and is told when the registry rejects it. Chaining, `npm login` and `logout` delegation, the security model, prior art. [Implementation](phase-2-implementation.md). Done when a provider written against the vectors alone works with npm.
+
+| Submission | State | Condition to move on |
+|---|---|---|
+| [1. npm/rfcs: the credential provider RFC](phase-2-implementation.md#1-npmrfcs-the-credential-provider-rfc) | Draft | Accepted |
+| [2. npm-registry-fetch: a second `getAuthorization` call after a rejection](phase-2-implementation.md#2-npm-registry-fetch-a-second-getauthorization-call-after-a-rejection) | Design only | 1 accepted and Phase 1a submission 1 released; then released itself |
+| [3. npm/cli: provider sessions, the chain and the cache](phase-2-implementation.md#3-npmcli-provider-sessions-the-chain-and-the-cache) | Design only | 1 accepted and 2 released |
+
+### Shared material
+
+- [Examples](examples/README.md): how providers for real registries would answer, and where each is easy to get wrong.
+- [sources.md](sources.md): is what the RFC says about npm, pnpm, Cargo and registries true? Each fact with its source and the date it was checked, what is not verified, and where the saved copies of the sources are.
+- [poc/patches](poc/patches): the Phase 1a prototype as patches against upstream npm/cli and npm-registry-fetch.
+- The old address, [rfc-credential-provider.md](rfc-credential-provider.md), says where each of its sections went.
 
 ## Running the checks
 
-The Phase 2 conformance artifacts (schema, policy, vectors, Python model, Rust pair) are listed in [phase-2-implementation.md](phase-2-implementation.md).
+The Phase 2 conformance artifacts (schema, policy, vectors, Python model, Rust pair) are listed in [phase-2-implementation.md](phase-2-implementation.md#how-it-is-checked).
 
 Prerequisites, as the CI workflows have them:
 

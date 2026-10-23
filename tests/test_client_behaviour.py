@@ -1,7 +1,7 @@
 """Behaviour of npm that only a client shows, as far as the Python model can:
 which operation a command sends, what is logged and at which level, how often a
 warning is said, what happens to a provider when npm exits. The rest of the
-list is in phase-2-implementation.md, "What only an npm client can show"."""
+list is in phase-2-implementation.md, "Limits"."""
 
 from __future__ import annotations
 

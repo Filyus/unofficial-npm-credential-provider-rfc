@@ -15,6 +15,7 @@ on:
       - 'phase-1a-token-helper.md'
       - 'phase-1b-credential-hardening.md'
       - 'phase-1a-implementation.md'
+      - 'phase-1b-implementation.md'
       - 'phase-2-credential-provider.md'
       - 'phase-2-implementation.md'
       - '.github/workflows/prototype.yml'

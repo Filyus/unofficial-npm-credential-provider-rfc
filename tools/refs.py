@@ -57,12 +57,21 @@ def key(url: str) -> str:
     return url.split("#")[0]
 
 
+FENCE = re.compile(r"^(```|~~~)[^\n]*\n.*?^\1[^\n]*$", re.M | re.S)
+
+
+def links_in(text: str) -> list[str]:
+    """The addresses a document cites. A fenced block is text to copy somewhere
+    else, a pull request body for instance, and cites nothing: its links point
+    at this repository's main branch because they are read where it is pasted."""
+    return [match.group(1) or match.group(2) for match in LINK.finditer(FENCE.sub("", text))]
+
+
 def cited() -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     for path in documents():
-        text = path.read_text(encoding="utf-8")
-        for match in LINK.finditer(text):
-            found.setdefault(key(match.group(1) or match.group(2)), []).append(str(path.relative_to(ROOT)).replace("\\", "/"))
+        for url in links_in(path.read_text(encoding="utf-8")):
+            found.setdefault(key(url), []).append(str(path.relative_to(ROOT)).replace("\\", "/"))
     return found
 
 

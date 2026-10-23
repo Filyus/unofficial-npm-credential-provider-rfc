@@ -66,6 +66,12 @@ class RefsTests(unittest.TestCase):
                 self.assertTrue(refs.BRANCH_SOURCE.match(f"https://github.com/o/r/blob/{ref}/a.go"))
         self.assertFalse(refs.BRANCH_SOURCE.match("https://github.com/o/r/blob/" + "a" * 40 + "/a.go"))
 
+    def test_a_fenced_block_cites_nothing(self) -> None:
+        """A pull request text in a fence links the main branch of this repository, as it must where it is pasted."""
+        text = ("[a](https://example.test/a)\n\n```markdown\nsee [b](https://example.test/b) and <https://example.test/c>\n```\n\n"
+                "~~~\n[d](https://example.test/d)\n~~~\n[e](https://example.test/e) and <https://example.test/f>\n")
+        self.assertEqual(refs.links_in(text), ["https://example.test/a", "https://example.test/e", "https://example.test/f"])
+
     def test_pinning_rewrites_whole_link_targets_only(self) -> None:
         old, new = "https://github.com/o/r/blob/main/a.go", "https://github.com/o/r/blob/" + "a" * 40 + "/a.go"
         text = (f"[a]({old}) [b]({old}2) <{old}> [c]({old}#L10) text {old} in prose\n"

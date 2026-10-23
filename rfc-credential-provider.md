@@ -18,5 +18,5 @@ Where the old sections went:
 | 8. Example: GitLab provider | [examples/gitlab.md](examples/gitlab.md) |
 | Rationale and Alternatives | [Phase 2](phase-2-credential-provider.md#rationale-and-alternatives); environment variables in [Phase 1a](phase-1a-token-helper.md#rationale-and-alternatives) |
 | Implementation, Configuration | [Phase 1a](phase-1a-token-helper.md#implementation) and [Phase 2](phase-2-credential-provider.md#implementation) |
-| Prior Art, open decisions for the npm maintainers, Future possibilities, Appendix | [Phase 2](phase-2-credential-provider.md#prior-art) |
+| Prior Art, open decisions for the npm maintainers, Appendix | [Phase 2](phase-2-credential-provider.md#prior-art) |
 | Migration Plan | [Phase 1a](phase-1a-token-helper.md#migration-plan) and [Phase 2](phase-2-credential-provider.md#migration-plan) |

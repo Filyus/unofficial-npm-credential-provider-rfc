@@ -3,6 +3,8 @@
 // Checks every relative link in the repository's tracked Markdown files: the
 // target file exists, and an anchor, in the same file or another, names a
 // heading there (GitHub's slug rules, headings inside code fences ignored).
+// Absolute links to this repository's main branch, as the pull request texts
+// have them, are checked the same way against the working tree.
 //
 //   node tools/check-links.js
 
@@ -37,10 +39,24 @@ const slugsOf = file => {
 const LINK = /\]\((<[^<>\n]*>|(?:[^()\s<]|\((?:[^()\s]|\([^()\s]*\))*\))+)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g
 const decode = target => { try { return decodeURIComponent(target) } catch { return target } }
 
+// A pull request text, which sits in a fenced block and is pasted somewhere
+// else, links this repository by absolute address, to the main branch. Those
+// links must resolve here too, anywhere in a document, fenced or not.
+const OWN = /\]\(https:\/\/github\.com\/Filyus\/unofficial-npm-credential-provider-rfc\/blob\/main\/([^)\s#]+)(?:#([^)\s]*))?\)/g
+
 const broken = []
+const check = (file, target, resolved, anchor) => {
+  if (!fs.existsSync(path.join(root, resolved))) {
+    broken.push(`${file}: ${target} (no such file)`)
+    return
+  }
+  if (anchor !== undefined && resolved.endsWith('.md') && !slugsOf(resolved).has(anchor)) {
+    broken.push(`${file}: ${target} (no such heading in ${resolved})`)
+  }
+}
 for (const file of files) {
-  const text = withoutFences(fs.readFileSync(path.join(root, file), 'utf8'))
-  for (const m of text.matchAll(LINK)) {
+  const whole = fs.readFileSync(path.join(root, file), 'utf8')
+  for (const m of withoutFences(whole).matchAll(LINK)) {
     const target = decode(m[1][0] === '<' ? m[1].slice(1, -1) : m[1])
     if (/^[a-z]+:/i.test(target)) {
       continue
@@ -48,14 +64,10 @@ for (const file of files) {
     const hash = target.indexOf('#')
     const rel = hash < 0 ? target : target.slice(0, hash)
     const anchor = hash < 0 ? undefined : target.slice(hash + 1)
-    const resolved = rel ? path.posix.normalize(path.posix.join(path.posix.dirname(file), rel)) : file
-    if (!fs.existsSync(path.join(root, resolved))) {
-      broken.push(`${file}: ${target} (no such file)`)
-      continue
-    }
-    if (anchor !== undefined && resolved.endsWith('.md') && !slugsOf(resolved).has(anchor)) {
-      broken.push(`${file}: ${target} (no such heading in ${resolved})`)
-    }
+    check(file, target, rel ? path.posix.normalize(path.posix.join(path.posix.dirname(file), rel)) : file, anchor)
+  }
+  for (const m of whole.matchAll(OWN)) {
+    check(file, m[0].slice(2, -1), decode(m[1]), m[2] === undefined ? undefined : decode(m[2]))
   }
 }
 if (broken.length) {

@@ -1,15 +1,22 @@
 'use strict'
 
-// Confirms that every piece of evidence phase-1a-implementation.md,
-// phase-2-implementation.md and sources.md cite still exists: each
-// `kind: text` reference must be found in the files of that kind, so a test
-// that is renamed or deleted cannot leave an RFC claim without evidence.
+// Confirms that every piece of evidence the three implementation documents
+// (phase-1a-, phase-1b- and phase-2-implementation.md) and sources.md cite
+// still exists: each `kind: text` reference must be found in the files of that
+// kind, so a test that is renamed or deleted cannot leave an RFC claim without
+// evidence.
 // Kinds: fetch, config, cli (npm's tests), e2e, probe (this repository's
 // scripts), spec (a key of spec/policy-v1.json), py (a file in tests/, or
 // `module.test_name`, or `module.Class.test_name`, for a test in it: a bare
 // module name proves only that the file exists), js (a
 // test title in examples/providers/*.test.js) and rs (a Rust test function
 // under poc/rust/crates).
+//
+// It also checks the submissions of each implementation document: every row of
+// a table under `## Rule by rule` has a Submission cell naming submissions of
+// that document's `## Submissions` table, every submission is named by a rule,
+// and, for Phase 1a, the commit shas and the lib lines added that the table
+// states are those of the commits in poc/patches.
 //
 //   node poc/claims/check.js <npm-cli checkout> <npm-registry-fetch checkout>
 
@@ -79,12 +86,184 @@ const found = (kind, text) => {
   return loaded[kind].includes(text)
 }
 
-const documents = ['phase-1a-implementation.md', 'phase-2-implementation.md', 'sources.md']
+const implementations = ['phase-1a-implementation.md', 'phase-1b-implementation.md', 'phase-2-implementation.md']
+const documents = [...implementations, 'sources.md']
 const refs = documents.flatMap(name => [...read(path.join(rfc, name)).matchAll(/`(fetch|config|cli|e2e|probe|spec|py|js|rs): ([^`]+)`/g)])
 const missing = refs.filter(([, kind, text]) => !found(kind, text))
 for (const [ref] of missing) {
   console.log(`missing ${ref}`)
 }
 console.log(`${refs.length} references, ${missing.length} missing`)
-console.log(missing.length || !refs.length ? 'FAIL' : 'PASS')
-process.exitCode = missing.length || !refs.length ? 1 : 0
+
+// The cells of a table row, split at the bars that are not inside a code span.
+const cellsOf = line => {
+  const cells = []
+  let current = ''
+  let inCode = false
+  for (const ch of line.trim().replace(/^\|/, '')) {
+    if (ch === '`') {
+      inCode = !inCode
+    }
+    if (ch === '|' && !inCode) {
+      cells.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  return cells
+}
+
+// The tables of the `## title` section of a document: { header, rows }, cells
+// as strings. Lines in a fenced block are not part of any table.
+const tablesIn = (text, title) => {
+  const lines = []
+  let inSection = false
+  let fenced = false
+  for (const line of text.split('\n')) {
+    if (/^(```|~~~)/.test(line)) {
+      fenced = !fenced
+    }
+    if (!fenced && /^## /.test(line)) {
+      inSection = line.slice(3).trim() === title
+      continue
+    }
+    if (inSection && !fenced) {
+      lines.push(line)
+    }
+  }
+  const tables = []
+  let current = null
+  for (const line of lines) {
+    if (line.startsWith('|')) {
+      if (!current) {
+        current = []
+        tables.push(current)
+      }
+      current.push(cellsOf(line))
+    } else {
+      current = null
+    }
+  }
+  return tables.map(([header, , ...rows]) => ({ header, rows }))
+}
+
+// Added lines of each commit of an mbox patch under lib/ and
+// workspaces/config/lib/, counted by walking the hunks by their own counters.
+const addedLibLines = file => {
+  const commits = []
+  let commit = null
+  let name = null
+  let oldLeft = 0
+  let newLeft = 0
+  // a checkout with autocrlf has CRLF endings; the walk does not depend on them
+  for (const line of read(file).split(/\r?\n/)) {
+    const from = /^From ([0-9a-f]{40}) /.exec(line)
+    if (from && !oldLeft && !newLeft) {
+      commit = { sha: from[1], added: 0 }
+      commits.push(commit)
+      name = null
+    } else if (!oldLeft && !newLeft) {
+      const diff = /^diff --git a\/.* b\/(.*)$/.exec(line)
+      const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line)
+      if (diff) {
+        name = diff[1]
+      } else if (hunk) {
+        oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1])
+        newLeft = hunk[2] === undefined ? 1 : Number(hunk[2])
+      }
+    } else if (line[0] === '+') {
+      newLeft--
+      if (name.startsWith('lib/') || name.startsWith('workspaces/config/lib/')) {
+        commit.added++
+      }
+    } else if (line[0] === '-') {
+      oldLeft--
+    } else if (line[0] !== '\\') {
+      oldLeft--
+      newLeft--
+    }
+  }
+  return commits
+}
+
+const problems = []
+let ruleRows = 0
+for (const name of implementations) {
+  const text = read(path.join(rfc, name))
+  const [submissions] = tablesIn(text, 'Submissions')
+  if (!submissions || submissions.header[0] !== '#') {
+    problems.push(`${name}: no Submissions table whose first column is #`)
+    continue
+  }
+  const numbers = new Set(submissions.rows.map(row => row[0]))
+  const named = new Set()
+  const rules = tablesIn(text, 'Rule by rule')
+  if (!rules.length) {
+    problems.push(`${name}: no table under Rule by rule`)
+  }
+  for (const { header, rows } of rules) {
+    const column = header.indexOf('Submission')
+    if (column < 0) {
+      problems.push(`${name}: a table under Rule by rule has no Submission column (${header.join(' | ')})`)
+      continue
+    }
+    for (const row of rows) {
+      ruleRows++
+      const cell = row[column] ?? ''
+      if (!/^\d+(, \d+)*$/.test(cell)) {
+        problems.push(`${name}: the Submission cell "${cell}" of "${row[0].slice(0, 60)}" is not a submission number or a list of them`)
+        continue
+      }
+      for (const number of cell.split(', ')) {
+        if (!numbers.has(number)) {
+          problems.push(`${name}: "${row[0].slice(0, 60)}" names submission ${number}, which the Submissions table does not have`)
+        }
+        named.add(number)
+      }
+    }
+  }
+  for (const number of numbers) {
+    if (!named.has(number)) {
+      problems.push(`${name}: submission ${number} is named by no rule`)
+    }
+  }
+  if (name === 'phase-1a-implementation.md') {
+    const patches = {
+      'npm-registry-fetch': addedLibLines(path.join(rfc, 'poc', 'patches', 'npm-registry-fetch.patch')),
+      'npm/cli': addedLibLines(path.join(rfc, 'poc', 'patches', 'npm-cli.patch')),
+    }
+    const matched = new Set()
+    for (const row of submissions.rows) {
+      const repository = Object.keys(patches).find(key => row[1].startsWith(key))
+      const sha = /commit `([0-9a-f]{7,40})`/i.exec(row[2])?.[1]
+      const lines = /(\d+) lib lines/.exec(row[2])?.[1]
+      if (!repository || !sha || !lines) {
+        problems.push(`${name}: submission ${row[0]} states no repository, no commit sha or no "N lib lines"`)
+        continue
+      }
+      const commit = patches[repository].find(c => c.sha.startsWith(sha))
+      if (!commit) {
+        problems.push(`${name}: submission ${row[0]} names commit ${sha}, which poc/patches has no commit of in ${repository}`)
+        continue
+      }
+      matched.add(commit.sha)
+      if (commit.added !== Number(lines)) {
+        problems.push(`${name}: submission ${row[0]} states ${lines} lib lines, the patch of ${sha} adds ${commit.added}`)
+      }
+    }
+    for (const commit of Object.values(patches).flat()) {
+      if (!matched.has(commit.sha)) {
+        problems.push(`${name}: the commit ${commit.sha.slice(0, 7)} of poc/patches is in no submission`)
+      }
+    }
+  }
+}
+for (const problem of problems) {
+  console.log(problem)
+}
+console.log(`${ruleRows} rule rows in ${implementations.length} documents, ${problems.length} problems with submissions`)
+
+const failed = missing.length || !refs.length || problems.length
+console.log(failed ? 'FAIL' : 'PASS')
+process.exitCode = failed ? 1 : 0

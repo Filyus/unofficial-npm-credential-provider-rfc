@@ -105,7 +105,7 @@ For a file chosen on the command line or in the environment there is no setting 
 
 ## Prior implementation
 
-Much of this was prototyped for the helper alone on the branch `token-helper-hardened` (npm-registry-fetch 0fcdbb7, npm-cli 7836c74): the check for what may carry a credential, the redirect loop, the transport taken from layers a project cannot write, the redaction of error responses and the end-to-end transport checks. This proposal generalises them to every credential and adds the child-process case. The same branch holds heavier machinery that this proposal does not use: containment by filesystem identity and the masking of fourteen encodings.
+Much of this was prototyped for the helper alone on the branch `token-helper-hardened` (npm-registry-fetch 0fcdbb7, npm-cli 7836c74): the check for what may carry a credential, the redirect loop, the transport taken from layers a project cannot write, the redaction of error responses and the end-to-end transport checks. This proposal generalises them to every credential and adds the child-process case. The same branch holds heavier machinery that this proposal does not use: containment by filesystem identity and the masking of fourteen encodings. [phase-1b-implementation.md](phase-1b-implementation.md) lists the submissions, each rule with the submission that carries it, and what the branch showed.
 
 ## Migration Plan
 
