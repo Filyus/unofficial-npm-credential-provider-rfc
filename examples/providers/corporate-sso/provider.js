@@ -49,13 +49,14 @@ const hasTokens = (granted, withRefresh) =>
   granted.expires_in > 0 &&
   (!withRefresh || (typeof granted.refresh_token === 'string' && granted.refresh_token !== ''))
 
-// Inside the timeout npm gives each kind of request (RFC, Session lifecycle): an
-// interactive `get` and `login` wait for a person, the others do not.
+// Inside the timeout npm gives each kind of request (RFC, Session lifecycle): a
+// write `get` at a terminal and `login` wait for a person, the others do not (a
+// read never does).
 const budgetMs = (req) => {
   if (req.kind === 'erase') {
     return 8 * 1000
   }
-  if (req.kind === 'logout' || (req.kind === 'get' && !req.interactive)) {
+  if (req.kind === 'logout' || (req.kind === 'get' && (req.operation === 'read' || !req.interactive))) {
     return 25 * 1000
   }
   return WAIT_MS
@@ -168,8 +169,9 @@ const start = (args) => {
 
   // The access token of the stored session: the cached one while it has
   // time left, else a refresh. `invalid_grant` means the login is dead:
-  // a device flow where a person is there, `other` where not.
-  // `login: false`: a dead login is `other` even where a person is there, for a renewal
+  // `other` for a read, whatever `interactive` says (a read never starts a
+  // sign-in); for a write at a terminal, a device flow.
+  // `login: false`: a dead login is `other` even for such a write, for a renewal
   // that comes after the person has already been asked something
   const sessionAccess = async (req, { force = false, until, login = true } = {}) => {
     const session = readSession()
@@ -190,7 +192,7 @@ const start = (args) => {
       return refreshed.json.access_token
     }
     if (refreshed.json && refreshed.json.error === 'invalid_grant') {
-      if (!req.interactive || !login) {
+      if (req.operation === 'read' || !req.interactive || !login) {
         throw new Error(expiredMessage(req))
       }
       return signIn(req, until)

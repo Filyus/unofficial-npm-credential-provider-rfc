@@ -1,0 +1,26 @@
+{
+  "hosts": [
+    "https://api.github.com",
+    "https://github.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "clientId": "example-oauth-app",
+    "owners": {
+      "@Acme": "work",
+      "@OctoCat": "personal"
+    },
+    "defaultAccount": "work"
+  },
+  "env": {},
+  "presence": [],
+  "store": {},
+  "state": {
+    "tokens": {}
+  },
+  "expect": {
+    "store": {
+      "https://npm.pkg.github.com/": null
+    }
+  }
+}

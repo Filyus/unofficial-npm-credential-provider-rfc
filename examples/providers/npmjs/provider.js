@@ -108,7 +108,7 @@ const create = async (args) => {
         cache: 'expires',
         expiresAt: sessionExpiresAt(entry),
         operationIndependent: false,
-        granularity: request.package ? 'package' : 'registry',
+        granularity: request.package && request.operation !== 'read' ? 'package' : 'registry',
       })
     }
     return ok('get', {
@@ -150,6 +150,16 @@ const create = async (args) => {
     }
     const pick = found[0]
     if (pick.entry.tier === 'session' && ctx.now() >= sessionExpiresAt(pick.entry)) {
+      if (request.operation === 'read') {
+        // a read never starts a login, and public reads on this host survive a lapsed one:
+        // nothing is sent, and npm says so at warn. `never`, so the next read asks again
+        return ok('get', {
+          auth: { type: 'none' },
+          cache: 'never',
+          operationIndependent: false,
+          granularity: 'registry',
+        })
+      }
       return err('other', 'The stored session token has expired. Run npm login.')
     }
     if (op.write) {
@@ -215,7 +225,9 @@ const create = async (args) => {
         ? err('other', `${request.operation} was refused with 403 and no other credential is released for it.`)
         : widened
     }
-    return release(request, op.tiers)
+    // only where the person has chosen it (`readWithSession`), the session token is the last tier a
+    // read falls back to: it is the user's full permissions, which every install then carries
+    return release(request, request.operation === 'read' && ctx.config.readWithSession ? [...op.tiers, 'session'] : op.tiers)
   }
 
   const erase = async (request) => {

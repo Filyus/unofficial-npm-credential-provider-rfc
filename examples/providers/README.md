@@ -43,7 +43,7 @@ The transcripts check what someone thought to record. [`tests/test_provider_sess
 It checks what the RFC requires of any provider rather than exact answers:
 
 - every answer and the whole session pass the Python model;
-- a request that is not interactive asks the person nothing;
+- a request that is not interactive asks the person nothing, and a `get` for `read` asks nothing and shows no sign-in, whatever `interactive` says;
 - what a provider does not know is `operation-not-supported`, never a read;
 - a foreign registry is `url-not-supported`;
 - erase does not log out;

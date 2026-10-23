@@ -30,6 +30,17 @@
 // the provider's own store here, logout removes it, which a build that leaves the
 // CLI's cache alone would have to record in a store of its own instead).
 //
+// A read never starts a sign-in and never asks the person anything, whatever
+// `interactive` says: a lapsed Identity Center session on a read is `other`
+// naming the renew command. Only a write on an interactive request may start
+// the sign-in, and only after the person has said yes to the write.
+//
+// In CI the reference provider reads only exported AWS_ACCESS_KEY_ID and
+// AWS_SECRET_ACCESS_KEY, a stand-in for the SDK default chain, which a real
+// build would use and which also finds container credentials (CodeBuild),
+// web identity (GitHub OIDC) and instance profiles. A long-lived IAM user key
+// in the job is what this stand-in would encourage; a real build avoids it.
+//
 // A write on an `interactive` request asks the person twice on the controlling
 // terminal, inside one 4 minute 30 second budget (npm's 5 minutes for an
 // interactive `get`), the first question before any sign-in is started: yes or
@@ -37,7 +48,10 @@
 // sent to STS as `TokenCode` beside the device's `SerialNumber`. A code that is
 // not typed in time, or that STS refuses, is `other`. A request that is not
 // `interactive` asks nothing, and a write is served to it only where the
-// provider's own configuration says the ambient role is a publisher.
+// provider's own configuration (`ciPublisher`, never an environment variable)
+// says the ambient role is a publisher: where the write credential is already
+// ambient in the job, the gate adds nothing and releasing it is honest, and
+// where it is not, `interactive: false` alone does not release it.
 
 const { serve, ok, err, log, Answer } = require('../lib/protocol.js')
 const { loadContext, plain } = require('../lib/context.js')
@@ -225,8 +239,9 @@ const start = (args) => {
   }
 
   // the identity a request mints from: the ambient role in CI, else the
-  // sign-in, renewed by a login only when a person is there to complete it
-  const identityKey = async (req, target, until) => {
+  // sign-in, renewed by a login only for a write on an interactive request, after
+  // the person has said yes to it: a read never starts a sign-in, whatever `interactive`
+  const identityKey = async (req, target, until, write) => {
     const key = ambient()
     if (key) {
       if (!(await callerIdentityOk(target, key))) {
@@ -235,7 +250,7 @@ const start = (args) => {
       return key
     }
     let signed = await signedInKey(target)
-    if (signed === null && req.interactive) {
+    if (signed === null && write && req.interactive) {
       await ssoLogin(until)
       signed = await signedInKey(target)
     }
@@ -391,7 +406,7 @@ const start = (args) => {
       }
     }
 
-    const keyId = await identityKey(req, target, deadline)
+    const keyId = await identityKey(req, target, deadline, write)
     if (!write) {
       const minted = await authorizationToken(target, keyId, READ_SECONDS)
       const answer = ok('get', {

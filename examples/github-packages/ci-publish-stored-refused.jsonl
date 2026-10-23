@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","version":"2.4.2","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"a write credential needs the person to confirm, and this request is not interactive"}}}
+{"from":"client","event":"close"}

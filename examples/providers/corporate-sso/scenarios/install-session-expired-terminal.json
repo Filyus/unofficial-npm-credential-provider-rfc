@@ -37,7 +37,7 @@
     },
     "state": {
       "idp": {
-        "devices": 1,
+        "devices": 0,
         "pending": 3,
         "refreshes": 0
       },
@@ -45,6 +45,5 @@
         "minted": []
       }
     }
-  },
-  "terminal": false
+  }
 }

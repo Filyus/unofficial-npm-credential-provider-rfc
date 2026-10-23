@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"registries":["https://npm.pkg.github.com/"],"capabilities":["login","logout"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://npm.pkg.github.com/","scope":"@acme","package":"widgets","operation":"read","command":"install","interactive":true}}
+{"from":"provider","message":{"Err":{"kind":"not-found"}}}
+{"from":"client","event":"close"}

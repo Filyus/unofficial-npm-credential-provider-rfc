@@ -20,7 +20,10 @@
 // provider's own policy: an interactive write (publish, deprecate, dist-tag,
 // unpublish) asks the person first, and the machine's own Entra token serves a
 // write with no one to ask only where `ciPublisher` in the provider's
-// configuration says so; a new login revokes what the replaced one minted.
+// configuration says so; a write from a stored PAT or the sign-in is `other` on a
+// request that is not interactive (neither is in the job's environment); a read
+// never starts a sign-in (a lapsed one is `other`, naming `npm login`); a new
+// login revokes what the replaced one minted.
 // Recalled, not read, and so unverified here: the SessionTokens paths, query
 // and fields and the way a token is revoked (DELETE with `authorizationId`),
 // the Entra v2.0 device-code and token endpoint shapes (these are the
@@ -449,6 +452,17 @@ const start = (args) => {
     }
 
     const account = readAccount()
+    // What the provider keeps (a stored PAT, a sign-in that mints) is not in the job's
+    // environment: `interactive: false` is a dependency's lifecycle script as much as a
+    // pipeline, so a write is not released on it. The job token and the identity above
+    // are different: the first is read from the environment, so it is already in reach
+    // of every script, and the second needs the configuration's word.
+    if ((account.pat || account.refreshToken) && Object.hasOwn(WRITES, req.operation) && !req.interactive) {
+      return err(
+        'other',
+        `The ${req.operation} of ${nameOf(req)} needs a person's presence, and this request is not interactive. The credential this provider holds for the ${org} organization is not one the job already has, so it is not released to a script. Run the command from a terminal.`,
+      )
+    }
     if (account.pat) {
       if (retried) {
         return err('other', `Azure Artifacts rejected the personal access token stored for the ${org} organization. The provider keeps it: run npm logout and npm login to replace it.`)

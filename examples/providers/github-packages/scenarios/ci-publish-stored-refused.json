@@ -1,0 +1,42 @@
+{
+  "hosts": [
+    "https://api.github.com",
+    "https://github.com"
+  ],
+  "now": 1792195200,
+  "config": {
+    "clientId": "example-oauth-app",
+    "owners": {
+      "@Acme": "work",
+      "@OctoCat": "personal"
+    },
+    "defaultAccount": "work"
+  },
+  "env": {},
+  "presence": [],
+  "store": {
+    "https://npm.pkg.github.com/": {
+      "accounts": {
+        "work": {
+          "readToken": "example-work-read-token",
+          "writeToken": "example-work-write-token"
+        },
+        "personal": {
+          "readToken": "example-personal-read-token"
+        }
+      }
+    }
+  },
+  "state": {},
+  "expect": {
+    "store": {
+      "https://npm.pkg.github.com/": {
+        "accounts": {
+          "work": {
+            "writeToken": "example-work-write-token"
+          }
+        }
+      }
+    }
+  }
+}

@@ -19,7 +19,7 @@ TRANSCRIPT = ROOT / "examples" / "npmjs" / "install.jsonl"
 # what examples/providers/scenario.js prints for --sessions: where the provider is, and what is secret
 HELPER = """
 const { readFileSync } = require('node:fs')
-const setup = { provider: process.env.TEST_PROVIDER, cwd: process.cwd(), configFile: 'none', env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT }, askedFile: 'none', secrets: [] }
+const setup = { provider: process.env.TEST_PROVIDER, cwd: process.cwd(), configFile: 'none', env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT }, askedFile: process.env.TEST_ASKED || 'none', secrets: [] }
 console.log(JSON.stringify(setup))
 process.stdin.resume()
 process.stdin.on('end', () => console.log(JSON.stringify({ secrets: [] })))
@@ -68,6 +68,45 @@ class HarnessStartTests(unittest.TestCase):
             self.assertEqual([request["registry"] for request in session.pool], ["https://registry.npmjs.o"])
             self.assertEqual(session.fresh_get()["registry"], "https://registry.npmjs.o")
             self.assertTrue(session.model.serves(session.fresh_get()["registry"]))
+        finally:
+            session.kill()
+
+    def ask_on_every_request(self, log: str) -> None:
+        asked = self.dir / "asked.log"
+        patcher = mock.patch.dict("os.environ", {"TEST_ASKED": str(asked)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.provider(
+            "const fs = require('node:fs'); const readline = require('node:readline')\n"
+            "console.log(JSON.stringify({ v: [1] }))\n"
+            "readline.createInterface({ input: process.stdin }).on('line', () => {\n"
+            f"  fs.appendFileSync({json.dumps(str(self.dir / log))}, 'asked\\n')\n"
+            "  console.log(JSON.stringify({ Err: { kind: 'other', message: 'x' } }))\n"
+            "})"
+        )
+
+    def test_a_read_that_asks_the_person_or_shows_a_sign_in_is_a_violation_whatever_interactive_says(self) -> None:
+        read = {"v": 1, "kind": "get", "registry": "https://registry.npmjs.org/", "operation": "read", "command": "install"}
+        for log in ("asked.log", "shown.log"):
+            for interactive in (True, False):
+                with self.subTest(log=log, interactive=interactive):
+                    self.ask_on_every_request(log)
+                    session = harness.Session("fake", TRANSCRIPT, 1, deadline=2)
+                    try:
+                        with self.assertRaises(harness.Violation) as caught:
+                            session.send({**read, "interactive": interactive})
+                        # a request that is not interactive is caught by the older rule first
+                        expected = "no-prompt-unattended" if (log == "asked.log" and not interactive) else "read-starts-no-login"
+                        self.assertEqual(caught.exception.invariant, expected)
+                    finally:
+                        session.kill()
+
+    def test_a_write_may_ask_the_person_at_a_terminal(self) -> None:
+        self.ask_on_every_request("asked.log")
+        session = harness.Session("fake", TRANSCRIPT, 1, deadline=2)
+        try:
+            session.send({"v": 1, "kind": "get", "registry": "https://registry.npmjs.org/", "operation": "publish",
+                          "version": "1.0.0", "command": "publish", "interactive": True})
         finally:
             session.kill()
 

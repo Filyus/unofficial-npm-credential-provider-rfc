@@ -68,7 +68,7 @@ The provider is in the global chain, not under a `//gitlab.example.com/` key, be
 Two forms work:
 
 - A key per project, one line for each, which also gives the right URL.
-- The global form, which needs one provider line, and the projects stay in the repositories that use them. The cost is that a global provider is asked about every registry, which the hello below removes.
+- The global form, which needs one provider line, and the projects stay in the repositories that use them. A provider in the global chain must list its registries in its hello, as the one below does; npm asks it about no registry outside the list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)).
 
 The `--instance` argument is for the provider's own use, for example to find the right keychain entry; with or without a trailing slash it names the same instance, and the hello below is the same.
 
@@ -109,6 +109,12 @@ The other two fields:
 - `granularity` is `scope`: every `@acme/*` package is a cache hit. Because the registry URL already contains the project, `registry` would give the same cache key while only `@acme` points at project 42; `scope` keeps one token per scope, so that erasing the token of `@acme` leaves `@acme-tools` alone.
 
 The second request in the file, for `@acme-tools/lint-rules`, is a new `get` and a second deploy token.
+
+**A lapsed login on a read.** [install-login-lapsed.jsonl](gitlab/install-login-lapsed.jsonl). A refresh with the stored refresh token is not a sign-in: it asks the person nothing, and the provider does it on any `get`. When GitLab refuses the refresh token (`invalid_grant`), a `read` is answered `other`, naming `npm login`, and the provider starts no device grant and shows nothing, whatever `interactive` says ([A read never starts a login](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). Only `login`, which the person runs, starts the device grant. The provider does not answer anonymously instead: a read of a project's registry takes a credential, and what GitLab does for a public package is not something this page has read.
+
+```json
+{"Err":{"kind":"other","message":"GitLab did not accept the stored login; run npm login"}}
+```
 
 ## Publish
 
@@ -210,18 +216,39 @@ In a GitLab job there is no keychain and no browser. The provider is in the job 
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-job-token"},"cache":"session","operationIndependent":false,"granularity":"registry"}}
 ```
 
+The check binds only where npm sends the token. Any other process of the job reads `CI_JOB_TOKEN` from the environment without the provider, so the check does not keep the token from a script; it keeps npm from sending the pipeline's token to a project, or a host, a repository chose. A static key bound to a registry path, `//gitlab.example.com/api/v4/projects/42/packages/npm/:_authToken=${CI_JOB_TOKEN}`, does the same and needs no provider. What the provider adds in a job is that one rule in one place, and, outside a job, deploy tokens that are short-lived.
+
 The token lasts while the job runs ([job token](https://docs.gitlab.com/ci/jobs/ci_job_token/)), so `session` is enough; `operationIndependent` is `false` here too, as on every read answer of this provider, since outside CI it holds a stronger token for `publish`.
 
 **Publish in CI.** [ci-publish.jsonl](gitlab/ci-publish.jsonl) is the same for `npm publish`: the pipeline is what authorizes the publish, so the provider asks for no presence it could not get and releases the job token, with `operationIndependent: false`. That holds when the request says `interactive: false`. `CI_JOB_TOKEN` is the environment's, set by whoever ran npm, and a write request that says a person is there is not a pipeline's: it gets the same presence prompt as any write, naming the operation and the package ([ci-publish-interactive.jsonl](gitlab/ci-publish-interactive.jsonl)). GitLab documents `_authToken=${CI_JOB_TOKEN}` for publishing from a pipeline ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)).
 
+The rule behind this is that a write credential the job already has in its environment is released on `interactive: false`, and one it does not have is not. `CI_JOB_TOKEN` is read from the environment, so every process of the job reaches it, a dependency's lifecycle script included; a gate in front of it would add nothing, and releasing it is honest. A deploy token the provider mints from a login is not in the environment, and `interactive: false` is also that lifecycle script, so a write on it is answered `other` and says a person must confirm ([publish-not-interactive.jsonl](gitlab/publish-not-interactive.jsonl)). The presence prompt for an interactive request with the job token guards the request, not the token.
+
 **No job token.** A job outside a CI environment has no job token and no refresh token, and the provider answers `not-found`. So does a job asked about another project's registry ([ci-other-project.jsonl](gitlab/ci-other-project.jsonl)): the job token is released only for the job's own host and project (`CI_SERVER_HOST`, `CI_PROJECT_ID`), so a dependency in another project is left to a credential behind the provider rather than sent the pipeline's token.
+
+**Projects on the job token's allowlist are refused too.** GitLab lets a project's allowlist name another project, and the job token then reaches it ([job token](https://docs.gitlab.com/ci/jobs/ci_job_token/)). The provider does not use that: it answers `not-found` for any project but the job's own, an allowlisted one included.
+
+The provider has no list of the projects whose allowlists name the job's project to check against, so it could not tell an allowed project from one a repository chose, and a project chosen by a repository is what the check is there to refuse. The smaller change is to say that it refuses them; a dependency in an allowlisted project is read with a credential of the user's own, through a per-registry list for that project's URL.
 
 **A refused job token.** A job token that GitLab refuses is not handed out again: it is the only credential here, so the retry is `other` and says so.
 
 - After a 401 the `erase` before it has nothing to delete ([ci-rejection.jsonl](gitlab/ci-rejection.jsonl)).
 - A 403 on a publish sends no erase, and the retry is the same `other` ([ci-forbidden.jsonl](gitlab/ci-forbidden.jsonl)).
 
-**A deploy token in a CI variable** needs no provider: `_authToken=${VAR}` in the user's npmrc is that credential, and a provider that finds neither a job token nor a login answers `not-found`. After a `not-found` the stored credential is used only where the chain lists `npm:token`, so the CI image adds `credentialProvider[]=npm:token` after the provider's line; the entry then serves the variable's token, with no fallback warning, since the user wrote it down. The provider reading the variable itself would only copy it, and would have to guess its name and which scopes it has.
+**A deploy token in a CI variable** needs no provider: `_authToken=${VAR}` in the user's npmrc is that credential, and a provider that finds neither a job token nor a login answers `not-found`. After a `not-found` the next entry of the chain is asked, and `credentialProvider[]=npm:token` after the provider's line serves the variable's token if it is written in the image's user or global config, the environment or the command line. That is all it serves:
+
+`npm:token` never serves a credential from a project `.npmrc`, so a project that commits `//gitlab.example.com/api/v4/projects/42/packages/npm/:_authToken=${CI_JOB_TOKEN}` gets nothing from it, and neither does one that commits `registry=` for a host of its own with a token line beside it ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)).
+
+The advice therefore holds for an image that carries its own `_authToken=${VAR}` in `/etc/npmrc` or `~/.npmrc`, or sets it in the environment, and does not for a token the project's repository wrote down: that one is moved to the image's config or replaced by the provider's job-token answer, which needs no line at all. The provider reading the variable itself would only copy it, and would have to guess its name and which scopes it has.
+
+## What breaks
+
+- **A Developer cannot use this provider.** Creating a deploy token takes the Maintainer or Owner role, and a Developer's OAuth token is refused with a 403 ([install-not-maintainer.jsonl](gitlab/install-not-maintainer.jsonl); on GitLab 19.5.1 the probes show the same 403 from a real instance).
+  - The provider answers `other` and says Maintainer or Owner is needed; it does not fall back to the OAuth token, which GitLab accepted at the registry for a Developer on 19.5.1 but which carries `api` and is not what the provider hands out.
+  - What a Developer uses instead is a personal access token with `api` (the first row of the credentials table), which any user can create for themselves, stored in the user's own config or environment and served by a per-registry list that holds just `npm:token` on the project's URL, as for a group or instance endpoint above. The provider's `other` is not `not-found`, so a Developer does not leave this provider in the global chain for that registry.
+- **The stored login is broader than what the provider hands out.** The refresh token the provider keeps is an OAuth login with the `api` scope, because creating a deploy token takes it, and `api` reaches every API route as the user ([api.rb](https://github.com/gitlabhq/gitlabhq/blob/449ed2875c2e3c4b51169484b799f4f803194ab5/lib/api/api.rb#L58)). The read deploy token the provider answers with reads one project's packages. A process that can read the provider's store holds the broader of the two, so the gain over a stored personal access token with `api` is that the long-lived secret sits in the keychain, not that it is narrower.
+- **The job token is not released for another project.** Allowlisted projects included, as the CI section says.
+- **A deploy token is never narrower than its project.** Project, not package or version, as under Publish.
 
 ## Where it is easy to go wrong
 
@@ -233,8 +260,8 @@ The token lasts while the job runs ([job token](https://docs.gitlab.com/ci/jobs/
 - **Leaking deploy tokens.** A token that is never deleted stays valid until its date, or forever when no expiry was set. Delete on `erase`, on `logout` and before minting a replacement, and never create one without `expires_at`. Deleting when the session ends is not available: npm sends `erase` only after a rejection and need not wait for the provider to exit, so the token's own expiry is what limits it (this reference provider has no timer of its own; one that keeps a process alive could add it).
 - **Reading the project from the wrong place.** The project is in the `registry` field. A host-level `credentialProvider` key hides it, as the Configuration section says, and a provider that falls back to a default project mints a token for the wrong one.
 - **Matching the wrong URL.** The registry page lists the same kinds of token for all three endpoints, and for the instance one requires a scope equal to the root group; for packages spread over projects it uses a group deploy token on the instance endpoint ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)). This provider mints project deploy tokens, which reach one project, so one that served the group and instance URLs with them would fail on dependencies in other projects. Tried on 19.5.1: a project deploy token read its own project's packages on the group and instance URLs (200), another project's token got a 404 ([Against a real GitLab](#against-a-real-gitlab)). Answer `url-not-supported`, or list only the project path in hello.
-- **Releasing the job token for any project.** `CI_JOB_TOKEN` reaches only its own project by default, plus the projects whose allowlist names it ([job token](https://docs.gitlab.com/ci/jobs/ci_job_token/)), and the registry page says that installing with it a package whose dependencies are in another project gives 404 ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)). A provider that hands it to a registry for any project on the host fails on dependencies in other projects, and sends the pipeline's token to registries it never meant to serve.
-- **Starting a login on a 401.** A 401 does not prove the login is dead. Check the refresh token with a refresh before saying so.
+- **Releasing the job token for any project.** `CI_JOB_TOKEN` reaches only its own project by default, plus the projects whose allowlist names it ([job token](https://docs.gitlab.com/ci/jobs/ci_job_token/)), and the registry page says that installing with it a package whose dependencies are in another project gives 404 ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)). A provider that hands it to a registry for any project on the host fails on dependencies in other projects, and sends the pipeline's token to registries it never meant to serve. This provider refuses every project but the job's own, allowlisted ones included ([CI](#ci)).
+- **Starting a login on a 401, or on any read.** A 401 does not prove the login is dead; check the refresh token with a refresh before saying so. And a read never starts a sign-in even when it is dead: it is `other`, naming `npm login` ([install-login-lapsed.jsonl](gitlab/install-login-lapsed.jsonl)).
 - **Widening on a 403.** A 403 for an expired token or a missing trailing slash is not a request for a write token. Answer a `read` retry with a read token or fail.
 - **Forgetting `forward`.** GitLab forwards a request for a package it does not hold to npmjs.com unless an administrator or group Owner disables it, and `npm audit` sends its body, including private package names, to the public registry unless run with `--registry` pointing at GitLab ([npm registry](https://docs.gitlab.com/user/packages/npm_registry/)). This is the registry's behaviour, not the provider's, and the provider cannot change it; its README should say so.
 
@@ -244,10 +271,11 @@ Everything on this page that a transcript shows is produced by the [reference pr
 
 The pinned run is a reproducible check of our code against one GitLab; the nightly run catches GitLab changing under us, and prints the version it actually got at its start and in its last line, so a failure says which GitLab changed. What the harness does and how a difference between the fake and GitLab is told is in the [providers README](providers/README.md#against-a-real-server).
 
-22 of the 25 scenarios run on 19.5.1, with the same 62 requests no scenario reaches (the probes). The login scenarios run for real: the scripted person signs in on GitLab's web pages, opens the verification link the provider shows, and presses Authorize and then Confirm. The others do not, and the run prints this list with the reasons ([skips](providers/live/gitlab-skips.json)):
+24 of the 28 scenarios run on 19.5.1, with the same 62 requests no scenario reaches (the probes). Three scenarios were added after the last live run (install-login-lapsed, install-not-maintainer and publish-not-interactive); the first and the third are meant to run and have not yet, and the second is skipped, below. The login scenarios run for real: the scripted person signs in on GitLab's web pages, opens the verification link the provider shows, and presses Authorize and then Confirm. The others do not, and the run prints this list with the reasons ([skips](providers/live/gitlab-skips.json)):
 
 - [install-refresh-unavailable](gitlab/install-refresh-unavailable.jsonl): the scenario needs the token endpoint to answer the refresh grant with a 503; a real GitLab is not made to fail on request.
 - [rejection-delete-failed](gitlab/rejection-delete-failed.jsonl): it needs GitLab to answer the deletion of a deploy token with a 500 and delete nothing.
+- [install-not-maintainer](gitlab/install-not-maintainer.jsonl): it needs a stored login of a Developer, and the harness signs in as the Maintainer only. The Developer's 403 is among the probes.
 - [login-unapproved](gitlab/login-unapproved.jsonl): it ends a login nobody approves by the provider's own 4 minutes 30 seconds of synthetic time. GitLab judges the polls against its real interval and its device code lives 300 real seconds, so a run of it would take as long as the login does. The unapproved poll and the poll that comes too soon are in the probes.
 
 Observed on 2026-10-22, GitLab 19.5.1, and held by the fake from then on (a difference fails the run unless [listed](providers/live/gitlab-divergences.json) with a reason, and the list is empty):

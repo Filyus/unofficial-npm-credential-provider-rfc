@@ -1,0 +1,35 @@
+{
+  "hosts": [
+    "https://registry.npmjs.org"
+  ],
+  "now": 1792238400,
+  "config": {
+    "readWithSession": true
+  },
+  "store": {
+    "tokens": [
+      {
+        "tier": "session",
+        "token": "example-session-token",
+        "selects": {
+          "all": true
+        },
+        "issuedAt": 1792235000
+      }
+    ]
+  },
+  "expect": {
+    "store": {
+      "tokens": [
+        {
+          "tier": "session",
+          "token": "example-session-token",
+          "selects": {
+            "all": true
+          },
+          "issuedAt": 1792235000
+        }
+      ]
+    }
+  }
+}

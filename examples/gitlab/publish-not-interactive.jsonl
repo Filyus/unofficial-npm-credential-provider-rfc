@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://gitlab.example.com/api/v4/projects/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://gitlab.example.com/api/v4/projects/42/packages/npm/","scope":"@acme","package":"widgets","version":"2.4.1","operation":"publish","command":"publish","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"a write credential needs the person to confirm, and this request is not interactive"}}}
+{"from":"client","event":"close"}

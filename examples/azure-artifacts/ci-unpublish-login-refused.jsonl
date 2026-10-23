@@ -1,0 +1,4 @@
+{"from":"provider","message":{"v":[1],"capabilities":["login","logout"],"registries":["https://pkgs.dev.azure.com/contoso/","https://contoso.pkgs.visualstudio.com/"]}}
+{"from":"client","message":{"v":1,"kind":"get","registry":"https://pkgs.dev.azure.com/contoso/","scope":"@contoso","package":"ui","version":"3.1.0","operation":"unpublish","command":"unpublish","interactive":false}}
+{"from":"provider","message":{"Err":{"kind":"other","message":"The unpublish of @contoso/ui needs a person's presence, and this request is not interactive. The credential this provider holds for the contoso organization is not one the job already has, so it is not released to a script. Run the command from a terminal."}}}
+{"from":"client","event":"close"}

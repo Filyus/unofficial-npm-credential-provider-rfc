@@ -59,7 +59,7 @@ The provider releases the full token for both either way, so the mapping in the 
 
 The provider is configured per registry, never in the global chain. A self-hosted registry has no hostname the provider can recognize, so it learns its registry from `--registry`, and a per-registry key keeps it from starting for a registry it does not serve ([Configuration](../phase-2-credential-provider.md#1-configuration)).
 
-A provider that someone does put in the global chain must list exactly the bases it was given, `http:` and `https:` as served, and answer `url-not-supported` for the rest.
+A provider that someone does put in the global chain must send `registries` (one whose hello has none serves no registry), listing exactly the bases it was given, `http:` and `https:` as served, and answer `url-not-supported` for the rest.
 
 The scheme:
 
@@ -102,6 +102,8 @@ The provider releases the read-only token it minted at login. Both Verdaccio tie
 - In JWT mode the provider decodes `exp` without verifying it, clamps it to at most 30 days ahead, and answers `"cache":"expires"` with `expiresAt`, as in [rejection.jsonl](verdaccio/rejection.jsonl).
   - An unverified value is not trusted for longer ([install-jwt-far-expiry.jsonl](verdaccio/install-jwt-far-expiry.jsonl)).
   - A token with under a minute left is not released but answered with an error that names the cure ([install-jwt-expiring.jsonl](verdaccio/install-jwt-expiring.jsonl)).
+    - That is a lapsed login on a read, and the provider answers `other` naming `npm logout` and `npm login`; it starts no login, with `interactive` `true` or not, since a read never does ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). It does not answer anonymously, which the RFC allows where public reads must survive:
+    - Verdaccio's `packages` rules may leave a package open (`access: $all`), but the provider cannot read them, and on a protected package an anonymous read would turn a lapsed login into a 401 that names nothing. **Limit, in the example only:** the condition that widens it is a provider setting that says the registry's packages are open, which then answers `{"type":"none"}` for a read on a lapsed login and keeps `other` for every write.
 
 The provider never derives `expiresAt` from an `expires` it asked for at mint time, since Verdaccio ignores that field ([token.ts](https://github.com/verdaccio/verdaccio/blob/30601b3416afa2d5384d806f1aad9df1d7116a85/packages/api/src/v1/token.ts)).
 
@@ -283,7 +285,13 @@ The operator can provision more on purpose. [ci-publish.jsonl](verdaccio/ci-publ
 {"Ok":{"kind":"get","auth":{"type":"bearer","token":"example-ci-full-token"},"cache":"session","granularity":"package","operationIndependent":false}}
 ```
 
-The answer is bound to the package and the operation, as any non-read answer is, and `cache` is `session` because the token is the opaque one that never expires. The provider checks with `GET /-/whoami` that the token is the named account's before it releases it; a token that is revoked is answered `other` ([ci-publish-dead-token.jsonl](verdaccio/ci-publish-dead-token.jsonl)). Without that provisioning the same request is [ci-publish-refused.jsonl](verdaccio/ci-publish-refused.jsonl) above. The token is a standing secret on the CI machine and, in AES mode, the account's password in reversible form ([credentials](#registry-and-credentials)); an account restricted to `publish` on one scope, and a `cidr_whitelist` on the generated token, narrow it, and nothing makes it short-lived. It only works where the account is not under `auth-and-writes` 2FA, below.
+The answer is bound to the package and the operation, as any non-read answer is, and `cache` is `session` because the token is the opaque one that never expires. The provider checks with `GET /-/whoami` that the token is the named account's before it releases it; a token that is revoked is answered `other` ([ci-publish-dead-token.jsonl](verdaccio/ci-publish-dead-token.jsonl)). Without that provisioning the same request is [ci-publish-refused.jsonl](verdaccio/ci-publish-refused.jsonl) above.
+
+The token is a standing secret on the CI machine and, in AES mode, the account's password in reversible form ([credentials](#registry-and-credentials)); an account restricted to `publish` on one scope, and a `cidr_whitelist` on the generated token, narrow it, and nothing makes it short-lived. It only works where the account is not under `auth-and-writes` 2FA, below.
+
+The write credential is ambient on that machine: the token is in the provider's store on the image, readable by the account the job runs as, so any process of the job, a dependency's lifecycle script included, can read it and call Verdaccio without npm. Releasing it is honest, and a prompt would add nothing. `interactive: false` alone is not what releases it, since a lifecycle script runs with that too.
+
+What does is the operator's `ciAccount` setting in the provider's own configuration and the stored token being that live account's token. A machine that holds a developer's own tokens and no `ciAccount` setting gets `other`.
 
 The staging case is the best one: a separate Verdaccio account that is only in the `stage` groups of the `packages` rules, whose full token the CI machine image gives the provider. `npm stage publish` needs no OTP, so staging works in CI, and a human then approves the version. Publishing directly from CI is not possible for a user under `auth-and-writes` 2FA: Verdaccio has no bypass-2FA tokens and ignores `bypass_2fa` ([two-factor authentication](https://verdaccio.org/docs/two-factor-authentication)).
 

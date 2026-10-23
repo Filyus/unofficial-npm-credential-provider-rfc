@@ -61,6 +61,7 @@ INVARIANTS = {
     "answer-is-a-response": "every line the provider writes is a JSON object with exactly Ok or Err",
     "model-accepts-answers": "the Python model accepts every answer, and the whole session as a transcript",
     "no-prompt-unattended": "a request that is not interactive asks the person nothing",
+    "read-starts-no-login": "a get for read asks the person nothing and shows no sign-in, whatever `interactive` says",
     "unknown-is-unsupported": "an unknown operation or kind is operation-not-supported, never served as a read",
     "foreign-registry": "a registry the provider does not serve is url-not-supported, for get, erase, login and logout",
     "erase-keeps-the-login": "the 401 retry after an erase is not not-found",
@@ -276,6 +277,10 @@ class Session:
 
     # --- the wire ---------------------------------------------------------------
 
+    def shown(self) -> int:
+        shown_file = self.asked_file.with_name("shown.log")
+        return len(shown_file.read_text(encoding="utf-8").splitlines()) if shown_file.exists() else 0
+
     def asked(self) -> int:
         return len(self.asked_file.read_text(encoding="utf-8").splitlines()) if self.asked_file.exists() else 0
 
@@ -299,6 +304,7 @@ class Session:
         if record:
             self.events.append({"from": "client", "message": request})
         asked_before = self.asked()
+        shown_before = self.shown()
         if raw is None:
             raw = json.dumps(request).encode("utf-8")
         answer = self.transmit(raw, f"the answer to {request['kind']}")
@@ -316,6 +322,9 @@ class Session:
             raise Violation("model-accepts-answers", f"{where}: {violation}") from None
         if not request.get("interactive") and self.asked() != asked_before:
             raise Violation("no-prompt-unattended", f"{where}: asked the person on a request that is not interactive")
+        if (request.get("kind") == "get" and request.get("operation") == "read"
+                and (self.asked() != asked_before or self.shown() != shown_before)):
+            raise Violation("read-starts-no-login", f"{where}: asked the person, or showed a sign-in, on a get for read")
         if answer.get("Err", {}).get("message", "").startswith(REJECTION_PREFIXES):
             raise Violation("valid-is-not-malformed", f"{where}: a request the model accepts was rejected as malformed")
         auth = answer.get("Ok", {}).get("auth") or {}

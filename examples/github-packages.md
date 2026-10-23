@@ -75,7 +75,9 @@ credentialProvider[]=npm-credential-provider-github
 credentialProvider[]=npm:token
 ```
 
-The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). Listing `npm:token` last keeps the stored credential for registries the provider does not serve, without the warning the implicit entry draws. The cost against the per-registry form is that a request to `npm.pkg.github.com` for a scope this provider answers `not-found` falls to the listed `npm:token`, which may hold a standing token: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
+The provider then starts for every command that goes to the network, to send its hello, but npm sends it nothing about any registry outside the hello list, and a provider in the global chain must list its registries, as this one does ([Version negotiation](../phase-2-credential-provider.md#version-negotiation)). The chain ends with `npm:token` whether it is listed or not.
+
+It serves only a token the user stored in a user or global config file, the environment or the command line, never one in a project `.npmrc` ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)); listing it says so and puts it where the user wants it. The cost against the per-registry form is that a request to `npm.pkg.github.com` for a scope this provider answers `not-found` falls to `npm:token`, which may hold a standing token of the user's own: see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong).
 
 The listed entry does not reach a URL form the provider declined on its own host. The provider declines a lockfile URL `http://npm.pkg.github.com/`, since its hello lists only the `https:` form, and the request fails, naming the provider and the form it lists, rather than send the `https:` token over `http:` ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). npm's `//npm.pkg.github.com/` key carries no scheme, so the stored token would otherwise match.
 
@@ -118,6 +120,12 @@ The developer runs `npm install` in a terminal, in a project whose `.npmrc` maps
 - `granularity: "scope"`, because the answer depends on the owner, not because the token is narrower: a classic token is user-wide. The provider answers `scope` to every request on this registry, unscoped ones included. The unscoped request below carries no `scope`, and its answer is cached under "scope absent".
 - `operationIndependent: false` (the default, written out), because the provider holds a stronger token for `publish`. With `true`, a cached read token would be found by the later `publish` lookup (see [Where it is easy to go wrong](#where-it-is-easy-to-go-wrong)).
 - `cache: "session"`: a classic token carries no expiry the provider knows of. A `GITHUB_TOKEN` also gets `session`: a command is shorter than the job.
+
+**A read never starts a sign-in.** [install-no-token.jsonl](github-packages/install-no-token.jsonl). With nothing stored for the account, an interactive `read` is `not-found`, and the provider starts no device flow and asks nothing ([A read never starts a login](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). A GitHub token does not lapse in the provider's store; a token GitHub rejects is a retry, which is answered `other` naming `npm login` (below). The device flow runs in `login`, and for a `publish` that the person confirmed. The provider does not answer a read anonymously: Packages wants a token even for public packages ([Registry and credentials](#registry-and-credentials)).
+
+```json
+{"Err":{"kind":"not-found"}}
+```
 
 The second request, for `@octocat/hello-world`, gets the personal account's token under its own `scope` cache key. The third, for an unscoped package, carries no `scope` and is answered with the work account's token.
 
@@ -329,7 +337,8 @@ And the publish, in its own session:
   - It serves the job token for every package of that owner, and for every unscoped read, which GitHub proxies from npmjs.org (a publish of an unscoped package gets nothing from it).
   - A package the repository has no access to is refused by the registry, and the retry then answers `other`, naming the workflow's package permissions, rather than the token just refused ([ci-rejected.jsonl](github-packages/ci-rejected.jsonl)).
   - The job is recognised by `GITHUB_ACTIONS=true` together with `GITHUB_TOKEN`, both from the environment, which is as trustworthy as the environment is.
-- Withholding `GITHUB_TOKEN` would gain nothing: every lifecycle script in the step already sees the same variable. The provider's value in CI is consistency with other environments, not secrecy. It removes no standing secret from the runner, and a stored classic token for cross-owner reads is still one.
+- Withholding `GITHUB_TOKEN` would gain nothing: every lifecycle script in the step already sees the same variable, and the provider can read it only because it is in the environment. Where the write credential is already ambient in the job, the provider's gate adds nothing and releasing it with no presence is honest. The provider's value in CI is consistency with other environments, not secrecy. It removes no standing secret from the runner, and a stored classic token for cross-owner reads is still one.
+- A credential that is not in the environment is a different case. A classic write token the provider stored is not released for a write on `interactive: false` alone, since a dependency's lifecycle script runs with it too: the answer is `other`, saying the request is not interactive ([ci-publish-stored-refused.jsonl](github-packages/ci-publish-stored-refused.jsonl): no job in the environment, a write token stored, a non-interactive publish).
 - The npm registry page names only a personal access token (classic) for authentication and `GITHUB_TOKEN` for publishing packages of the workflow's repository, and no OIDC exchange (read on 2026-10-21); that no trusted publishing exists is an absence in that page, not something it states. On what is documented, the RFC's precedence for an exchanged token does not apply here.
 
 ## Where it is easy to go wrong
@@ -348,6 +357,7 @@ And the publish, in its own session:
 12. **A default registry that proxies npmjs.org.** With `registry=https://npm.pkg.github.com/`, the provider is asked about `@types` and every other scope in the tree, and the audit request, and must return a token: anonymous requests are refused, and `/lodash` without a token gives a 404. A provider that picks accounts by owner needs a default account for scopes it does not know. The reference provider does that: `defaultAccount` serves every owner not in `owners`, so the exposure in item 1 stands for it.
 13. **Revoking what it does not own.** Logout may revoke a token the provider was given. It must not revoke `gh`'s token (that breaks `gh` everywhere) or `GITHUB_TOKEN`.
 14. **Expecting a security gain in Actions.** The provider removes no standing secret there. The token is in the environment only if the workflow put it there, and then every script in the step has it already.
+15. **Starting the device flow on a read, or releasing a stored write token on `interactive: false`.** A read is made by every install and by a lockfile's URL, so it never starts a sign-in ([install-no-token.jsonl](github-packages/install-no-token.jsonl)). A write token that is not in the job's environment is released only to a request that says a person is there ([ci-publish-stored-refused.jsonl](github-packages/ci-publish-stored-refused.jsonl)).
 
 ## What this registry asks of the RFC
 

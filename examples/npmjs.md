@@ -52,7 +52,7 @@ credentialProvider[]=npm-credential-provider-npmjs
 credentialProvider[]=npm-credential-provider-gitlab
 ```
 
-Because the chain is asked about every registry, this provider lists `registries` in its hello, so npm sends it nothing about a registry it does not serve. The cost of the global form is in [What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc): the RFC gives a provider no way to let a public read go out anonymously.
+A provider in the global chain must list `registries` in its hello, and this one does, so npm sends it nothing about a registry it does not serve. A lapsed login on a public read is answered with an anonymous answer ([Install](#install), [What this registry asks of the RFC](#what-this-registry-asks-of-the-rfc)).
 
 **The reference provider's settings.** [The reference provider](providers/npmjs/provider.js) reads a JSON file named by a `--config <file>` argument that the lines above leave out; it fails to start without one. This page's provider takes no other setting; the file's keys are for the run: where its store is, which address answers for the host, the clock, the person's scripted answers, and the knobs `pollMs`, `loginSeconds` and `pollLimit` of the web-login poll ([providers/README.md](providers/README.md)).
 
@@ -83,6 +83,18 @@ Provider logic for `read`: the read-only granular token whose selection covers t
 ```
 
 `cache` is `session` because a granular token lives at least one day ([about access tokens](https://docs.npmjs.com/about-access-tokens)); a session token would be `expires` (see [Login and logout](#login-and-logout)).
+
+**A read never starts a login, and a lapsed one is anonymous.** The session token is the user's full permissions, and the provider does not hand it out for a read unless the person set `readWithSession` in the provider's own configuration, for a user who logs in through the provider and keeps no read-only token. Every install then carries a credential that can write, for the two hours that follow a login, as `npm login` has always done; a read-only token above is what to prefer. With the setting, and no read-only token that covers the request:
+
+- a live session token answers the read ([install-session.jsonl](npmjs/install-session.jsonl)): `expires` at the issue time plus 7200, `granularity` `registry`, `operationIndependent` `false`;
+- a session that has lapsed answers `{"type":"none"}`, whatever `interactive` says ([install-session-lapsed.jsonl](npmjs/install-session-lapsed.jsonl) with `interactive` `false`, [install-session-lapsed-interactive.jsonl](npmjs/install-session-lapsed-interactive.jsonl) with `true`). Registry.npmjs.org serves public reads without a credential (probed, [Rejection](#rejection)), so they go on, and npm says at `warn` that the registry is read anonymously and names this provider. The provider starts no web login on a read, so nobody is shown a sign-in page by an install. `cache` is `never`, so the next read asks again, and a login made in another terminal is found at once:
+
+```json
+{"v":1,"kind":"get","registry":"https://registry.npmjs.org/","package":"left-pad","operation":"read","command":"install","interactive":false}
+{"Ok":{"kind":"get","auth":{"type":"none"},"cache":"never","operationIndependent":false,"granularity":"registry"}}
+```
+
+A private package then answers 404 to the anonymous request, as it does to any request without a credential, and the warning says why. Without `readWithSession`, a read no read-only token covers is `not-found`, as above. The anonymous answer is valid for a `read` only: a lapsed session on `access` or `account` is `other` ([session-expired.jsonl](npmjs/session-expired.jsonl)).
 
 ## Publish
 
@@ -223,7 +235,9 @@ In CI `interactive` is `false`, so the provider prompts for nothing and serves o
 - read-only tokens for `read` and `stage-read`;
 - a stage-only token for `stage`, `deprecate` and `dist-tag`, which the user pre-authorized by creating it for that package, but only where the provider's own configuration says so (`ciStageOnly`, never an environment variable).
 
-The reason for the setting: `interactive: false` is also a dependency's lifecycle script, which a provider must not hand a write token to on that alone ([ci-stage-only-not-enabled.jsonl](npmjs/ci-stage-only-not-enabled.jsonl): the same request without the setting is answered `other`, naming it).
+The reason for the setting: `interactive: false` is also a dependency's lifecycle script, which a provider must not hand a write token to on that alone ([ci-stage-only-not-enabled.jsonl](npmjs/ci-stage-only-not-enabled.jsonl): the same request without the setting is answered `other`, naming it). This is the RFC's principle for a write in CI ([In CI](../phase-2-credential-provider.md#in-ci)): where the credential is already ambient in the job, the provider's gate adds nothing and releasing it is honest; where it is not, `interactive: false` alone is not enough.
+
+Here the stage-only token is in the provider's store on the runner, and the provider's own `ciStageOnly` says that this machine is a pipeline that may use it. What gates a stage-only token is the registry: it cannot publish directly, and `npm stage approve` needs a one-time password.
 
 Direct publish in CI is trusted publishing: npm exchanges the identity token and asks no provider ([Trusted publishing](../phase-2-credential-provider.md#error-response)). `access`, `trust` and `account` answer `other` naming what was needed, as the RFC requires for a credential that needs presence ([Non-interactive and CI behavior](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)): [ci-access.jsonl](npmjs/ci-access.jsonl). [ci.jsonl](npmjs/ci.jsonl) is `npm stage publish`:
 
@@ -253,12 +267,11 @@ An `npm ci` in the same job asks for `read` as in [install.jsonl](npmjs/install.
 
 ## What this registry asks of the RFC
 
-- **No way to let a public read go out anonymously** ([Provider chaining](../phase-2-credential-provider.md#error-response), [Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)).
-  - A chain provider for registry.npmjs.org is asked before every public packument and tarball. The RFC already accepts that a broken global provider fails anonymous reads from this host. The case here is narrower: the provider is healthy, but its only credential is a lapsed two-hour session token.
-  - Answering `Ok` with it sends a dead token (a token the registry does not know got 200 on public reads when probed on 2026-10-21, see [401](#rejection), so a public read may still succeed with it), and for a private package the retry cannot succeed. `not-found` fails because no provider answers `Ok`, and under a per-registry list `url-not-supported` fails too.
-  - `url-not-supported` does not help either. The RFC has a provider decide it "from `registry` alone", and npm remembers it for the command (so a later publish loses the provider). On a host the hello lists, registry.npmjs.org here, the request then fails: the implicit `npm:token`, which would send it anonymously when nothing is stored, is not reached ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). It would be reached only if the hello listed no `registries`, and then the provider would be asked about every registry.
-  - Two options: allow an explicit anonymous answer, or say that `url-not-supported` may reflect the provider's state for the registry (nothing usable stored) and not only its URL, and that npm's memory of it is then limited to reads. The second option weakens the guarantee that makes the memory sound.
-  - **In the RFC, as a limit:** [Legacy fallback](../phase-2-credential-provider.md#legacy-fallback) states it with its reason (an anonymous answer would let a broken provider turn authenticated requests anonymous, so a private package looks missing instead of failing loudly) and the condition that would widen it. Meanwhile this provider answers `other`, with a message telling the user to log in ([session-expired.jsonl](npmjs/session-expired.jsonl)).
+- **A way to let a public read go out anonymously** ([Auth types](../phase-2-credential-provider.md#auth-types), [Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)). This was a limit; it is now in the RFC.
+  - A chain provider for registry.npmjs.org is asked before every public packument and tarball. The case here is a healthy provider whose only credential for a read is a lapsed two-hour session token. Answering `Ok` with it sends a dead token, `not-found` fails because no provider answers `Ok`, `url-not-supported` is remembered for the command and, on a host the hello lists, fails the request.
+  - The RFC now lets a provider answer a `get` for `read` with `{"type":"none"}`. npm sends the request without a credential and says so at `warn`, naming the provider, so a broken provider cannot turn authenticated requests anonymous without a sound. The answer is valid for a read only, and not for a retry. The earlier objection to it is answered by the warning and by that restriction.
+  - This provider answers it for a lapsed session token on a read ([install-session-lapsed.jsonl](npmjs/install-session-lapsed.jsonl)); it starts no web login on a read.
+  - The page's own warning: the provider falls back to the session token for a read only where `readWithSession` is set, since that token can write.
 - **A 403 does not say why** ([erase](../phase-2-credential-provider.md#erase-a-credential-was-rejected)).
   - The retry carries `httpStatus` and `authChallenges`, not the body or npm's error code. A publish 403 on npmjs.com is `E_STAGE_REQUIRED` for a stage-only token ([API](https://api-docs.npmjs.com/)) and may be a permission refusal otherwise.
   - A provider knows which token it handed out, so it can refuse to widen from a stage-only one; it cannot tell the two causes apart when it handed out a token that is not stage-only, and then widens on a 403 that a package setting caused, which the RFC allows under the write policy.

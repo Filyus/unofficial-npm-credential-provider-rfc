@@ -65,7 +65,7 @@ No key matched there, so this page reads `registry` as the registry chosen for t
 
 What the reference provider ([provider.js](providers/azure-artifacts/provider.js)) reads besides `--org` (it needs `--config <file>` too, which says where its store is): for CI, the pipeline's `SYSTEM_ACCESSTOKEN` and `SYSTEM_COLLECTIONURI` (the job token is used only when the collection is this organization's), or a workload identity's `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`; `AZURE_ARTIFACTS_ENTRA_SOURCE=az` to use the Azure CLI's token instead; `ciPublisher` in its own configuration file, which says that the machine's own Entra identity may serve a write when no person can be asked (a file the user or administrator owns, never an environment variable; see [CI](#ci)); and `endpoints` in the same file, which the conformance run uses to send every vendor address to a local fake and which a real build has no use for.
 
-The per-registry form is the better default. It keeps the provider from starting for registries it does not serve, and a team that adds this line changes nothing for other registries. Either way a stored `_authToken` that Microsoft's `NpmAuthenticate` task or `vsts-npm-auth` wrote is ignored under the per-registry form, and warned about on every command: delete those lines, or list `npm:token`.
+The per-registry form is the better default. It keeps the provider from starting for registries it does not serve, and a team that adds this line changes nothing for other registries. Either way a stored `_authToken` that Microsoft's `NpmAuthenticate` task or `vsts-npm-auth` wrote is ignored under the per-registry form, and warned about on every command: delete those lines, or list `npm:token`, which serves such a line only if it is in a user or global config file, the environment or the command line, never in a project `.npmrc` ([Legacy fallback](../phase-2-credential-provider.md#legacy-fallback)).
 
 ## Hello
 
@@ -91,6 +91,12 @@ The per-registry form is the better default. It keeps the provider from starting
 - `expiresAt` is the `validTo` the service returned, not the one the provider asked for.
 - `granularity` is `registry`: nothing finer exists. `operationIndependent` is `true` because one `vso.packaging_write` token serves read, publish and deprecate. npm caches every other operation bound to that operation and package anyway ([Caching](../phase-2-credential-provider.md#5-caching)).
 
+**A lapsed sign-in on a read.** [install-login-lapsed.jsonl](azure-artifacts/install-login-lapsed.jsonl). When Entra refuses the stored refresh token, a `read` is answered `other`, naming `npm login`, and no sign-in is started: no device code, no prompt, whatever `interactive` says ([A read never starts a login](../phase-2-credential-provider.md#non-interactive-and-ci-behavior)). The scenario counts no device request to Entra. Entra sign-in happens only in `login`, which the person runs. The provider does not answer anonymously instead: this page documents no public read of an organization's feeds, so a lapsed login fails the install loudly.
+
+```json
+{"Err":{"kind":"other","message":"Microsoft Entra did not renew the sign-in for the contoso organization. Run npm login."}}
+```
+
 ## Publish
 
 [publish.jsonl](azure-artifacts/publish.jsonl). `npm publish` of `@contoso/ui` 3.2.0 from a terminal.
@@ -105,7 +111,11 @@ The provider answers from its own per-organization cache, the same session token
 {"Err":{"kind":"other","message":"The publish of @contoso/ui@3.2.0 was not confirmed within 4 minutes 30 seconds. No credential was released."}}
 ```
 
-`deprecate` and `dist-tag` ask the same way, and so does a stored PAT or a job token when the request is interactive. What the prompt guards is the request, not the token: the `read` answer above already carries `vso.packaging_write` ([below](#where-it-is-easy-to-go-wrong)). Publishing needs `vso.packaging_write` and the Contributor role, which the user either has or has not. The provider cannot see the role cheaply, so a refusal is the registry's to give.
+`deprecate` and `dist-tag` ask the same way, and so does a stored PAT or a job token when the request is interactive. What the prompt guards is the request, not the token: the `read` answer above already carries `vso.packaging_write` ([below](#where-it-is-easy-to-go-wrong)).
+
+A write that is not interactive is not released from what the provider keeps. `interactive: false` is also a dependency's lifecycle script, and neither a stored PAT nor the sign-in is in the job's environment, so a script that asked would be handed a credential it could not otherwise reach. The request is answered `other` and says to run the command from a terminal ([ci-publish-login-refused.jsonl](azure-artifacts/ci-publish-login-refused.jsonl), and [ci-unpublish-login-refused.jsonl](azure-artifacts/ci-unpublish-login-refused.jsonl) for the manage token, the one write whose credential the gate really holds back).
+
+For `publish` the refusal is only as strong as the request: the same script can ask for `read` and receive the write-capable session token. What a pipeline uses instead is under [CI](#ci). Publishing needs `vso.packaging_write` and the Contributor role, which the user either has or has not. The provider cannot see the role cheaply, so a refusal is the registry's to give.
 
 [unpublish.jsonl](azure-artifacts/unpublish.jsonl). `npm unpublish @contoso/ui@3.1.0` is the one write that needs more: `vso.packaging_manage` and Owner.
 
@@ -259,6 +269,11 @@ What the logout leaves alone or cannot revoke:
 - If the identity holds no token at all, the answer is `not-found`, as for a read.
 - A job token that Azure Artifacts rejects is not refreshed: the retry is answered `other`, naming the organization and the build identity's role ([rejection-job-token.jsonl](azure-artifacts/rejection-job-token.jsonl)).
 
+**What a provider adds in a pipeline.** The credential is ambient there. `SYSTEM_ACCESSTOKEN` is in the environment of the step that maps it, so every process of the step reaches it without npm, and a workload identity's federated token file is in reach of the job as well. The provider cannot hide either. The rule it follows is:
+
+- A credential read from the job's own environment is released for a write on `interactive: false`: the job already has it, the gate would add nothing, and releasing it is honest. What the provider still adds is the organization check (the job token is used only for the organization named in `SYSTEM_COLLECTIONURI`), and, for a sign-in, tokens minted on demand and short-lived instead of one in a variable or in `.npmrc`.
+- A credential that is not in the environment is not released for a write on `interactive: false` alone. That covers a stored PAT, the sign-in and the Entra token of the machine's own identity (the Azure CLI's, whose token is minted when asked for). That token is not packaging-scoped, so it is released for a write only on the provider's own word, below.
+
 **The identity's own token for a write.** `interactive: false` is a pipeline, and it is also a developer's `npm publish > log.txt`. The Entra token of the machine's identity (the Azure CLI's, or a workload identity's) is not packaging-scoped, so the reference provider releases it for a read only, and for a write only when its own configuration file says the machine's identity is a publisher (`ciPublisher`, as the [AWS provider](aws-codeartifact.md) does), never on an environment variable's word. Without that setting the write is answered `other` and says so ([ci-publish-entra-refused.jsonl](azure-artifacts/ci-publish-entra-refused.jsonl)); with it the token is released ([ci-publish-entra.jsonl](azure-artifacts/ci-publish-entra.jsonl)). The job token is not covered by the setting: it exists only in the job that was given it.
 
 ```json
@@ -281,6 +296,8 @@ A later request for a project-scoped feed, `https://pkgs.dev.azure.com/contoso/w
 - **Reporting the requested lifetime as `expiresAt`.** A tenant policy can cap a PAT, and credprovider retries a 400 without `validTo` so that the service picks the lifetime (its own log line says "service-defined valid-time"; the reason for the 400 is not stated there) ([VstsSessionTokenClient.cs](https://github.com/microsoft/artifacts-credprovider/blob/fd03bdfa0d44facee74b938ed74512f468b048b0/CredentialProvider.Microsoft/CredentialProviders/Vsts/VstsSessionTokenClient.cs)). Report what the service returned.
 - **Expecting presence to gate a publish.** The `read` answer already carries `vso.packaging_write`, so a script that asks for `read` gets a token that can publish; the reference provider's presence prompt on `publish` ([publish-declined.jsonl](azure-artifacts/publish-declined.jsonl)) guards only the request, not the token ([Publishing while a script runs](../phase-2-credential-provider.md#publishing-while-a-script-runs)). A provider that wants the gate has to keep the write token out of `read`, which this registry makes costly for installs from an upstream. Only `unpublish`, whose manage token no read answer carries, is gated for real.
 - **Answering an `http:` URL.** `registry` arrives with the request's scheme. The hello lists `https:` entries only, so npm treats the `http:` form as `url-not-supported` and asks nothing; a provider in the global chain, or one that matches for itself, answers `url-not-supported` too ([Registry matching](../phase-2-credential-provider.md#registry-matching)). An Azure DevOps Server over `http:` needs its own, explicit entry.
+- **Releasing a write on `interactive: false` alone.** A dependency's lifecycle script runs with it too. Release a write credential unprompted only where the job already has it (the job token the pipeline mapped into the environment); a stored PAT, the sign-in and the machine's own identity token are not that ([CI](#ci)).
+- **Starting a sign-in on a read.** A lapsed refresh token on a `read` is `other` naming `npm login`, never a device code: a read is made by every install and by a lockfile's URL.
 - **Re-running `az` on the retry.** It returns the rejected token.
 - **Writing the device-code prompt to stderr.** Under the RFC stderr is logged at verbose only. Open the controlling terminal. credprovider's device-code flow times out after 90 seconds, inside the 5-minute interactive `get` budget.
 - **Trusting `authChallenges` for the authority.** The provider does its own probe, cached per organization, and checks the authority against its own allowlist of Microsoft sign-in hosts.
