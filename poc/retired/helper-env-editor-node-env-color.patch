@@ -1,0 +1,137 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 0db7840..af2db44 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -149,7 +149,7 @@ Since it is not told which request it serves and cannot say how long its token i
+ 
+ The helper does not see the project.
+ It starts in its own directory, with nothing on its standard input, and has 60 seconds and 1 MiB of output; npm ends it with SIGTERM and, 2 seconds later, SIGKILL (on Windows, the whole process tree), so a helper script should `exec` the command that does the work. Once the helper has exited npm reads its output for at most 250 ms more, so a background process it left running does not keep npm waiting.
+-Its environment is npm's own without what npm set from a project's configuration: the `npm_config_*` variables, and `NODE_OPTIONS` where npm set it from `node-options`, which gets the value the user's environment had (an `npm` that a script started, finding it set by its parent, passes none on).
++Its environment is npm's own without what npm set from a project's configuration: the `npm_config_*` variables, and `NODE_OPTIONS`, `EDITOR`, `NODE_ENV` and `COLOR` where npm set them from its configuration, which get the values the user's environment had (an `npm` that a script started, finding them set by its parent, passes none of them on).
+ When npm runs inside `npm run`, the `node_modules/.bin` directories and `node-gyp-bin` it added in front of `PATH` are removed, so the helper's tools are found where the user installed them, and a tool that only a project installs is called by its absolute path.
+ An `npm` that the helper itself runs finds the variable `NPM_INTERNAL_TOKEN_HELPER_RUNNING` and fails with `ETOKENHELPER` where it would have run a helper, so a wrapper that calls `npm` cannot loop.
+ Lines the helper writes to standard error are shown as warnings when it fails and at `--loglevel verbose` when it works, with the token it printed replaced by `***`.
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index 3f1208e..fffcff6 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -227,18 +227,35 @@ const command = (helper, platform) => platform === 'win32' && /\.(cmd|bat)$/i.te
+ // config or about itself. A project's .npmrc reaches a child this way:
+ // `node-options` alone would let a repository load code into a node-based
+ // helper and read the credential it prints. Every npm_config_* variable goes,
+-// and NODE_OPTIONS, which npm sets from `node-options`. Where npm overwrote a
+-// value the user had in the environment npm started with, the helper gets that
+-// value back, and where there was none the variable is absent. An npm that was
+-// itself started by npm (a script that runs `npm publish`) finds NODE_OPTIONS
+-// already set by its parent, and a value equal to npm_config_node_options is
+-// npm's too. A value that the user had set to the same thing is lost by this,
+-// the price of not being able to tell them apart; the helper then gets none.
+-const RESTORED = /^node_options$/i
++// and the four others, each set only from the config key named: NODE_OPTIONS
++// (`node-options`), EDITOR (`editor`), NODE_ENV (`omit` holding `dev`) and COLOR
++// (`color`). Where npm overwrote a value the user had in the environment npm
++// started with, the helper gets that value back, and where there was none the
++// variable is absent. An npm that was itself started by npm (a script that runs
++// `npm publish`) finds all four already set by its parent, and a value that is
++// what the parent set is npm's too, recognised by what the parent exported:
++// NODE_OPTIONS and EDITOR equal npm_config_node_options and npm_config_editor;
++// NODE_ENV is `production` while npm_config_omit holds `dev`, or
++// npm_config_production is true, or npm_config_only is `prod`/`production`
++// (the settings that make npm set it); COLOR is `0` or `1` where
++// npm_config_global_prefix says a parent npm ran, since every npm sets COLOR
++// itself. A value that the user had set to the same thing is lost by this, the
++// price of not being able to tell them apart; the helper then gets none.
++const RESTORED = /^(node_options|editor|node_env|color)$/i
+ const original = (startEnv) => {
+-  const parent = Object.entries(startEnv).find(([key]) => key.toLowerCase() === 'npm_config_node_options')?.[1]
+-  return Object.fromEntries(Object.entries(startEnv)
+-    .filter(([name, value]) => RESTORED.test(name) && value !== parent))
++  const lookup = (name) => Object.entries(startEnv).find(([key]) => key.toLowerCase() === name)?.[1]
++  const omitsDev = /(^|\n)dev(\n|$)/.test(lookup('npm_config_omit') || '') ||
++    lookup('npm_config_production') === 'true' || /^prod(uction)?$/.test(lookup('npm_config_only') || '')
++  const setByParent = {
++    node_options: (value) => value === lookup('npm_config_node_options'),
++    editor: (value) => value === lookup('npm_config_editor'),
++    node_env: (value) => value === 'production' && omitsDev,
++    color: (value) => /^[01]$/.test(value) && lookup('npm_config_global_prefix') !== undefined,
++  }
++  return Object.fromEntries(Object.entries(startEnv).filter(([name, value]) => {
++    const lower = name.toLowerCase()
++    return RESTORED.test(name) && !setByParent[lower](value)
++  }))
+ }
+ 
+ // The directories npm put in front of PATH for a script: when npm runs inside
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index ba32aa7..55c3657 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -574,6 +574,8 @@ t.test('a credential from the command line or the environment is used instead of
+ t.test('the environment', async t => {
+   const start = {
+     NODE_OPTIONS: '--user-flag',
++    EDITOR: 'user-editor',
++    COLOR: '0',
+     npm_config_registry: 'https://x/',
+     KEEP: 'yes',
+   }
+@@ -596,9 +598,9 @@ t.test('the environment', async t => {
+   await getAuthorization({ regKey: REG })
+   const env = calls[0].opts.env
+   t.equal(env.NODE_OPTIONS, '--user-flag', 'what the user started npm with, not what config set')
+-  t.equal(env.EDITOR, 'from-npmrc', 'EDITOR, NODE_ENV and COLOR are not npm\'s to take out')
+-  t.equal(env.NODE_ENV, 'production')
+-  t.equal(env.COLOR, '1')
++  t.equal(env.EDITOR, 'user-editor')
++  t.equal(env.COLOR, '0')
++  t.notOk('NODE_ENV' in env, 'absent when the user had none')
+   t.notOk(Object.keys(env).some(k => /^npm_config_/i.test(k)), 'nothing npm exported from its config')
+   t.equal(env.KEEP, 'yes')
+   t.equal(env.INIT_CWD, '/somewhere', 'what the user has is not npm\'s to remove')
+@@ -608,11 +610,44 @@ t.test('the environment', async t => {
+     startEnv: {
+       node_options: '--require /repo/evil.js',
+       npm_config_node_options: '--require /repo/evil.js',
++      Editor: 'vim',
++      NPM_CONFIG_EDITOR: 'vim',
++      NODE_ENV: 'test',
+     },
+   })
+   await parent.getAuthorization({ regKey: REG })
+-  t.notOk(Object.keys(parent.calls[0].opts.env).some(k => /^node_options$/i.test(k)),
+-    'an npm that a script started finds the value its parent set from config, which is not the user\'s')
++  const inherited = parent.calls[0].opts.env
++  t.notOk(Object.keys(inherited).some(k => /^(node_options|editor)$/i.test(k)),
++    'an npm that a script started finds the values its parent set from config, which are not the user\'s')
++  t.equal(inherited.NODE_ENV, 'test')
++
++  // what npm sets from its config is recognised by what it exported: NODE_ENV
++  // while omit holds dev (or production, or only=prod), COLOR in any npm below the first
++  for (const [name, exported] of [
++    ['omit', { npm_config_omit: 'dev' }],
++    ['omit with another type', { npm_config_omit: 'optional\n\ndev' }],
++    ['production', { npm_config_production: 'true' }],
++    ['only', { npm_config_only: 'prod' }],
++  ]) {
++    const nested = setup(t, printing('tok'), {
++      startEnv: { NODE_ENV: 'production', COLOR: '1', npm_config_global_prefix: '/usr', ...exported, KEEP: 'yes' },
++    })
++    await nested.getAuthorization({ regKey: REG })
++    const got = nested.calls[0].opts.env
++    t.notOk('NODE_ENV' in got, `NODE_ENV that --${name} made is npm's`)
++    t.notOk('COLOR' in got, 'and so is the COLOR of a parent npm')
++    t.equal(got.KEEP, 'yes')
++  }
++  const users = setup(t, printing('tok'), { startEnv: { NODE_ENV: 'production', COLOR: '1' } })
++  await users.getAuthorization({ regKey: REG })
++  t.equal(users.calls[0].opts.env.NODE_ENV, 'production', 'a NODE_ENV that no setting of npm explains is the user\'s')
++  t.equal(users.calls[0].opts.env.COLOR, '1', 'and so is a COLOR in an npm that no npm started')
++  const other = setup(t, printing('tok'), {
++    startEnv: { NODE_ENV: 'development', COLOR: 'always', npm_config_omit: 'dev', npm_config_global_prefix: '/usr' },
++  })
++  await other.getAuthorization({ regKey: REG })
++  t.equal(other.calls[0].opts.env.NODE_ENV, 'development', 'only production is what npm sets')
++  t.equal(other.calls[0].opts.env.COLOR, 'always', 'and only 0 or 1')
+ })
+ 
+ t.test('PATH loses what npm added for a script', async t => {

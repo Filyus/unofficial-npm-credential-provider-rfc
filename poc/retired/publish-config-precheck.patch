@@ -1,0 +1,276 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 0db7840..2f1c793 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -185,6 +185,7 @@ So it is when `proxy` or `https-proxy` does and the request is over plain `http:
+ The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
+ The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
+ Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
++The same goes for the `publishConfig` of `package.json`: when it sets one of them and a helper serves the registry that `npm publish` or `npm unpublish` targets, the command is refused with `ETOKENHELPER`, naming `publishConfig.<key>`; remove it from `publishConfig`, or set it on the command line, which overrides `publishConfig`.
+ 
+ ### Unsupported Custom Configuration Keys
+ 
+diff --git a/lib/commands/publish.js b/lib/commands/publish.js
+index 3074fe8..cc05b9d 100644
+--- a/lib/commands/publish.js
++++ b/lib/commands/publish.js
+@@ -329,6 +329,8 @@ class Publish extends BaseCommand {
+         }
+       }
+       flatten(filteredPublishConfig, opts)
++      publishConfigOverrides.refuseProjectRoute(this.npm.config, filteredPublishConfig,
++        npmFetch.pickRegistry(npa.resolve(manifest.name, manifest.version), opts))
+     }
+     // the route a token helper's credential may take is checked for each
+     // request, against this and the other layers; each manifest sets it anew
+diff --git a/lib/commands/unpublish.js b/lib/commands/unpublish.js
+index 1dd7684..0ef1890 100644
+--- a/lib/commands/unpublish.js
++++ b/lib/commands/unpublish.js
+@@ -1,6 +1,7 @@
+ const libaccess = require('libnpmaccess')
+ const libunpub = require('libnpmpublish').unpublish
+ const npa = require('npm-package-arg')
++const npmFetch = require('npm-registry-fetch')
+ const pacote = require('pacote')
+ const { output, log } = require('proc-log')
+ const pkgJson = require('@npmcli/package-json')
+@@ -136,6 +137,8 @@ class Unpublish extends BaseCommand {
+       // the route a token helper's credential may take is checked for each
+       // request, against this and the other layers
+       this.npm.config.setPublishConfigRoute(filteredPublishConfig)
++      publishConfigOverrides.refuseProjectRoute(this.npm.config, filteredPublishConfig,
++        npmFetch.pickRegistry(spec, opts))
+     }
+ 
+     const versions = await Unpublish.getKeysOfVersions(spec.name, opts)
+diff --git a/lib/utils/publish-config.js b/lib/utils/publish-config.js
+index ffafd42..118f114 100644
+--- a/lib/utils/publish-config.js
++++ b/lib/utils/publish-config.js
+@@ -1,4 +1,5 @@
+ const { log } = require('proc-log')
++const { display } = require('./token-helper.js')
+ 
+ // The `publishConfig` settings that apply on top of the loaded config. Keys
+ // set on the command line win over the manifest, and a `tokenHelper` is
+@@ -21,4 +22,51 @@ const publishConfigOverrides = (manifest, cliFlags, command, warn = true) => {
+   return overrides
+ }
+ 
++// The settings that choose where a request goes and whom it trusts, which a
++// token helper's credential must not follow when package.json chose them (as
++// it must not when a project .npmrc did, see @npmcli/config).
++const TRANSPORT = ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']
++
++// The registry key of the token helper that a request to `registry` would run:
++// npm-registry-fetch asks for each key of the URL from the longest up and stops
++// at the first that holds a stored credential, and a credential given on the
++// command line or in the environment is used instead of the helper.
++const helperKey = (config, registry) => {
++  const helpers = config.flat.tokenHelpers || {}
++  const { host, pathname } = new URL(registry)
++  let key = `//${host}${pathname}`
++  while (key.length > '//'.length) {
++    if (helpers[key]) {
++      return config.credentialKeysFromCliOrEnv(key).length ? null : key
++    }
++    if (config.get(`${key}:_authToken`) || config.get(`${key}:_auth`) ||
++      config.get(`${key}:username`) && config.get(`${key}:_password`)) {
++      return null
++    }
++    key = key.replace(/([^/]+|\/)$/, '')
++  }
++  return null
++}
++
++// Refuses, before the helper is run, when the publishConfig that applies (what
++// publishConfigOverrides returned: keys set on the command line are not in it)
++// sets one of those for a registry that has a token helper. It is a refusal
++// and not a dropped key, as for a project .npmrc: the user is told what
++// package.json asks for.
++const refuseProjectRoute = (config, overrides, registry) => {
++  const keys = TRANSPORT.filter(key => key in overrides &&
++    (key === 'strict-ssl' ? overrides[key] === false : overrides[key] !== null && overrides[key] !== undefined))
++  const key = keys.length ? helperKey(config, registry) : null
++  if (key) {
++    throw Object.assign(new Error(
++      `Token helper ${display(config.flat.tokenHelpers[key], `${key}:tokenHelper`)} was not run: its credential ` +
++      'is not sent over a route that a project chose, and package.json sets ' +
++      `${keys.map(k => `"publishConfig.${k}"`).join(', ')}; remove ` +
++      `${keys.length > 1 ? 'them' : 'it'} from publishConfig, or set ${keys.length > 1 ? 'them' : 'it'} ` +
++      'on the command line, which overrides publishConfig'
++    ), { code: 'ETOKENHELPER' })
++  }
++}
++
+ module.exports = publishConfigOverrides
++module.exports.refuseProjectRoute = refuseProjectRoute
+diff --git a/test/lib/commands/publish.js b/test/lib/commands/publish.js
+index 88258fc..0410f7f 100644
+--- a/test/lib/commands/publish.js
++++ b/test/lib/commands/publish.js
+@@ -2143,33 +2143,6 @@ t.test('publishConfig route settings reach the tokenHelper check', async t => {
+   const uri = 'https://registry.npmjs.org/pkg'
+   const homeDir = { '.npmrc': `${regKey}:tokenHelper=${helper}\n` }
+ 
+-  t.test('a CA', async t => {
+-    const packageJson = { ...pkgJson, publishConfig: { ca: 'project-ca' } }
+-    const { npm, registry } = await loadNpmWithRegistry(t, {
+-      homeDir,
+-      prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
+-    })
+-    registry.publish(pkg, { packageJson })
+-    await npm.exec('publish', [])
+-    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
+-      code: 'ETOKENHELPER',
+-      message: /"ca" comes from the publishConfig of package\.json/,
+-    }, 'the request that would send the helper\'s credential is refused')
+-  })
+-
+-  t.test('strict-ssl false', async t => {
+-    const packageJson = { ...pkgJson, publishConfig: { 'strict-ssl': false } }
+-    const { npm, registry } = await loadNpmWithRegistry(t, {
+-      homeDir,
+-      prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
+-    })
+-    registry.publish(pkg, { packageJson })
+-    await npm.exec('publish', [])
+-    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
+-      message: /"strict-ssl" comes from the publishConfig of package\.json/,
+-    })
+-  })
+-
+   t.test('no publishConfig clears an earlier one', async t => {
+     const { npm, registry } = await loadNpmWithRegistry(t, {
+       homeDir,
+@@ -2181,3 +2154,20 @@ t.test('publishConfig route settings reach the tokenHelper check', async t => {
+     t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), 'Bearer test-helper-token')
+   })
+ })
++
++t.test('a publishConfig route setting is refused for a registry that has a tokenHelper', async t => {
++  const helper = require('../../fixtures/token-helper')
++  for (const [key, value] of [['proxy', 'http://project-proxy:3128'], ['strict-ssl', false]]) {
++    t.test(key, async t => {
++      const packageJson = { ...pkgJson, publishConfig: { [key]: value } }
++      const { npm } = await loadNpmWithRegistry(t, {
++        homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++        prefixDir: { 'package.json': JSON.stringify(packageJson, null, 2) },
++      })
++      await t.rejects(npm.exec('publish', []), {
++        code: 'ETOKENHELPER',
++        message: new RegExp(`was not run.*"publishConfig\\.${key}".*remove it from publishConfig`),
++      }, 'nothing is requested, and the helper is not run')
++    })
++  }
++})
+diff --git a/test/lib/commands/unpublish.js b/test/lib/commands/unpublish.js
+index cfec069..b5ac4f6 100644
+--- a/test/lib/commands/unpublish.js
++++ b/test/lib/commands/unpublish.js
+@@ -681,27 +681,21 @@ t.test('publishConfig cannot supply a tokenHelper', async t => {
+   ])
+ })
+ 
+-t.test('publishConfig route settings reach the tokenHelper check', async t => {
++t.test('a publishConfig route setting is refused for a registry that has a tokenHelper', async t => {
+   const helper = require('../../fixtures/token-helper')
+-  const regKey = '//registry.npmjs.org/'
+   const { npm } = await loadMockNpm(t, {
+     config: { force: true },
+-    homeDir: { '.npmrc': `${regKey}:tokenHelper=${helper}\n` },
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
+     prefixDir: {
+       'package.json': JSON.stringify({
+         name: pkg,
+         version: '1.0.0',
+-        publishConfig: { 'strict-ssl': false },
++        publishConfig: { 'https-proxy': 'http://project-proxy:3128' },
+       }, null, 2),
+     },
+   })
+-  const registry = new MockRegistry({ tap: t, registry: npm.config.get('registry') })
+-  const manifest = registry.manifest({ name: pkg })
+-  await registry.package({ manifest, query: { write: true }, times: 2 })
+-  registry.unpublish({ manifest })
+-  await npm.exec('unpublish', [])
+-  await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: 'https://registry.npmjs.org/pkg' }), {
++  await t.rejects(npm.exec('unpublish', []), {
+     code: 'ETOKENHELPER',
+-    message: /"strict-ssl" comes from the publishConfig of package\.json/,
+-  }, 'the request that would send the helper\'s credential is refused')
++    message: /was not run.*"publishConfig\.https-proxy".*remove it from publishConfig/,
++  }, 'nothing is requested, and the helper is not run')
+ })
+diff --git a/test/lib/utils/publish-config.js b/test/lib/utils/publish-config.js
+index 23452aa..eb1fef2 100644
+--- a/test/lib/utils/publish-config.js
++++ b/test/lib/utils/publish-config.js
+@@ -24,3 +24,66 @@ t.test('publishConfig overrides', async t => {
+   publishConfigOverrides(manifest, {}, 'publish', false)
+   t.same(logs, [], 'no warning when asked not to')
+ })
++
++// a config as far as the check reads it: token helpers by registry key, stored
++// values, and what the command line or environment gives
++const configFor = ({ helpers = { '//r.example/': '/usr/local/bin/token' }, stored = {}, given = {} } = {}) => ({
++  flat: { tokenHelpers: helpers },
++  get: key => stored[key],
++  credentialKeysFromCliOrEnv: key => given[key] || [],
++})
++
++t.test('a publishConfig route setting is refused for a registry that has a token helper', async t => {
++  const { refuseProjectRoute } = publishConfigOverrides
++  const refused = (overrides, config = configFor(), registry = 'https://r.example/') =>
++    t.throws(() => refuseProjectRoute(config, overrides, registry), { code: 'ETOKENHELPER' }, JSON.stringify(overrides))
++
++  for (const overrides of [
++    { proxy: 'http://p:1' },
++    { 'https-proxy': 'http://p:1' },
++    { ca: 'x' },
++    { cafile: '/repo/ca.pem' },
++    { 'strict-ssl': false },
++  ]) {
++    const [key] = Object.keys(overrides)
++    t.throws(() => refuseProjectRoute(configFor(), overrides, 'https://r.example/'), {
++      code: 'ETOKENHELPER',
++      message: new RegExp(`was not run.*"publishConfig\\.${key}".*remove it from publishConfig, ` +
++        'or set it on the command line, which overrides publishConfig'),
++    }, key)
++  }
++  t.throws(() => refuseProjectRoute(configFor(), { proxy: 'http://p:1', ca: 'x' }, 'https://r.example/'), {
++    message: /"publishConfig\.proxy", "publishConfig\.ca"; remove them from publishConfig, or set them on the command line/,
++  }, 'every setting is named')
++
++  refused({ proxy: 'http://p:1' }, configFor({ helpers: { '//r.example/': '/usr/local/bin/token' } }), 'https://r.example/pkg/')
++  refused({ proxy: 'http://p:1' }, configFor({ helpers: { '//r.example/': '/usr/local/bin/token' } }), 'https://r.example/npm/sub/')
++  t.throws(() => refuseProjectRoute(configFor(), { proxy: 'http://p:1' }, 'https://r.example/'),
++    { message: /Token helper configured as "\/\/r\.example\/:tokenHelper" \(the value is not shown\)/ },
++    'a helper value that is not a file is not printed')
++})
++
++t.test('a publishConfig route setting is allowed where no token helper would run', async t => {
++  const { refuseProjectRoute } = publishConfigOverrides
++  const ok = (name, overrides, config, registry = 'https://r.example/') =>
++    t.doesNotThrow(() => refuseProjectRoute(config, overrides, registry), name)
++
++  ok('no token helper at all', { proxy: 'http://p:1' }, { flat: {}, get: () => undefined })
++  ok('a helper for another registry', { proxy: 'http://p:1' }, configFor(), 'https://other.example/')
++  ok('nothing about the route', { tag: 'next', registry: 'https://r.example/' }, configFor())
++  ok('strict-ssl left on', { 'strict-ssl': true }, configFor())
++  ok('null settings are the default', { proxy: null, ca: null, cafile: undefined }, configFor())
++  ok('a credential given for this run replaces the helper', { proxy: 'http://p:1' },
++    configFor({ given: { '//r.example/': ['//r.example/:_authToken'] } }))
++  ok('a token stored under a longer key is used instead', { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:_authToken': 't' } }),
++    'https://r.example/npm/')
++  ok('so is _auth, or a username and password',
++    { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:_auth': 't' } }), 'https://r.example/npm/')
++  ok('a username and password', { proxy: 'http://p:1' },
++    configFor({ helpers: { '//r.example/': '/h' }, stored: { '//r.example/npm/:username': 'u', '//r.example/npm/:_password': 'p' } }),
++    'https://r.example/npm/')
++  ok('a key set on the command line is not in what applies', publishConfigOverrides(
++    { publishConfig: { proxy: 'http://p:1' } }, { proxy: 'http://mine:1' }, 'publish', false), configFor())
++})

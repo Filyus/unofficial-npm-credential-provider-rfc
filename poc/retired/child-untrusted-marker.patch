@@ -1,0 +1,210 @@
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index fabe40d..d3169e7 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -22,6 +22,7 @@ const internalEnv = [
+   'npm-version',
+   'global-prefix',
+   'local-prefix',
++  'token-helper-untrusted',
+ ]
+ 
+ // the settings that choose where a request goes and whom it trusts
+@@ -78,9 +79,11 @@ class Config {
+   // `env` and `publishConfig` entries warn instead of error.
+   #unknownConfigs = []
+   // The user and global files that may configure a token helper (see
+-  // #trustTokenHelpers) and why the others may not.
++  // #trustTokenHelpers), why the others may not, and the ones whose file has a
++  // tokenHelper key at all.
+   #tokenHelperTrusted = new Set()
+   #tokenHelperRefusals = new Map()
++  #tokenHelperSeen = new Set()
+   #publishConfigRoute = {}
+ 
+   static get typeDefs () {
+@@ -667,6 +670,7 @@ class Config {
+         // the machine owner may configure one: a project .npmrc comes with
+         // the repository, and env and cli values can be set by scripts.
+         if (/(^|:)tokenHelper$/.test(k)) {
++          this.#tokenHelperSeen.add(where)
+           if (!this.#tokenHelperTrusted.has(where)) {
+             const why = this.#tokenHelperRefusals.get(where) ||
+               'tokenHelper may only be set in user or global config'
+@@ -949,9 +953,11 @@ class Config {
+   // treats as "user" or "global". So a token helper counts from those files
+   // only when project config sets none of the three. Keys are compared as npm
+   // applies them, after ${VAR} expansion: `user${UNSET?}config=` is
+-  // `userconfig`. A file that is not trusted is the repository's, and counts as
+-  // the project's layer for the settings of the route of a request too
+-  // (tokenHelperProjectTransport), not only for the tokenHelper key.
++  // `userconfig`. A child npm inherits the chosen paths as environment values,
++  // so its parent passes on which files it did not trust. A file that is not
++  // trusted is the repository's, and counts as the project's layer for the
++  // settings of the route of a request too (tokenHelperProjectTransport), not
++  // only for the tokenHelper key.
+   #trustTokenHelpers (where) {
+     const { raw } = this.data.get('project')
+     const chosen = ['userconfig', 'globalconfig', 'prefix'].some(key =>
+@@ -959,6 +965,8 @@ class Config {
+     if (chosen) {
+       this.#tokenHelperRefusals.set(where,
+         'project config sets userconfig, globalconfig or prefix, so the file may not be the user\'s')
++    } else if (this.#inheritedUntrusted().includes(where)) {
++      this.#tokenHelperRefusals.set(where, 'the parent npm process did not trust it')
+     } else {
+       const inside = this.#chosenInsideProject(where)
+       if (inside) {
+@@ -1034,6 +1042,18 @@ class Config {
+     return null
+   }
+ 
++  #inheritedUntrusted () {
++    return (this.env.npm_config_token_helper_untrusted || '').split(',')
++  }
++
++  // The files that may not configure a token helper but have a tokenHelper
++  // key, for setEnvs to pass on to child processes. It is empty, and so
++  // sets nothing, for anyone who has no helper configured.
++  get tokenHelperUntrusted () {
++    return ['user', 'global'].filter(where => !this.#tokenHelperTrusted.has(where) &&
++      (this.#tokenHelperSeen.has(where) || this.#inheritedUntrusted().includes(where)))
++  }
++
+   // What publish and unpublish take from the manifest's publishConfig, for the
+   // settings that choose the route of a request (see tokenHelperProjectTransport).
+   // They replace what the layers say, as flatten() does for the request, and
+diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
+index 12719b5..0338354 100644
+--- a/workspaces/config/lib/set-envs.js
++++ b/workspaces/config/lib/set-envs.js
+@@ -93,6 +93,15 @@ const setEnvs = (config) => {
+   // TODO this may not be the best away to persist these
+   env.npm_config_global_prefix = config.globalPrefix
+   env.npm_config_local_prefix = config.localPrefix
++  // a child npm inherits a project-chosen userconfig or globalconfig as an
++  // environment value, so it is told which files the parent did not trust for
++  // a token helper; nothing is set unless one of them has a helper
++  const untrusted = config.tokenHelperUntrusted || []
++  if (untrusted.length) {
++    env.npm_config_token_helper_untrusted = untrusted.join(',')
++  } else {
++    delete env.npm_config_token_helper_untrusted
++  }
+   if (cliConf.editor) {
+     env.EDITOR = cliConf.editor
+   }
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index f069620..1b77eed 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -2548,6 +2548,7 @@ t.test('tokenHelper is honored only from user and global config', async t => {
+       'tokenHelper may only be set in user or global config')), `${where} config is reported`)
+   }
+   t.same(config.getUnknownConfigs('user'), [], 'tokenHelper is a known nerf-dart key')
++  t.same(config.tokenHelperUntrusted, [], 'and nothing is passed on to child processes')
+ })
+ 
+ t.test('a user or global file that project config chose cannot configure a tokenHelper', async t => {
+@@ -2565,6 +2566,7 @@ t.test('a user or global file that project config chose cannot configure a token
+       t.notOk(helperIn(config.flat, '//helper.registry/'), 'no helper from either file')
+       t.notOk(helperIn(config.flat, '//other.registry/'), 'not even from the file project config named')
+       t.ok(warned.some(w => w.includes('project config sets userconfig, globalconfig or prefix')), 'reported')
++      t.same(config.tokenHelperUntrusted, ['user', 'global'], 'and passed on to child processes')
+     })
+   }
+ 
+@@ -2591,6 +2593,7 @@ t.test('a user or global file that the command line or the environment put insid
+     for (const part of refusedFor(path, dir, marker)) {
+       t.ok(warned.some(w => w.includes(part)), `reported: ${part}`)
+     }
++    t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
+   }
+   for (const [name, options, where, dir] of [
+     ['--userconfig into the checkout', { argv: ['--userconfig=<path>/project/ci.npmrc'] }, 'user', 'project'],
+@@ -2695,6 +2698,7 @@ t.test('a user or global file that the command line or the environment put insid
+     t.equal(helperIn(dir.config.flat, '//helper.registry/'), HELPER, 'a directory without a mark, below home, in the current directory')
+     const chosen = await loadHelperConfig(t, { user: keyed, global: keyed })
+     t.equal(helperIn(chosen.config.flat, '//helper.registry/'), HELPER, 'both files, chosen outside the project')
++    t.same(chosen.config.tokenHelperUntrusted, [])
+     const sibling = await loadHelperConfig(t, {
+       files: false, sub: keyed, tree: { sibling: { 'ci.npmrc': keyed } }, argv: ['--userconfig=<path>/sibling/ci.npmrc'],
+     })
+@@ -2703,6 +2707,8 @@ t.test('a user or global file that the command line or the environment put insid
+       files: false, user: keyed, argv: ['--userconfig=<path>/home/.npmrc', '--prefix=<path>/missing'],
+     })
+     t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there holds no file to refuse')
++    const absent = await loadHelperConfig(t, { files: false, argv: ['--userconfig=<path>/project/absent.npmrc'] })
++    t.same(absent.config.tokenHelperUntrusted, [], 'a file that is not there has no key to refuse')
+   })
+ 
+   t.test('npm -g --prefix with node_modules only', async t => {
+@@ -2770,6 +2776,32 @@ t.test('a user or global file that the command line or the environment put insid
+   })
+ })
+ 
++t.test('a child npm keeps distrusting files its parent did not trust', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  const trusting = await loadHelperConfig(t, { user: keyed, env: { npm_config_token_helper_untrusted: '' } })
++  t.equal(helperIn(trusting.config.flat, '//helper.registry/'), HELPER, 'an empty marker distrusts nothing')
++
++  const child = await loadHelperConfig(t, { user: keyed, env: { npm_config_token_helper_untrusted: 'user' } })
++  t.notOk(helperIn(child.config.flat, '//helper.registry/'), 'but not the file the parent marked')
++  t.ok(child.warned.some(w => w.includes('the parent npm process did not trust it')))
++  t.same(child.config.tokenHelperUntrusted, ['user'], 'and the marker is passed on again')
++  t.same(child.config.getUnknownConfigs('env'), [], 'the marker is not unknown config')
++
++  const grandchild = await loadHelperConfig(t, {
++    user: '',
++    global: keyed,
++    env: { npm_config_token_helper_untrusted: 'user,global' },
++  })
++  t.same(grandchild.config.tokenHelperUntrusted, ['user', 'global'],
++    'a marked file is passed on even when its file has no helper any more')
++
++  const nobody = await loadHelperConfig(t, { user: 'save=false\n' })
++  t.same(nobody.config.tokenHelperUntrusted, [], 'a file without a helper is never marked')
++
++  const noProject = await loadHelperConfig(t, { project: null, user: keyed })
++  t.equal(helperIn(noProject.config.flat, '//helper.registry/'), HELPER, 'a project without an .npmrc chose nothing')
++})
++
+ t.test('getCredentialsByURI reports a tokenHelper ahead of a stored token', async t => {
+   const { config } = await loadHelperConfig(t, {
+     user: [
+diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
+index 3a63fe7..5936e87 100644
+--- a/workspaces/config/test/set-envs.js
++++ b/workspaces/config/test/set-envs.js
+@@ -278,6 +278,31 @@ t.test('does not export persistent allow-scripts config', t => {
+   t.end()
+ })
+ 
++t.test('a child npm is told which config files the parent did not trust for a token helper', t => {
++  const { definitions, defaults } = mockDefinitions(t)
++  const envConf = Object.create(defaults)
++  const cliConf = Object.create(envConf)
++  const make = (tokenHelperUntrusted, env) => ({
++    env,
++    defaults,
++    definitions,
++    list: [cliConf, envConf],
++    globalPrefix,
++    localPrefix,
++    npmBin,
++    execPath,
++    tokenHelperUntrusted,
++  })
++  const env = { npm_config_token_helper_untrusted: 'stale' }
++  setEnvs(make(['user'], env))
++  t.equal(env.npm_config_token_helper_untrusted, 'user')
++  setEnvs(make(['user', 'global'], env))
++  t.equal(env.npm_config_token_helper_untrusted, 'user,global', 'every untrusted file is passed on')
++  setEnvs(make([], env))
++  t.notOk('npm_config_token_helper_untrusted' in env, 'cleared when every file was trusted')
++  t.end()
++})
++
+ t.test('a nerf-darted credential in config is not exported, so it cannot reach a child as an environment value', t => {
+   const { definitions, defaults } = mockDefinitions(t)
+   const envConf = Object.create(defaults)

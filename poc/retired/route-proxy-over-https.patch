@@ -1,0 +1,139 @@
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index 0db7840..6607e2c 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -180,8 +180,7 @@ npm refuses to start a command that makes requests while a helper is configured
+ The credential is sent as a stored `_authToken` for the same registry is: with the same proxy and certificate settings and the same redirects.
+ Two things a stored token would be sent over are refused for the helper's credential, with `ETOKENHELPER` and without running the helper.
+ A request over plain `http:` to a host that is not this machine (`localhost`, `127.0.0.0/8`, `[::1]`) is refused: use `https:`.
+-A request is also refused when `ca` or `cafile` has its value from the project's configuration, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and where it comes from.
+-So it is when `proxy` or `https-proxy` does and the request is over plain `http:` (only a loopback one is allowed at all), which npm sends to the proxy itself; over `https:` a proxy only tunnels the connection, and the setting does not matter.
++A request is also refused when `proxy`, `https-proxy`, `ca` or `cafile` has its value from the project's configuration, or `strict-ssl` is `false` there, since a repository could then route the credential through a server of its choosing; the message names the key and where it comes from.
+ The project's configuration is, for these settings as for `tokenHelper`: a project `.npmrc`; a user or global file that the rules above do not trust (one chosen inside a project, such as `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, or named by the project's `.npmrc`); a value in the environment that the project's `.npmrc` holds too, which is what an `npm` started by another `npm` finds, since the parent exports its project settings as `npm_config_*` variables and the child reads the same `.npmrc` from its own directory; and the `publishConfig` of `package.json` for `npm publish` and `npm unpublish`, which replaces the other layers for the request as it does in `npm publish`.
+ The check is made for each request, so a publish whose credential is an OIDC token, which replaces the helper, is not refused.
+ Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index 3f1208e..9075519 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -32,10 +32,6 @@ const MAX_WIN_CWD = 258
+ const GUARD = 'NPM_INTERNAL_TOKEN_HELPER_RUNNING'
+ // the hosts to which a credential may be sent over plain http: this machine
+ const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/
+-// the settings of a proxy: over https a proxy sees only a CONNECT tunnel, and
+-// the credential travels inside it, so they are refused for an http request
+-// only, which npm sends to the proxy itself (even a loopback one)
+-const PROXY = /^(https-)?proxy$/
+ 
+ const isFile = (name) => {
+   try {
+@@ -434,7 +430,6 @@ module.exports = (
+         `to ${hostname}; use https`)
+     }
+     const transport = config.tokenHelperProjectTransport
+-      .filter(({ key }) => protocol !== 'https:' || !PROXY.test(key))
+     if (transport.length) {
+       throw new TokenHelperError(display(helper, `${regKey}:tokenHelper`),
+         'was not run: its credential is not sent over a route that a ' +
+diff --git a/test/lib/npm.js b/test/lib/npm.js
+index b167264..731262c 100644
+--- a/test/lib/npm.js
++++ b/test/lib/npm.js
+@@ -781,22 +781,19 @@ t.test('the helper, the route a project chose and a credential for this run', as
+   const regKey = '//helper.example/'
+   const uri = 'https://helper.example/pkg'
+   const projectProxy = { '.npmrc': 'proxy=http://project-proxy:3128\n' }
+-
+   const loopback = 'http://localhost:4873/pkg'
+ 
+   t.test('a proxy in the project', async t => {
+     const { npm } = await loadMockNpm(t, { homeDir, prefixDir: projectProxy })
+-    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: loopback }), {
++    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
+       code: 'ETOKENHELPER',
+       message: /"proxy" comes from .*\.npmrc.*remove it from the project's \.npmrc or publishConfig/,
+     })
+-    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), 'Bearer test-helper-token',
+-      'and not for an https request, which a proxy only tunnels')
+   })
+ 
+   t.test('a proxy on the command line is the user\'s own', async t => {
+     const { npm } = await loadMockNpm(t, { homeDir, prefixDir: projectProxy, config: { proxy: 'http://my-proxy:3128' } })
+-    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri: loopback }), 'Bearer test-helper-token')
++    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), 'Bearer test-helper-token')
+   })
+ 
+   t.test('plain http', async t => {
+@@ -820,9 +817,10 @@ t.test('the helper, the route a project chose and a credential for this run', as
+   t.test('a proxy in publishConfig', async t => {
+     const { npm } = await loadMockNpm(t, { homeDir })
+     npm.config.setPublishConfigRoute({ proxy: 'http://project-proxy:3128' })
+-    t.equal(await npm.flatOptions.getAuthorization({ regKey, uri }), 'Bearer test-helper-token', 'not over https')
+-    await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: loopback }),
+-      { code: 'ETOKENHELPER', message: /"proxy" comes from the publishConfig/ }, 'over http loopback')
++    for (const request of [uri, loopback]) {
++      await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri: request }),
++        { code: 'ETOKENHELPER', message: /"proxy" comes from the publishConfig/ }, request)
++    }
+   })
+ 
+   t.test('publishConfig and an OIDC token', async t => {
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index ba32aa7..273a732 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -488,27 +488,20 @@ t.test('the helper\'s credential is not sent over plain http, except to this mac
+ t.test('the helper\'s credential is not sent over a route that a project chose', async t => {
+   const FILE = join('proj', '.npmrc')
+   const refused = (key, source = FILE) => ({ transport: [{ key, source }] })
+-  // npm proxies a loopback http request, so every key refuses one
+   for (const key of ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']) {
+     const { getAuthorization, calls } = setup(t, printing('tok'), { config: refused(key) })
+-    await t.rejects(getAuthorization({ regKey: REG, uri: 'http://localhost:4873/pkg' }), {
++    await t.rejects(getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), {
+       code: 'ETOKENHELPER',
+       message: new RegExp(`"${key}" comes from ${FILE.replace('\\', '\\\\')}.*remove it from the project's .npmrc or publishConfig, ` +
+         'or set it on the command line, which overrides project config'),
+     }, key)
+     t.equal(calls.length, 0, `${key}: the helper is not run`)
+   }
+-  for (const key of ['ca', 'cafile', 'strict-ssl']) {
+-    const { getAuthorization, calls } = setup(t, printing('tok'), { config: refused(key) })
+-    await t.rejects(getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), { code: 'ETOKENHELPER' },
+-      `${key} refuses an https request`)
+-    t.equal(calls.length, 0)
+-  }
+ 
+   const { getAuthorization, calls } = setup(t, printing('tok'), {
+     config: { transport: [{ key: 'proxy', source: 'a.npmrc' }, { key: 'ca', source: 'b.npmrc' }] },
+   })
+-  await t.rejects(getAuthorization({ regKey: REG, uri: 'http://localhost:4873/pkg' }),
++  await t.rejects(getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }),
+     { message: /"proxy" comes from a.npmrc, "ca" comes from b.npmrc/ }, 'every setting is named')
+   t.equal(calls.length, 0)
+ 
+@@ -520,24 +513,6 @@ t.test('the helper\'s credential is not sent over a route that a project chose',
+     'a registry without a helper has no credential to protect')
+ })
+ 
+-t.test('a project proxy refuses an http request, not an https one', async t => {
+-  const { getAuthorization, calls } = setup(t, printing('tok'), {
+-    config: { transport: [{ key: 'proxy', source: 'a.npmrc' }, { key: 'https-proxy', source: 'a.npmrc' }] },
+-  })
+-  t.equal(await getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }), 'Bearer tok',
+-    'over https the proxy sees a CONNECT tunnel')
+-  t.equal(calls.length, 1)
+-  await t.rejects(getAuthorization({ regKey: REG, uri: 'http://127.0.0.1:4873/pkg' }),
+-    { message: /"proxy" comes from a.npmrc, "https-proxy" comes from a.npmrc/ }, 'a loopback request is proxied')
+-  const ca = setup(t, printing('tok'), {
+-    config: { transport: [{ key: 'proxy', source: 'a.npmrc' }, { key: 'ca', source: 'b.npmrc' }] },
+-  })
+-  await t.rejects(ca.getAuthorization({ regKey: REG, uri: 'https://helper.registry/pkg' }),
+-    { message: /"ca" comes from b.npmrc/ }, 'a CA still refuses, and only it is named')
+-  await t.rejects(ca.getAuthorization({ regKey: REG }), { message: /"proxy" comes from a.npmrc, "ca"/ },
+-    'without a URL nothing is known about the protocol: every key refuses')
+-})
+-
+ t.test('a credential from the command line or the environment is used instead of the helper, with one warning per registry', async t => {
+   const logs = logsOf(t)
+   const { getAuthorization, calls } = setup(t, printing('tok'), {

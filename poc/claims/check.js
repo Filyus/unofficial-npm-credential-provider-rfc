@@ -18,6 +18,9 @@
 // and, for Phase 1a, the commit shas and the lib lines added that the table
 // states are those of the commits in poc/patches.
 //
+// And the retired mechanisms: every patch in poc/retired is an entry of
+// retired.json and a row of the README's table there, and the other way round.
+//
 //   node poc/claims/check.js <npm-cli checkout> <npm-registry-fetch checkout>
 
 const fs = require('fs')
@@ -263,6 +266,42 @@ for (const problem of problems) {
   console.log(problem)
 }
 console.log(`${ruleRows} rule rows in ${implementations.length} documents, ${problems.length} problems with submissions`)
+
+// The retired mechanisms: poc/retired holds one patch for each entry of
+// retired.json and one row of the README's table for each, and nothing else.
+const retiredDir = path.join(rfc, 'poc', 'retired')
+const retiredProblems = []
+const listed = JSON.parse(read(path.join(retiredDir, 'retired.json'))).retired
+const onDisk = fs.readdirSync(retiredDir).filter(name => name.endsWith('.patch'))
+const rowsOfReadme = read(path.join(retiredDir, 'README.md')).split('\n')
+  .filter(line => line.startsWith('|')).map(cellsOf)
+  .map(cells => /^`([^`]+\.patch)`$/.exec(cells[0])?.[1]).filter(Boolean)
+for (const name of onDisk) {
+  if (!listed.some(entry => entry.patch === name)) {
+    retiredProblems.push(`poc/retired/${name} is in no entry of retired.json`)
+  }
+  if (!rowsOfReadme.includes(name)) {
+    retiredProblems.push(`poc/retired/${name} has no row in poc/retired/README.md`)
+  }
+}
+for (const entry of listed) {
+  if (!onDisk.includes(entry.patch)) {
+    retiredProblems.push(`retired.json lists ${entry.patch}, which is not in poc/retired`)
+  }
+  if (!Object.values(entry.tests).flat().length) {
+    retiredProblems.push(`retired.json lists no tests for ${entry.name}`)
+  }
+}
+for (const name of rowsOfReadme) {
+  if (!onDisk.includes(name)) {
+    retiredProblems.push(`poc/retired/README.md has a row for ${name}, which is not in poc/retired`)
+  }
+}
+for (const problem of retiredProblems) {
+  console.log(problem)
+}
+console.log(`${onDisk.length} retired patches, ${listed.length} in retired.json, ${rowsOfReadme.length} rows in the README, ${retiredProblems.length} problems`)
+problems.push(...retiredProblems)
 
 const failed = missing.length || !refs.length || problems.length
 console.log(failed ? 'FAIL' : 'PASS')

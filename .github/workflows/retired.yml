@@ -1,0 +1,55 @@
+# Proves that each retired mechanism of the Phase 1a prototype is still one
+# `git apply` away (poc/retired): every patch is applied to the prototype, the
+# tap files of the mechanism it restores are run, and the tree is put back. It
+# runs when the patches change and once a week, so a mechanism does not rot
+# unseen while npm/cli moves; it fails if a patch does not apply or its tests do
+# not pass.
+name: retired
+
+on:
+  push:
+    paths:
+      - 'poc/retired/**'
+      - 'poc/patches/**'
+      - '.github/workflows/retired.yml'
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NPM_CLI_BASE: ae98c62586b6fea44114f72e249e246a2981de70
+
+jobs:
+  retired:
+    name: the retired mechanisms apply and pass
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: rfc
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      # as the prototype workflow does it: dependencies installed from the base
+      # commit's manifest first, because the patch raises the npm-registry-fetch
+      # floor to a version that is not published. The restored tests need no
+      # overlay of the prototype's npm-registry-fetch.
+      - name: Apply the npm-cli patch
+        run: |
+          git init -q npm-cli
+          cd npm-cli
+          git fetch -q --depth 1 https://github.com/npm/cli.git "$NPM_CLI_BASE"
+          git checkout -q FETCH_HEAD
+          node scripts/resetdeps.js
+          git -c user.name=ci -c user.email=ci@localhost am -q ../rfc/poc/patches/npm-cli.patch
+          git status --short
+      # one line per mechanism with its outcome, also in the job summary
+      - name: Each retired patch applies, and its tests pass
+        run: node rfc/poc/retired/run.js npm-cli
