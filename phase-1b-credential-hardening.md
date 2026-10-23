@@ -22,7 +22,9 @@ It ships as one opt-in setting in a minor release, `strict-credentials`, and is 
 
 ## Motivation
 
-[Phase 1a](phase-1-token-helper.md) treats a helper's credential as a stored token on purpose: a helper held to a stricter rule than the token it replaces would be the one credential that cannot reach an `http:` registry, and the question belongs to every credential. The weaknesses below are today's behaviour for a stored `_authToken`. A helper or provider inherits them until this proposal lands.
+[Phase 1a](phase-1-token-helper.md) already refuses two of these routes for a helper's credential, plain `http:` except to this machine and a proxy or CA that a project chose, because a helper mints a fresh, often broad token. Its runner can decide that before the program starts, from the request's URL and from which layer a setting came from. This proposal extends the same two rules to every credential, a stored `_authToken` included, and adds what is the library's to do after a credential is sent.
+
+The weaknesses below are today's behaviour for a stored `_authToken`. A helper or provider inherits those that 1a does not refuse (redirects, the cache index, error responses, `noproxy` and `local-address`) until this proposal lands.
 
 - **A project chooses the route.** A request carrying a credential takes `proxy`, `https-proxy`, `noproxy`, `ca`, `cafile`, `strict-ssl` and `local-address` from any config layer, a repository's `.npmrc` among them. That `.npmrc` can send the credential through its own proxy, or past a certificate it chose.
 - **A child npm reads the project's config as its environment.** When npm starts a script, it exports its resolved config, project values included, as `npm_config_*` variables ([sources.md](sources.md#external-facts)). A child npm reads them as its environment layer, which ranks above every file, so a transport setting the parent took from the repository reaches the child as if the user had set it, and a rule applied only to files is bypassed by `npm run`.
@@ -73,7 +75,7 @@ A project `.npmrc` cannot set `userconfig` or `globalconfig`. In a minor release
 
 A project-set `prefix` is not refused: it still applies to installs, which is what a repository that sets `prefix` relies on. npm does not use it to locate the global config file, which is found only from the user's, environment, command-line or built-in `prefix`. The global file therefore cannot move into the repository, and `prefix` alone moves nothing the credential rules depend on.
 
-This is what lets [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-be-set) stay as narrow as it is: with the project unable to name a user or global file, "who chose this file" needs no further provenance code, and a helper or provider configured there can only be the user's. The `prefix` condition of that rule then holds by construction.
+This covers the project's own choice only. [Phase 1a's trust rule](phase-1-token-helper.md#where-it-may-be-set) keeps its location rule for a file whose path the command line or the environment chose (`npm ci --prefix sub`, `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`): such a file is refused when a directory from its own up holds a `package.json` or a `.git`. A CI job, not the user, writes those values, so no refusal of a `.npmrc` setting reaches them, and 1b leaves them to that rule. With 1b, the clause of 1a's rule about `userconfig`, `globalconfig` and `prefix` in a project `.npmrc` holds by construction; the location rule stays.
 
 ## Threat model
 
@@ -91,13 +93,15 @@ Out of scope, as in [Phase 1a](phase-1-token-helper.md#scope): code that already
 
 ## Rationale and Alternatives
 
-**One rule for every credential.** A stricter rule for helpers alone would leave `_authToken`, the credential that leaks today, unchanged and make helpers harder to adopt than the token they replace. Splitting Phase 1a from this proposal lets the helper ship without waiting for a change that affects every user.
+**One rule for every credential.** A stricter rule for helpers alone leaves `_authToken`, the credential that leaks today, unchanged, and makes helpers harder to adopt than the token they replace for anyone whose registry is served over `http:` on a network address. Phase 1a takes that cost for the two rules its runner can enforce, because a helper's token is fresh and broad; the rest, and the same rules for stored tokens, wait here. Splitting 1a from this proposal lets the helper ship without a change that affects every user.
 
 **Opt-in first.** Each rule can break a setup that works: an `_authToken` for an `http:` registry on a private network, or a project-selected config file. `strict-credentials` lets those users see the warnings for a release before anything is refused.
 
 **Why a marker and not a different export.** Not exporting transport keys to a child would break scripts that rely on the proxy settings reaching a child npm. A marker keeps what the user set and drops only what a project set.
 
-**Refusing project-set `userconfig` and `globalconfig`, and ignoring a project `prefix` for the global file's location,** instead of detecting where a file lies: detection needs filesystem identity, which differs between filesystems, and can be gotten past by a spelling. A refusal has no spelling to get past. A project `prefix` is kept for installs because refusing it would break repositories that use it for that, while the one thing it could do to a credential, move the global file, is cut off.
+**Refusing project-set `userconfig` and `globalconfig`, and ignoring a project `prefix` for the global file's location,** instead of detecting where a file lies, for the project's own choice: a refusal has no spelling to get past.
+
+For a file chosen on the command line or in the environment there is no setting to refuse, and 1a detects where the file lies by a walk over its real path's directories for a mark, which needs no identity and is not fooled by a spelling; its limits are in [phase-1-implementation.md](phase-1-implementation.md#limits). A project `prefix` is kept for installs because refusing it would break repositories that use it for that, while the one thing it could do to a credential, move the global file, is cut off.
 
 ## Prior implementation
 
