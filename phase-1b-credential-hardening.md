@@ -43,7 +43,7 @@ With it `false`, npm warns for what the rules below would change and behaves as 
 
 ### Where a credential may go
 
-A request carries a credential only when its URL is `https:`, or `http:` to a loopback address (`localhost`, `127.0.0.1`, `::1`). Otherwise npm sends the request without it and warns at the default log level, once per registry, naming the registry key and the remedy: serve the registry over `https:`. The warning is not left to `verbose`: a registry that answers 401 with nothing in the request to say why is what a silent withhold looks like.
+A request carries a credential only when its URL is `https:`, or `http:` to a loopback address (`localhost`, any `127.x.x.x`, `[::1]`, as Phase 1a defines it for a helper). Otherwise npm sends the request without it and warns at the default log level, once per registry, naming the registry key and the remedy: serve the registry over `https:`. The warning is not left to `verbose`: a registry that answers 401 with nothing in the request to say why is what a silent withhold looks like.
 
 The same rule covers the credential's source: a stored token, a helper and a provider all pass through it. A loopback request with a credential does not go through a proxy, so a local registry is reached directly and the credential never leaves the machine.
 
