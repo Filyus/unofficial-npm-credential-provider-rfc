@@ -13,7 +13,7 @@ Where the pieces of [Phase 1b](phase-1b-credential-hardening.md) stand: what is 
 | 3 | npm/cli | The `strict-credentials` setting, opt-in in a minor release; the project layer (a user or global file chosen inside a project counts as the project's); no `${VAR}` expansion in it; the `http:` allowance `//host:port/:allow-http-credential`; the messages for ignored keys; a project `.npmrc` cannot set `userconfig` or `globalconfig`; the marker for a child npm; the warnings | Depends on 2 released. The layer provenance and the child marker of [Phase 1a submission 2](phase-1a-implementation.md#2-npmcli-the-token-helper) are built there for helpers; this generalises them to every credential, and builds them if 1a has not landed. Moves on when a minor ships it | Design only |
 | 4 | npm/cli, next major | `strict-credentials` is `true` by default, and a project `.npmrc` setting `userconfig` or `globalconfig` is an error | Depends on 3 shipped in a minor. Moves on when the major ships | Design only |
 
-### 1. make-fetch-happen: `Authorization` never in the cache index
+### 1. make-fetch-happen and minipass-fetch: `Authorization` out of the cache index, redirects compare host
 
 - **What it will contain.** Two changes, proposed first because they are the smallest and help every caller of the libraries.
   - Where make-fetch-happen writes the headers a response names in `Vary` to its cache index, `Authorization` is left out whatever the response says. Without it, a registry that sends `Vary: Authorization` leaves the credential in the index ([sources.md](sources.md#external-facts)).

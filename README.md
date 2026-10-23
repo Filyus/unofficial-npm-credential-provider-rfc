@@ -26,7 +26,7 @@ Phase 1a changes nothing for anyone who has not configured a helper, and Phase 2
 
 | Submission | State | Condition to move on |
 |---|---|---|
-| [1. make-fetch-happen: `Authorization` never in the cache index](phase-1b-implementation.md#1-make-fetch-happen-authorization-never-in-the-cache-index) | Design only | Released |
+| [1. make-fetch-happen and minipass-fetch: `Authorization` out of the cache index, redirects compare host](phase-1b-implementation.md#1-make-fetch-happen-and-minipass-fetch-authorization-out-of-the-cache-index-redirects-compare-host) | Design only | Released |
 | [2. npm-registry-fetch: the route and the answer of a credentialed request](phase-1b-implementation.md#2-npm-registry-fetch-the-route-and-the-answer-of-a-credentialed-request) | Design only | Released |
 | [3. npm/cli: `strict-credentials`](phase-1b-implementation.md#3-npmcli-strict-credentials) | Design only | Submission 2 released; then shipped in a minor |
 | [4. npm/cli, next major: on by default](phase-1b-implementation.md#4-npmcli-next-major-strict-credentials-on-by-default) | Design only | Submission 3 shipped in a minor |
