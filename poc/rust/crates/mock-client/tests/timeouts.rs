@@ -79,8 +79,8 @@ fn the_limits_are_the_policys() {
     );
     assert_eq!(Timeouts::default(), limits);
     assert_eq!(
-        Some(u64::from(generated::TIMEOUT_KILLS_BEFORE_NO_RESTART)),
-        policy["credentialProvider"]["timeoutKillsBeforeNoRestart"].as_u64()
+        Some(u64::from(generated::FAILED_SESSIONS_BEFORE_NO_RESTART)),
+        policy["credentialProvider"]["failedSessionsBeforeNoRestart"].as_u64()
     );
 }
 
@@ -214,14 +214,14 @@ fn a_provider_killed_twice_is_not_started_again_and_a_fast_one_is_never_killed()
         short_requests(),
     );
     // each request starts a new session and is killed
-    for kills in 1..=generated::TIMEOUT_KILLS_BEFORE_NO_RESTART {
+    for kills in 1..=generated::FAILED_SESSIONS_BEFORE_NO_RESTART {
         let error = supervisor.request(&get(false)).unwrap_err();
         assert!(timed_out(&error), "{error}");
         assert_eq!(supervisor.kills(), kills);
     }
     let error = supervisor.request(&get(false)).unwrap_err();
     assert!(matches!(error, ExchangeError::NotRestarted), "{error}");
-    assert_eq!(starts.get(), generated::TIMEOUT_KILLS_BEFORE_NO_RESTART);
+    assert_eq!(starts.get(), generated::FAILED_SESSIONS_BEFORE_NO_RESTART);
 
     // a provider that answers keeps its one session
     let mut supervisor =
@@ -236,7 +236,7 @@ fn a_provider_killed_twice_is_not_started_again_and_a_fast_one_is_never_killed()
 fn a_hello_timeout_counts_toward_the_kills() {
     let mut supervisor =
         ProviderSupervisor::new(|| provider_command("hang-hello"), Timeouts::all(SHORT));
-    for _ in 0..generated::TIMEOUT_KILLS_BEFORE_NO_RESTART {
+    for _ in 0..generated::FAILED_SESSIONS_BEFORE_NO_RESTART {
         assert!(timed_out(&supervisor.request(&get(false)).unwrap_err()));
     }
     assert!(matches!(

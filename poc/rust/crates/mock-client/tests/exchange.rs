@@ -1,7 +1,9 @@
 use credential_provider_protocol::{Auth, ErrorKind, ProviderResponse, Request, RequestKind};
 use mock_client::{
-    ChainKind, ClientScenario, ProviderCommand, ProviderSession, run_exchange, run_provider_chain,
+    ChainKind, ClientScenario, Idle, ProviderCommand, ProviderSession, run_exchange,
+    run_provider_chain,
 };
+use std::time::Duration;
 
 mod common;
 use common::provider_command;
@@ -30,25 +32,99 @@ fn one_session_serves_sequential_requests_from_one_process() {
         .expect("closing stdin ends the provider cleanly");
 }
 
+// A line the provider writes while no request is outstanding is a stray line, and
+// the session ends. What can be told is only that: a line written after the
+// next request was sent cannot be told from its answer (the third test below
+// shows it). So the provider's duty is one line per request, flushed, and
+// nothing else on stdout.
+
 #[test]
-fn a_line_with_no_request_outstanding_ends_the_session() {
+fn a_line_that_arrives_while_no_request_is_outstanding_ends_the_session() {
     // the provider answers the first request and then sends a second line
-    // nobody asked for; without the check it would be the answer to the next
+    // nobody asked for; npm's reader, which is always listening, sees it the
+    // moment it comes, and `watch_idle` waits for it as that reader would
     let mut session =
         ProviderSession::spawn(provider_command("extra-line")).expect("provider starts");
     let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
     session.request(&request).expect("first request");
-    // both lines left the provider in one write; give the reader thread time
-    std::thread::sleep(std::time::Duration::from_millis(100));
 
-    let error = session
-        .request(&request)
-        .expect_err("the stray line is not an answer");
+    assert_eq!(session.watch_idle(Duration::from_secs(20)), Idle::Stray);
+
+    assert!(session.killed());
+    let error = session.request(&request).expect_err("the session is over");
+    assert!(error.to_string().contains("session ended"), "{error}");
+}
+
+#[test]
+fn a_stray_line_that_has_arrived_by_the_next_request_fails_it() {
+    // The next request looks at what has arrived by now. Whether the stray line
+    // has by then is a race: a request written before it came is answered with
+    // it. So the requests go on until one finds it, which is what a test can
+    // rely on and a provider cannot.
+    let mut session =
+        ProviderSession::spawn(provider_command("extra-line")).expect("provider starts");
+    let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
+    let error = (0..400)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(5));
+            session.request(&request).err()
+        })
+        .expect("a request finds the stray line");
+
     assert!(
         error.to_string().contains("no request was outstanding"),
         "{error}"
     );
     assert!(session.killed());
+}
+
+#[test]
+fn a_line_written_after_the_next_request_was_sent_is_taken_for_its_answer() {
+    // the limit, as a test: on its second request this provider writes a line
+    // nobody asked for and then the answer. The client has no way to tell
+    // the first from the answer, so it takes it, and the answer is what is left.
+    let mut session = ProviderSession::spawn(provider_command("stale-line-before-answer"))
+        .expect("provider starts");
+    let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
+    let first = session.request(&request).expect("first request");
+    assert_eq!(bearer_token(&first), "test-token");
+
+    let second = session.request(&request).expect("second request");
+
+    assert_eq!(bearer_token(&second), "stale-token", "taken for the answer");
+    assert_eq!(
+        session.watch_idle(Duration::from_secs(20)),
+        Idle::Stray,
+        "the real answer is the stray line now"
+    );
+}
+
+#[test]
+fn a_byte_order_mark_carriage_returns_and_blank_lines_are_no_stray_lines() {
+    let mut session = ProviderSession::spawn(provider_command("bom-and-blank-lines"))
+        .expect("a mark before the hello is skipped, and the carriage return is whitespace");
+    let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
+    for _ in 0..2 {
+        let answer = session.request(&request).expect("answered");
+        assert_eq!(bearer_token(&answer), "test-token");
+        // the blank lines that followed it are nothing
+        assert_eq!(session.watch_idle(Duration::from_millis(300)), Idle::Quiet);
+    }
+    session.close().expect("clean exit");
+}
+
+#[test]
+fn a_line_that_is_not_a_message_is_reported_by_its_length_and_never_quoted() {
+    let mut session =
+        ProviderSession::spawn(provider_command("secret-in-wrong-field")).expect("provider starts");
+    let request = Request::get_install("https://registry.example.test/", Some("@scope"), "a");
+
+    let error = session.request(&request).expect_err("not an answer");
+
+    let text = format!("{error} {error:?}");
+    assert!(!text.contains("secret"), "{text}");
+    assert!(text.contains("malformed protocol line of"), "{text}");
+    assert!(session.killed(), "a malformed message ends the session");
 }
 
 #[test]
@@ -281,7 +357,7 @@ fn client_rejects_invalid_json_response() {
     let error = run_exchange(provider_command("invalid-json"), ClientScenario::InstallGet)
         .expect_err("invalid JSON should fail");
 
-    assert!(error.to_string().contains("json error"));
+    assert!(error.to_string().contains("malformed protocol line"));
 }
 
 #[test]
@@ -297,7 +373,7 @@ fn client_rejects_both_ok_and_err() {
     let error = run_exchange(provider_command("both-ok-err"), ClientScenario::InstallGet)
         .expect_err("both Ok and Err should fail");
 
-    assert!(error.to_string().contains("json error"));
+    assert!(error.to_string().contains("malformed protocol line"));
 }
 
 #[test]
@@ -308,7 +384,7 @@ fn client_rejects_malformed_auth() {
     )
     .expect_err("malformed auth should fail");
 
-    assert!(error.to_string().contains("json error"));
+    assert!(error.to_string().contains("malformed protocol line"));
 }
 
 #[test]

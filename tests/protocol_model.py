@@ -16,7 +16,9 @@ from tests.generated_policy import (
     EXPIRY_MARGIN_SECONDS,
     GLOBAL_CHAIN_LISTED_HOST_OUTCOME,
     IDENTIFIER_PATTERN,
+    LINE_SIZE_MINIMUM,
     SCHEME_IN_CACHE_KEY,
+    SESSION_ENDS,
     UNKNOWN_CACHE,
     UNKNOWN_ERROR_KIND,
     UNKNOWN_GRANULARITY,
@@ -30,7 +32,7 @@ from tests.generated_policy import (
     SUPPORTED_OPERATIONS,
     OPERATION_BOUND_EXCEPT,
     PACKAGE_BOUND_WHEN_PRESENT,
-    TIMEOUT_KILLS_BEFORE_NO_RESTART,
+    FAILED_SESSIONS_BEFORE_NO_RESTART,
     STORED_CREDENTIAL_ENTRY,
     SUPPORTED_REQUEST_KINDS,
     TIMEOUT_SECONDS,
@@ -166,7 +168,7 @@ class CredentialClientModel:
         that registry and scope)."""
         outcome = self.handle_response(request, response)
         if request.get("kind") != "erase":
-            declined.record(provider, request["registry"], outcome, request.get("scope"))
+            declined.record(provider, request["registry"], outcome, request.get("scope"), request.get("operation"))
         return outcome
 
     def receive_hello(self, message: dict[str, Any]) -> int:
@@ -259,8 +261,9 @@ class CredentialClientModel:
         one retry. Otherwise every cache entry of that issuance is dropped, at
         every level, and the erase carries the context of the `get` that produced
         it (version included) and the response's granularity, cached or not.
-        Returns None when the provider did not advertise `erase`: the eviction
-        still happens, there is just nobody to tell."""
+        Returns None for an issuance that was already retired. npm always sends
+        `erase` otherwise: there is no capability that suppresses it, and a
+        provider with nothing to erase answers `Ok`."""
         self._require_state(ClientState.READY)
         if issuance is None:
             served = self.lookup(context.registry, context.scope, context.package, context.operation, now)
@@ -270,8 +273,6 @@ class CredentialClientModel:
         record = self.issued.get(issuance) if issuance is not None else None
         if issuance is not None:
             self._retire(issuance)
-        if "erase" not in self.capabilities:
-            return None
         request: dict[str, Any] = {
             "v": self.version,
             "kind": "erase",
@@ -292,6 +293,48 @@ class CredentialClientModel:
             request["authChallenges"] = list(auth_challenges)
         validate_request(request)
         return request
+
+    def retry_request(
+        self,
+        context: RequestContext,
+        http_status: int,
+        auth_challenges: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """The `get` that follows a rejected registry request: the context of
+        the failed request, `retry: true`, the status of the rejection and the
+        challenges of its response. It is sent after an erase (401) or without
+        one (403), and for a request whose answer was already erased or
+        replaced (`request_after_stale`)."""
+        request = self.build_request(context)
+        request["retry"] = True
+        request["httpStatus"] = http_status
+        if auth_challenges:
+            request["authChallenges"] = list(auth_challenges)
+        validate_request(request)
+        return request
+
+    def request_after_stale(
+        self,
+        context: RequestContext,
+        http_status: int,
+        issuance: int,
+        now: int = 0,
+        auth_challenges: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """A 401 or 403 on a request whose answer npm had already erased or
+        replaced: no erase and no retry of the usual kind. The request goes
+        again with what the cache now holds, and `None` is returned; on a
+        cache miss the provider is asked, and that `get` is the request's one
+        retry, so it carries `retry: true` and the `httpStatus` of the stale
+        rejection, as the retry after an erase does. A provider that saw a
+        plain `get` could hand out the token it has just been told was
+        refused."""
+        self._require_state(ClientState.READY)
+        if issuance not in self.retired:
+            raise ProtocolViolation("the answer was not erased or replaced: this is the ordinary rejection")
+        if self.lookup(context.registry, context.scope, context.package, context.operation, now) is not None:
+            return None
+        return self.retry_request(context, http_status, auth_challenges)
 
     def refused_by_403(self, issuance: int) -> bool:
         """A 403 on a request that carried `issuance`. Returns whether a retry
@@ -768,6 +811,10 @@ class ChainOutcome(NamedTuple):
     entry: int | None = None
     warnings: tuple[str, ...] = ()
     message: str = ""
+    # what npm logs at `verbose`: each provider of a global chain whose hello
+    # sent no `registries`, which is asked about every registry the command
+    # touches. Everything in `warnings` is logged at `warn`.
+    verbose: tuple[str, ...] = ()
 
 
 class ProviderListing(NamedTuple):
@@ -830,11 +877,15 @@ def resolve_chain(
         return ChainOutcome("oidc")
     entries = list(answers)
     listed = STORED_CREDENTIAL_ENTRY in entries
+    without_list = [] if providers is None else [provider.name for provider in providers if provider.registries is None]
+    verbose = () if per_registry else tuple(
+        f"{name} sent no registries: it is asked about every registry this command touches" for name in without_list
+    )
 
     def done(result: str, entry: int | None = None, *warnings: str) -> ChainOutcome:
         if per_registry and stored_credential and not listed and result != "stored-credential":
             warnings = ("stored credential ignored: the per-registry list does not include npm:token", *warnings)
-        return ChainOutcome(result, entry, tuple(warnings))
+        return ChainOutcome(result, entry, tuple(warnings), verbose=verbose)
 
     if not entries:
         # no provider configured for the registry: what npm does today
@@ -854,7 +905,9 @@ def resolve_chain(
                     return ChainOutcome(
                         GLOBAL_CHAIN_LISTED_HOST_OUTCOME, index, (),
                         f"{registry} is a URL form a provider declined on a host its hello lists, "
-                        f"so npm sends no stored credential: {named}",
+                        f"so npm sends no stored credential: {named}"
+                        f"; the remedy is a per-registry list for it that holds just {STORED_CREDENTIAL_ENTRY}",
+                        verbose,
                     )
             if stored_credential:
                 return done("stored-credential", index)
@@ -882,7 +935,9 @@ def resolve_chain(
             return ChainOutcome(
                 GLOBAL_CHAIN_LISTED_HOST_OUTCOME, None, (),
                 f"{registry} is a URL form a provider declined on a host its hello lists, "
-                f"so npm sends no stored credential: {named}",
+                f"so npm sends no stored credential: {named}"
+                f"; the remedy is a per-registry list for it that holds just {STORED_CREDENTIAL_ENTRY}",
+                verbose,
             )
     if stored_credential and not listed:
         # every provider lists its registries and none lists this host: no
@@ -890,7 +945,10 @@ def resolve_chain(
         # stored credential
         if providers is not None and all(provider.registries is not None for provider in providers):
             return done("stored-credential")
-        return done("stored-credential", None, "stored credential used after every global provider declined the registry")
+        said = "stored credential used after every global provider declined the registry"
+        if without_list:
+            said += f"; no registries from {', '.join(without_list)}"
+        return done("stored-credential", None, said)
     return done("anonymous")
 
 
@@ -962,25 +1020,194 @@ def rejection_action(status: int, www_authenticate: str | None = None, body: Any
     return False, False, "other"
 
 
+class StrayLine(ProtocolViolation):
+    """A line the provider wrote while no request was outstanding."""
+
+
+def read_provider_line(raw: bytes, *, first: bool = False, outstanding: bool = True) -> Any | None:
+    """What npm makes of one line of a provider's stdout, newline and all.
+
+    `first` is the first line of the stream: a UTF-8 byte order mark before it
+    is skipped, as Phase 1a skips one before a helper's output. A line of
+    nothing but spaces, tabs and carriage returns is blank and ignored, whether
+    or not a request is outstanding: it is no stray line. A carriage return
+    before the newline is trailing whitespace. Any other line while no request
+    is outstanding is a `StrayLine`, and one that is over the size limit or is
+    not JSON, or not UTF-8, is a protocol violation.
+
+    No error quotes the line, which may carry a credential: each says how long
+    the line was and nothing else. A line npm reads after it sent the next
+    request cannot be told from the answer to it, so the caller passes
+    `outstanding` as it stood when the line arrived."""
+    import json
+
+    length = len(raw)
+    if first and raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    if length > LINE_SIZE_MINIMUM:
+        raise ProtocolViolation(f"a line of {length} bytes is over the limit of {LINE_SIZE_MINIMUM}")
+    if not raw.strip(b" \t\r\n"):
+        return None
+    if not outstanding:
+        raise StrayLine(f"a line of {length} bytes arrived while no request was outstanding")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        # `from None`: the decoder's message may quote the text
+        raise ProtocolViolation(f"a malformed line of {length} bytes") from None
+
+
 @dataclass
 class ProviderRestarts:
-    """A provider killed for a timeout, at hello or during a request, ends its
-    session: the requests queued behind it fail, the cache stays; the next
-    request starts a new session, until it has been killed
-    TIMEOUT_KILLS_BEFORE_NO_RESTART times in one command."""
+    """One provider across an npm command. What ends a session, what happens to
+    the request in flight, what the next request gets and whether the end
+    counts toward the limit is `SESSION_ENDS`, a table of the policy. A session
+    that ends in a failure that counts is replaced by the next request, until
+    FAILED_SESSIONS_BEFORE_NO_RESTART of them have ended in one command; a
+    provider whose hello failed is not started again. The requests queued
+    behind a failed one fail with it; the cache stays."""
 
     kills: int = 0
     failed: list[str] = field(default_factory=list)
+    skipped: bool = False
+    session_open: bool = False
+    warnings: list[str] = field(default_factory=list)
+    starts: int = 0
+
+    def start(self) -> None:
+        """The next request needed a provider and started a process."""
+        if not self.may_start():
+            raise ProtocolViolation("the provider is not started again")
+        self.starts += 1
+        self.session_open = True
+
+    def end(self, cause: str, queued: tuple[str, ...] | list[str] = (), name: str = "provider") -> list[str]:
+        """A session ends for `cause`, a key of `SESSION_ENDS`; the requests
+        waiting on the provider, in order, are the ones that fail when the
+        cause fails them. A stray line makes npm warn, naming the provider."""
+        row = SESSION_ENDS[cause]
+        if row["session"] == "ends":
+            self.session_open = False
+        if row["counts"]:
+            self.kills += 1
+        if row["next"] == "skipped":
+            self.skipped = True
+        if cause == "stray-line":
+            self.warnings.append(f"{name} wrote a line while no request was outstanding; it was ended")
+        failing = list(queued) if row["request"] == "fails" else []
+        self.failed.extend(failing)
+        return failing
 
     def on_timeout(self, queued: list[str]) -> list[str]:
         """The kill: the requests waiting on the provider, in order, are the
         ones that fail (the cache is not touched)."""
-        self.kills += 1
-        self.failed.extend(queued)
-        return list(queued)
+        return self.end("timeout", queued)
+
+    def npm_exits(self, outstanding: bool) -> str:
+        """npm ends the command. A provider with a request outstanding (after
+        Ctrl-C, or a failure elsewhere) is killed, as for a timeout, so that one
+        waiting on a prompt is not left behind; an idle one gets its stdin closed
+        and exits. Neither counts toward the limit."""
+        if not self.session_open:
+            return "none"
+        self.session_open = False
+        return "kill" if outstanding else "close-stdin"
+
+    def next_request(self) -> str:
+        """What the next request that needs the provider gets: `same-process`,
+        `new-process`, or `none` for a provider that is skipped or has
+        failed too often."""
+        if self.session_open:
+            return "same-process"
+        return "new-process" if self.may_start() else "none"
 
     def may_start(self) -> bool:
-        return self.kills < TIMEOUT_KILLS_BEFORE_NO_RESTART
+        return not self.skipped and self.kills < FAILED_SESSIONS_BEFORE_NO_RESTART
+
+
+@dataclass
+class ProviderPool:
+    """The providers of one npm command. A provider is identified by its
+    resolved executable path and its arguments (after expansion), nothing else:
+    one identity is one process per command, whether it is named by the global
+    chain or by several per-registry lists, and two entries that differ in path
+    or in an argument are two providers, each with its own limit."""
+
+    providers: dict[tuple[str, tuple[str, ...]], ProviderRestarts] = field(default_factory=dict)
+
+    def provider(self, path: str, arguments: tuple[str, ...] | list[str] = ()) -> ProviderRestarts:
+        return self.providers.setdefault((os.path.normcase(path), tuple(arguments)), ProviderRestarts())
+
+
+@dataclass
+class CommandWarnings:
+    """The warnings of one npm command. Each is said once per registry per
+    command: a stored credential used after a global chain declined the
+    registry, and one that a per-registry list ignores. A second command is a
+    new object and says them again, which is what "on every command, so that it
+    gets deleted" means."""
+
+    said: set[tuple[str, str]] = field(default_factory=set)
+    lines: list[str] = field(default_factory=list)
+
+    def say(self, registry: str, outcome: ChainOutcome) -> list[str]:
+        new = []
+        for text in outcome.warnings:
+            if (registry, text) not in self.said:
+                self.said.add((registry, text))
+                new.append(f"{registry}: {text}")
+        self.lines.extend(new)
+        return new
+
+
+class CommandRefused(RuntimeError):
+    """npm refuses the command under a provider."""
+
+
+# the operation each npm command sends (section 4 of the specification); a
+# command that writes nothing and has no row sends `read`
+_WHOLE_COMMANDS = {
+    "install": "read", "ci": "read", "update": "read", "view": "read", "search": "read", "outdated": "read",
+    "whoami": "read", "publish": "publish", "deprecate": "deprecate", "undeprecate": "deprecate",
+    "unpublish": "unpublish", "access": "access", "team": "access", "org": "access", "trust": "trust",
+    "token": "account",
+}
+_SUBCOMMANDS = {
+    ("stage", "publish"): "stage", ("stage", "approve"): "publish", ("stage", "reject"): "stage-reject",
+    ("stage", "list"): "stage-read", ("stage", "view"): "stage-read", ("stage", "download"): "stage-read",
+    ("dist-tag", "add"): "dist-tag", ("dist-tag", "rm"): "dist-tag", ("dist-tag", "ls"): "read",
+    ("owner", "add"): "owner", ("owner", "rm"): "owner", ("owner", "ls"): "read",
+    ("profile", "get"): "account", ("profile", "set"): "account", ("profile", "disable-2fa"): "account",
+}
+# commands whose writes `--dry-run` skips, so every request they make is a read; any other
+# command sends its operation whatever `dry-run` says, since a project `.npmrc` can set it
+_DRY_RUN_READS = frozenset({"publish", "unpublish", "deprecate"})
+
+
+def operation_for(command: str, subcommand: str | None = None, dry_run: bool = False) -> str:
+    """The operation npm sends in every request of a command. `--dry-run` turns
+    a `publish`, `unpublish` or `deprecate` into reads: a publish in a
+    pull-request job asks for no write credential. `profile enable-2fa` is
+    refused under a provider, since it may replace the stored credential with a
+    token a provider's credential cannot take part in."""
+    if (command, subcommand) == ("profile", "enable-2fa"):
+        raise CommandRefused("profile enable-2fa is refused under a provider")
+    operation = _SUBCOMMANDS.get((command, subcommand)) or _WHOLE_COMMANDS.get(command)
+    if operation is None:
+        raise KeyError(f"no operation for npm {command} {subcommand or ''}".strip())
+    if dry_run and command in _DRY_RUN_READS:
+        return "read"
+    return operation
+
+
+def loggable(message: dict[str, Any]) -> dict[str, Any]:
+    """What npm logs of a request, at any level: the `token` of a `login` is
+    left out, since it came from the person and is a credential."""
+    return {name: value for name, value in message.items() if name != "token"}
+
+
+# the lookup of `stage approve` and `reject` comes before the write of its own command
+NOT_FOUND_NOT_REMEMBERED_FOR = frozenset({"stage-read"})
 
 
 @dataclass
@@ -990,7 +1217,11 @@ class DeclinedRegistries:
     that does not serve a registry is asked about it once. `not-found` is
     remembered the same way, for that provider, registry and scope (an
     unscoped package's being no scope): a provider that holds one scope of many
-    is asked about each other scope once."""
+    is asked about each other scope once. The memory is not keyed by operation,
+    because one npm command carries one operation; the one exception is the
+    `stage-read` lookup that `stage approve` and `reject` make before their
+    write, and a `not-found` answered to it is not remembered, so the write's
+    `get` reaches the provider."""
 
     declined: set[tuple[str, str]] = field(default_factory=set)
     not_found: set[tuple[str, str, str | None]] = field(default_factory=set)
@@ -1006,10 +1237,11 @@ class DeclinedRegistries:
             return "try-next-provider-not-found"
         return None
 
-    def record(self, provider: str, registry: str, outcome: str, scope: str | None = None) -> None:
+    def record(self, provider: str, registry: str, outcome: str, scope: str | None = None,
+               operation: str | None = None) -> None:
         if outcome == "try-next-provider":
             self.declined.add((provider, registry))
-        elif outcome == "try-next-provider-not-found":
+        elif outcome == "try-next-provider-not-found" and operation not in NOT_FOUND_NOT_REMEMBERED_FOR:
             self.not_found.add((provider, registry, scope))
 
 

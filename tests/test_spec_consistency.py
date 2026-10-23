@@ -109,7 +109,7 @@ class SpecConsistencyTests(unittest.TestCase):
 
     def test_erase_errors_match_python_model(self) -> None:
         client = CredentialClientModel()
-        client.receive_hello({"v": [1], "capabilities": ["erase"]})
+        client.receive_hello({"v": [1]})
         erase = {
             "v": 1,
             "kind": "erase",

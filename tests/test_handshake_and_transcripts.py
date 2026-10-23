@@ -53,9 +53,11 @@ class HandshakeTests(unittest.TestCase):
     def test_hello_capabilities_are_recorded(self) -> None:
         client = CredentialClientModel()
 
-        client.receive_hello({"v": [1], "capabilities": ["login", "erase", "future"]})
+        client.receive_hello({"v": [1], "capabilities": ["login", "logout", "erase", "future"]})
 
-        self.assertEqual(client.capabilities, frozenset({"login", "erase"}))
+        # `erase` was a capability once; npm always sends it now, so it is a
+        # name like any other this npm does not know
+        self.assertEqual(client.capabilities, frozenset({"login", "logout"}))
 
     def test_malformed_hello_capabilities_are_rejected(self) -> None:
         client = CredentialClientModel()

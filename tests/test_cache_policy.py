@@ -210,7 +210,7 @@ class CacheLookupTests(unittest.TestCase):
 class RejectedCredentialTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = CredentialClientModel()
-        self.client.receive_hello({"v": [1], "capabilities": ["erase"]})
+        self.client.receive_hello({"v": [1]})
 
     def context(self, **changes: object) -> RequestContext:
         return RequestContext(registry=REGISTRY, scope="@scope", package="pkg", **changes)
@@ -266,13 +266,21 @@ class RejectedCredentialTests(unittest.TestCase):
         self.assertEqual(self.client.lookup(REGISTRY, "@scope", "pkg").auth["token"], "registry-new")
         self.assertEqual(self.client.lookup(REGISTRY, "@scope").auth["token"], "registry-new")
 
-    def test_without_the_erase_capability_the_entries_go_but_no_request_is_built(self) -> None:
-        client = CredentialClientModel()
-        client.receive_hello({"v": [1]})
-        client.handle_response(request(), ok("scope", token="rejected"))
+    def test_erase_is_sent_whatever_the_hello_says(self) -> None:
+        """There is no `erase` capability: npm always sends it, and a provider
+        with nothing to erase answers `Ok`. An old provider that still lists
+        the name in its hello is no different."""
+        for hello in ({"v": [1]}, {"v": [1], "capabilities": []}, {"v": [1], "capabilities": ["login", "logout"]},
+                      {"v": [1], "capabilities": ["erase"]}):
+            with self.subTest(hello=hello):
+                client = CredentialClientModel()
+                client.receive_hello(hello)
+                client.handle_response(request(), ok("scope", token="rejected"))
 
-        self.assertIsNone(client.reject_credential(self.context()))
-        self.assertEqual(client.cache, {})
+                erase = client.reject_credential(self.context())
+
+                self.assertEqual(erase["kind"], "erase")
+                self.assertEqual(client.cache, {})
 
     def test_a_credential_that_was_never_cached_still_yields_an_erase(self) -> None:
         self.client.handle_response(request(), ok("scope", cache="never", token="rejected"))

@@ -995,9 +995,19 @@ impl ProviderResponse {
 #[derive(Debug)]
 pub enum ProtocolError {
     InvalidMessage(String),
-    NoCompatibleVersion { supported: Vec<u64> },
-    LineTooLong { limit: usize },
+    NoCompatibleVersion {
+        supported: Vec<u64>,
+    },
+    LineTooLong {
+        limit: usize,
+    },
+    /// A line that is not a message of the kind asked for. It names the length
+    /// of the line and never its content, which may be a credential.
+    Malformed {
+        bytes: usize,
+    },
     Io(io::Error),
+    /// A message that could not be written.
     Json(serde_json::Error),
 }
 
@@ -1010,6 +1020,9 @@ impl fmt::Display for ProtocolError {
             }
             Self::LineTooLong { limit } => {
                 write!(f, "protocol line exceeds {limit} bytes")
+            }
+            Self::Malformed { bytes } => {
+                write!(f, "malformed protocol line of {bytes} bytes")
             }
             Self::Io(error) => write!(f, "io error: {error}"),
             Self::Json(error) => write!(f, "json error: {error}"),
@@ -1050,6 +1063,29 @@ pub fn negotiate(hello: &Hello) -> Result<u32, ProtocolError> {
 pub fn read_json_line<T: DeserializeOwned>(
     reader: &mut impl BufRead,
 ) -> Result<Option<T>, ProtocolError> {
+    Ok(read_line(reader, false)?.map(|(message, _)| message))
+}
+
+/// `read_json_line` for what npm reads from a provider's stdout. `at_start` is
+/// true for the first read of the stream: a UTF-8 byte order mark before the
+/// first line is skipped, as Phase 1a skips one before a helper's output. A
+/// line that is not a message is `Malformed`, which says how long the line was
+/// and nothing of what it held, since it may carry a credential. The length of a
+/// line that is a message comes with it, for a caller that later finds it
+/// does not fit what it asked for and must say so the same way.
+pub fn read_provider_line<T: DeserializeOwned>(
+    reader: &mut impl BufRead,
+    at_start: bool,
+) -> Result<Option<(T, usize)>, ProtocolError> {
+    read_line(reader, at_start)
+}
+
+const BYTE_ORDER_MARK: &[u8] = b"\xEF\xBB\xBF";
+
+fn read_line<T: DeserializeOwned>(
+    reader: &mut impl BufRead,
+    mut skip_mark: bool,
+) -> Result<Option<(T, usize)>, ProtocolError> {
     loop {
         let mut line = Vec::new();
         let bytes =
@@ -1065,6 +1101,10 @@ pub fn read_json_line<T: DeserializeOwned>(
                 limit: MAX_LINE_BYTES,
             });
         }
+        // only the first line of the stream: a mark anywhere else is not JSON
+        if std::mem::take(&mut skip_mark) && line.starts_with(BYTE_ORDER_MARK) {
+            line.drain(..BYTE_ORDER_MARK.len());
+        }
         if line
             .iter()
             .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
@@ -1077,8 +1117,10 @@ pub fn read_json_line<T: DeserializeOwned>(
         // not trimmed: JSON's own whitespace (space, tab, CR, LF) may follow the
         // value and serde_json allows it, but ASCII whitespace such as a form feed
         // is not JSON whitespace
-        let value: serde_json::Value = serde_json::from_slice(&line)?;
-        return Ok(Some(serde_json::from_value(value)?));
+        let malformed = |_| ProtocolError::Malformed { bytes: line.len() };
+        let value: serde_json::Value = serde_json::from_slice(&line).map_err(malformed)?;
+        let message = serde_json::from_value(value).map_err(malformed)?;
+        return Ok(Some((message, line.len())));
     }
 }
 
@@ -1301,6 +1343,63 @@ mod tests {
         ));
         let next: serde_json::Value = read_json_line(&mut input).unwrap().unwrap();
         assert_eq!(next["n"], 2, "the stream is where a line starts");
+    }
+
+    #[test]
+    fn a_byte_order_mark_before_the_first_line_of_a_provider_is_skipped() {
+        let value = |input: &[u8], at_start| {
+            let mut input = io::Cursor::new(input.to_vec());
+            read_provider_line::<serde_json::Value>(&mut input, at_start)
+        };
+        // before the first line, the first of the stream
+        let (hello, _) = value(b"\xEF\xBB\xBF{\"v\":[1]}\n", true).unwrap().unwrap();
+        assert_eq!(hello["v"][0], 1);
+        // a line of its own is a blank line, and the next one is the first message
+        let mut input = io::Cursor::new(b"\xEF\xBB\xBF\n{\"v\":[1]}\n".to_vec());
+        let (hello, _) = read_provider_line::<serde_json::Value>(&mut input, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hello["v"][0], 1);
+        // anywhere else it is not JSON: not on a later line, nor on a read that is not the first
+        assert!(matches!(
+            value(b"\xEF\xBB\xBF{\"v\":[1]}\n", false),
+            Err(ProtocolError::Malformed { .. })
+        ));
+        let mut input = io::Cursor::new(b"{\"n\":1}\n\xEF\xBB\xBF{\"n\":2}\n".to_vec());
+        read_provider_line::<serde_json::Value>(&mut input, true)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            read_provider_line::<serde_json::Value>(&mut input, false),
+            Err(ProtocolError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn a_carriage_return_ends_a_line_as_trailing_whitespace() {
+        let mut input = io::Cursor::new(b"{\"n\":1}\r\n{\"n\":2} \t\r\n".to_vec());
+        for number in [1, 2] {
+            let line: serde_json::Value = read_json_line(&mut input).unwrap().unwrap();
+            assert_eq!(line["n"], number);
+        }
+    }
+
+    #[test]
+    fn a_malformed_line_is_reported_by_its_length_and_never_quoted() {
+        // a valid JSON line that is not the message asked for would make serde
+        // quote the string it found, and this one stands for a credential
+        let line = r#"{"Ok":{"kind":"get","auth":"super-secret-token"}}"#;
+        let mut input = io::Cursor::new(format!("{line}\n"));
+        let error = read_provider_line::<ProviderResponse>(&mut input, true).unwrap_err();
+        assert!(
+            matches!(error, ProtocolError::Malformed { bytes } if bytes == line.len() + 1),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("secret"), "{error}");
+        // not JSON at all, with the secret in it
+        let mut input = io::Cursor::new(b"token=super-secret-token\n".to_vec());
+        let error = read_provider_line::<serde_json::Value>(&mut input, true).unwrap_err();
+        assert!(!format!("{error:?}{error}").contains("secret"));
     }
 
     #[test]

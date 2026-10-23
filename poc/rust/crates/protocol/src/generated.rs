@@ -36,7 +36,6 @@ pub const KNOWN_COMMANDS: &[&str] = &[
 pub const CAPABILITIES: &[&str] = &[
     "login",
     "logout",
-    "erase",
 ];
 pub const AUTH_TYPES: &[&str] = &[
     "bearer",
@@ -75,9 +74,10 @@ pub const UNKNOWN_ERROR_KIND: &str = "other";
 pub const UNKNOWN_CACHE: &str = "never";
 pub const UNKNOWN_GRANULARITY: &str = "package";
 pub const LINE_SIZE_MINIMUM: usize = 1048576;
-pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = 2;
+pub const FAILED_SESSIONS_BEFORE_NO_RESTART: u32 = 2;
 pub const SENTINEL_ARGUMENT: &str = "--npm-credential-provider";
 pub const ERASE_ERROR_OUTCOMES: &[(&str, &str)] = &[("url-not-supported", "ignore-and-retry"), ("not-found", "ignore-and-retry"), ("operation-not-supported", "ignore-and-retry"), ("other", "warn-and-retry")];
+pub const SESSION_ENDS: &[(&str, &str, &str, &str, bool)] = &[("timeout", "fails", "ends", "new-process", true), ("exit-outstanding", "fails", "ends", "new-process", true), ("oversized-line", "fails", "ends", "new-process", true), ("malformed-message", "fails", "ends", "new-process", true), ("stray-line", "none", "ends", "new-process", true), ("exit-idle", "none", "ends", "new-process", false), ("hello-failed", "fails", "ends", "skipped", false), ("error-answer", "fails", "continues", "same-process", false)];
 pub const HELLO_TIMEOUT_SECONDS: u64 = 10;
 pub const GET_TIMEOUT_SECONDS: u64 = 30;
 pub const GET_INTERACTIVE_TIMEOUT_SECONDS: u64 = 300;

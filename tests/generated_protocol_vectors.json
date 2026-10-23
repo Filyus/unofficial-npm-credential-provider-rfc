@@ -18,8 +18,7 @@
         ],
         "capabilities": [
           "login",
-          "logout",
-          "erase"
+          "logout"
         ]
       }
     },

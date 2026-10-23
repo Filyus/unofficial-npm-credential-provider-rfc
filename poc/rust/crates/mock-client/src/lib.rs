@@ -1,6 +1,6 @@
 use credential_provider_protocol::{
     Auth, ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderResponse, Request,
-    RequestKind, generated, generated::SENTINEL_ARGUMENT, negotiate, read_json_line,
+    RequestKind, generated, generated::SENTINEL_ARGUMENT, negotiate, read_provider_line,
     write_json_line,
 };
 use std::fmt;
@@ -73,7 +73,9 @@ impl Default for Timeouts {
     }
 }
 
-type Line = Result<Option<serde_json::Value>, ProtocolError>;
+/// One line of the provider's stdout as the reader thread read it, with its
+/// length in bytes, or how reading it failed.
+type Line = Result<Option<(serde_json::Value, usize)>, ProtocolError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientScenario {
@@ -100,6 +102,16 @@ pub struct ExchangeSummary {
 pub enum ExchangeError {
     Protocol(ProtocolError),
     Provider(String),
+    /// The provider exited, or closed its stdout, before `waiting_for` came.
+    Exited {
+        waiting_for: String,
+    },
+    /// The provider wrote a line while no request was outstanding.
+    StrayLine,
+    /// The provider's hello failed (a version npm does not speak, a malformed
+    /// one, none) or it could not be started: it is skipped for the rest of
+    /// the command, and the request fails.
+    Skipped,
     MissingPipe(&'static str),
     ProcessFailed(String),
     /// The provider did not answer within the limit for `waiting_for` and was
@@ -110,8 +122,8 @@ pub enum ExchangeError {
     },
     /// An earlier timeout killed this session's provider: the request fails.
     SessionEnded,
-    /// The provider was killed for a timeout `TIMEOUT_KILLS_BEFORE_NO_RESTART`
-    /// times in this command, so it is not started again.
+    /// `FAILED_SESSIONS_BEFORE_NO_RESTART` sessions of this provider have ended
+    /// in a failure in this command, so it is not started again.
     NotRestarted,
 }
 
@@ -120,6 +132,9 @@ impl fmt::Display for ExchangeError {
         match self {
             Self::Protocol(error) => write!(f, "{error}"),
             Self::Provider(message) => write!(f, "provider error: {message}"),
+            Self::Exited { waiting_for } => write!(f, "provider exited before {waiting_for}"),
+            Self::StrayLine => write!(f, "a line arrived while no request was outstanding"),
+            Self::Skipped => write!(f, "provider skipped for the rest of the command"),
             Self::MissingPipe(pipe) => write!(f, "missing provider {pipe} pipe"),
             Self::ProcessFailed(message) => write!(f, "provider process failed: {message}"),
             Self::TimedOut { waiting_for, limit } => write!(
@@ -130,8 +145,8 @@ impl fmt::Display for ExchangeError {
             Self::SessionEnded => write!(f, "provider session ended by a timeout"),
             Self::NotRestarted => write!(
                 f,
-                "provider killed for a timeout {} times; not started again",
-                generated::TIMEOUT_KILLS_BEFORE_NO_RESTART
+                "provider failed in {} sessions; not started again",
+                generated::FAILED_SESSIONS_BEFORE_NO_RESTART
             ),
         }
     }
@@ -157,6 +172,17 @@ impl ProviderCommand {
     pub fn new(program: Command, args: Vec<String>) -> Self {
         Self { program, args }
     }
+}
+
+/// What a provider did while no request was outstanding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Idle {
+    /// Nothing, or only blank lines.
+    Quiet,
+    /// It wrote a line nobody asked for.
+    Stray,
+    /// It exited, or closed its stdout.
+    Exited,
 }
 
 /// One provider process for the lifetime of an npm command: spawned once,
@@ -247,8 +273,10 @@ impl ProviderSession {
         let (sender, lines) = mpsc::channel::<Line>();
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
+            let mut at_start = true;
             loop {
-                let line = read_json_line::<serde_json::Value>(&mut reader);
+                let line = read_provider_line::<serde_json::Value>(&mut reader, at_start);
+                at_start = false;
                 let last = matches!(line, Ok(None) | Err(ProtocolError::Io(_)));
                 if sender.send(line).is_err() || last {
                     break;
@@ -270,14 +298,7 @@ impl ProviderSession {
         };
 
         let limit = timeouts.hello;
-        let hello = session
-            .next_line::<Hello>(limit, "hello")
-            .map_err(|error| match error {
-                ExchangeError::Provider(_) => {
-                    ExchangeError::Provider("provider exited before hello".into())
-                }
-                other => other,
-            })?;
+        let hello = session.next_line::<Hello>(limit, "hello")?;
         session.version = negotiate(&hello)?;
         session.capabilities = hello.capabilities.clone().unwrap_or_default();
         session.hello = Some(hello);
@@ -298,7 +319,13 @@ impl ProviderSession {
             .timeouts
             .for_request(&request.kind, request.interactive == Some(true));
         let response = self.exchange(request, limit, kind_name(&request.kind))?;
-        response.validate_for(&request.kind)?;
+        if let Err(error) = response.validate_for(&request.kind) {
+            // an answer that does not fit its request (an `Ok` of another
+            // kind, an expiry that is missing) is a malformed message: the
+            // session ends
+            self.kill();
+            return Err(error.into());
+        }
         Ok(response)
     }
 
@@ -361,30 +388,30 @@ impl ProviderSession {
         if self.killed {
             return Err(ExchangeError::SessionEnded);
         }
-        // requests carry no id, so a line that arrived while none was
+        // Requests carry no id, so a line that arrived while none was
         // outstanding would be read as the answer to this one: Phase 2,
-        // Session lifecycle
-        match self.lines.try_recv() {
-            Ok(Ok(Some(_))) => {
-                self.kill();
-                return Err(ExchangeError::Provider(
-                    "a line arrived while no request was outstanding".into(),
-                ));
+        // Session lifecycle. This catches what has arrived by now. A line the
+        // provider writes after the request below was sent cannot be told
+        // from its answer, so it is read as one.
+        match self.watch_idle(Duration::ZERO) {
+            Idle::Quiet => {}
+            Idle::Stray => return Err(ExchangeError::StrayLine),
+            Idle::Exited => {
+                return Err(ExchangeError::Exited {
+                    waiting_for: waiting_for.into(),
+                });
             }
-            Ok(Ok(None)) => {
-                return Err(ExchangeError::Provider(format!(
-                    "provider exited before {waiting_for}"
-                )));
-            }
-            Ok(Err(error)) => return Err(error.into()),
-            Err(_) => {}
         }
         // the deadline starts before the write: a provider that reads nothing
         // is killed at the limit like one that reads and never answers
         let deadline = Instant::now() + limit;
         let mut bytes = Vec::new();
         write_json_line(&mut bytes, message)?;
-        self.send_bytes(bytes)?;
+        if let Err(error) = self.send_bytes(bytes) {
+            // the pipe is closed: the provider is gone with a request outstanding
+            self.kill();
+            return Err(error);
+        }
         self.next_line_within(
             deadline.saturating_duration_since(Instant::now()),
             limit,
@@ -412,21 +439,59 @@ impl ProviderSession {
         if self.killed {
             return Err(ExchangeError::SessionEnded);
         }
-        let exited = || ExchangeError::Provider(format!("provider exited before {waiting_for}"));
-        match self.lines.recv_timeout(left) {
-            Ok(line) => {
-                let value = line?.ok_or_else(exited)?;
-                Ok(serde_json::from_value(value).map_err(ProtocolError::Json)?)
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                self.kill();
-                Err(ExchangeError::TimedOut {
-                    waiting_for: waiting_for.into(),
-                    limit,
-                })
-            }
+        let exited = || ExchangeError::Exited {
+            waiting_for: waiting_for.into(),
+        };
+        let result = match self.lines.recv_timeout(left) {
+            Ok(line) => match line {
+                Ok(Some((value, bytes))) => serde_json::from_value(value)
+                    // not the serde error, which quotes what it found: the
+                    // line may carry a credential, so only its length is said
+                    .map_err(|_| ProtocolError::Malformed { bytes }.into()),
+                Ok(None) => Err(exited()),
+                Err(error) => Err(error.into()),
+            },
+            Err(RecvTimeoutError::Timeout) => Err(ExchangeError::TimedOut {
+                waiting_for: waiting_for.into(),
+                limit,
+            }),
             Err(RecvTimeoutError::Disconnected) => Err(exited()),
+        };
+        if result.is_err() {
+            // every way a wait fails ends the session: no answer in time, the
+            // provider gone, an oversized line, a line that is not a message
+            self.kill();
         }
+        result
+    }
+
+    /// Looks at what the provider has written while no request is outstanding,
+    /// waiting up to `wait` for it: a blank line was dropped by the reader and
+    /// is nothing, any other line is a stray one, and the provider having
+    /// exited is the end of the session. Either of the last two ends it, as
+    /// npm does the moment it sees one, with the provider killed.
+    pub fn watch_idle(&mut self, wait: Duration) -> Idle {
+        if self.killed {
+            return Idle::Quiet;
+        }
+        let seen = match wait {
+            Duration::ZERO => self.lines.try_recv().map_err(|error| match error {
+                mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout,
+                mpsc::TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+            }),
+            wait => self.lines.recv_timeout(wait),
+        };
+        let idle = match seen {
+            Err(RecvTimeoutError::Timeout) => return Idle::Quiet,
+            // any line is one, a malformed or an oversized one included
+            Ok(
+                Ok(Some(_))
+                | Err(ProtocolError::Malformed { .. } | ProtocolError::LineTooLong { .. }),
+            ) => Idle::Stray,
+            Ok(Ok(None) | Err(_)) | Err(RecvTimeoutError::Disconnected) => Idle::Exited,
+        };
+        self.kill();
+        idle
     }
 
     fn kill(&mut self) {
@@ -544,16 +609,33 @@ pub fn run_exchange_with(
 }
 
 /// One provider across an npm command: starts a session when a request needs
-/// one, and counts the kills a timeout caused. A timeout fails the request, the
-/// requests queued behind it on that session, and ends the session; the next
-/// request starts a new one, until the provider has been killed
-/// `TIMEOUT_KILLS_BEFORE_NO_RESTART` times, at hello or during a request.
-/// Nothing is cached here, so what a cache keeps across a kill is the caller's.
+/// one and sees to what ends it. What each cause does is the policy's table
+/// (`credentialProvider.sessionEnds`, `generated::SESSION_ENDS`):
+///
+/// - a timeout, an exit with a request outstanding, an oversized line or a
+///   malformed message fail the request in flight and end the session, and the
+///   next request starts a new process; each counts toward
+///   `FAILED_SESSIONS_BEFORE_NO_RESTART`, after which the provider is not
+///   started again;
+/// - a stray line, written while no request was outstanding, ends the session
+///   as soon as it is seen (`watch_idle`, or the next request), is warned
+///   about, counts, and fails nothing: the request that comes next starts a new
+///   process;
+/// - a provider that exits while idle fails nothing and does not count;
+/// - a hello that failed (no common version, malformed or none, or a provider
+///   that cannot be started) fails the request and skips the provider for the
+///   rest of the command;
+/// - an `Err` answer fails its request and leaves the session alone.
+///
+/// Nothing is cached here, so what a cache keeps across an end is the caller's.
 pub struct ProviderSupervisor {
     start: Box<dyn FnMut() -> ProviderCommand>,
     timeouts: Timeouts,
+    name: String,
     session: Option<ProviderSession>,
-    kills: u32,
+    failed_sessions: u32,
+    skipped: bool,
+    warnings: Vec<String>,
 }
 
 impl ProviderSupervisor {
@@ -561,33 +643,93 @@ impl ProviderSupervisor {
         Self {
             start: Box::new(start),
             timeouts,
+            name: "provider".into(),
             session: None,
-            kills: 0,
+            failed_sessions: 0,
+            skipped: false,
+            warnings: Vec::new(),
         }
     }
 
+    /// The name a warning gives the provider by.
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// The sessions that ended in a failure that counts toward the limit.
     pub fn kills(&self) -> u32 {
-        self.kills
+        self.failed_sessions
+    }
+
+    /// What npm warned about, naming the provider: a stray line.
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    /// Whether a session is open.
+    pub fn is_running(&self) -> bool {
+        self.session.is_some()
+    }
+
+    /// Sees what the provider did while no request was outstanding, waiting up
+    /// to `wait`, and ends the session as the table says. npm's reader does
+    /// this the moment a line arrives; a request does it too, for what has
+    /// arrived by then.
+    pub fn watch_idle(&mut self, wait: Duration) -> Idle {
+        let Some(session) = self.session.as_mut() else {
+            return Idle::Quiet;
+        };
+        let idle = session.watch_idle(wait);
+        match idle {
+            Idle::Quiet => {}
+            Idle::Stray => {
+                self.failed_sessions += 1;
+                self.session = None;
+                self.warnings.push(format!(
+                    "{} wrote a line while no request was outstanding; it was ended",
+                    self.name
+                ));
+            }
+            // not a failure: it does not count
+            Idle::Exited => self.session = None,
+        }
+        idle
     }
 
     pub fn request(&mut self, request: &Request) -> Result<ProviderResponse, ExchangeError> {
+        if self.skipped {
+            return Err(ExchangeError::Skipped);
+        }
+        self.watch_idle(Duration::ZERO);
         if self.session.is_none() {
-            if self.kills >= generated::TIMEOUT_KILLS_BEFORE_NO_RESTART {
+            if self.failed_sessions >= generated::FAILED_SESSIONS_BEFORE_NO_RESTART {
                 return Err(ExchangeError::NotRestarted);
             }
             match ProviderSession::spawn_with((self.start)(), self.timeouts) {
                 Ok(session) => self.session = Some(session),
-                Err(error) => return Err(self.note(error)),
+                Err(error) => return Err(self.hello_failed(error)),
             }
         }
         let session = self.session.as_mut().expect("a session was just ensured");
-        session.request(request).map_err(|error| self.note(error))
+        let result = session.request(request);
+        // an error that ended the session (a timeout, the provider gone, a
+        // line that is no message, an answer that does not fit) counts; one
+        // that did not (the request npm built was wrong) is nobody's failure
+        if result.is_err() && session.killed() {
+            self.failed_sessions += 1;
+            self.session = None;
+        }
+        result
     }
 
-    fn note(&mut self, error: ExchangeError) -> ExchangeError {
+    /// The hello did not come right. A timeout is a timeout like any other and
+    /// counts; the rest skip the provider for the command.
+    fn hello_failed(&mut self, error: ExchangeError) -> ExchangeError {
         if matches!(error, ExchangeError::TimedOut { .. }) {
-            self.kills += 1;
-            self.session = None;
+            self.failed_sessions += 1;
+        } else {
+            self.skipped = true;
         }
         error
     }

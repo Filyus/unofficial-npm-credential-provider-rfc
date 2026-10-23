@@ -13,7 +13,7 @@ Source: `spec/policy-v1.json`.
 | Operations | `read`, `publish`, `stage`, `stage-read`, `deprecate`, `dist-tag`, `unpublish`, `owner`, `access`, `trust`, `stage-reject`, `account` |
 | Operations that require `version` | `publish`, `stage`, `stage-reject` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
-| Capabilities | `login`, `logout`, `erase` |
+| Capabilities | `login`, `logout` |
 | Auth types | `bearer`, `basic` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |
@@ -136,3 +136,16 @@ Source: `spec/policy-v1.json`.
 | `erase` | `10` |
 | `login` | `300` |
 | `logout` | `30` |
+
+## Provider Session Ends
+
+| Cause | Request in flight | Session | Next request | Counts toward the limit |
+| --- | --- | --- | --- | --- |
+| `timeout` | `fails` | `ends` | `new-process` | `true` |
+| `exit-outstanding` | `fails` | `ends` | `new-process` | `true` |
+| `oversized-line` | `fails` | `ends` | `new-process` | `true` |
+| `malformed-message` | `fails` | `ends` | `new-process` | `true` |
+| `stray-line` | `none` | `ends` | `new-process` | `true` |
+| `exit-idle` | `none` | `ends` | `new-process` | `false` |
+| `hello-failed` | `fails` | `ends` | `skipped` | `false` |
+| `error-answer` | `fails` | `continues` | `same-process` | `false` |

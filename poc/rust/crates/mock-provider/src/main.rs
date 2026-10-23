@@ -53,6 +53,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..Hello::v1()
             },
         )?;
+    } else if scenario == "bom-and-blank-lines" {
+        // a byte order mark before the first line, a carriage return before
+        // each newline, and blank lines between the messages: a client reads
+        // all of that as the hello and the answers, and none as a stray line
+        let mut stdout = io::stdout();
+        stdout.write_all(b"\xEF\xBB\xBF{\"v\":[1]}\r\n\n  \r\n")?;
+        stdout.flush()?;
     } else {
         write_json_line(&mut io::stdout(), &Hello::v1())?;
     }
@@ -128,6 +135,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => ProviderOk::done(request.kind.clone()),
             };
             write_json_line(&mut io::stdout(), &ProviderResponse::Ok(response))?;
+            continue;
+        }
+        // answers, then exits: the end of a session that is no failure when it
+        // comes while no request is outstanding
+        if scenario == "exit-after-answer" {
+            write_json_line(
+                &mut io::stdout(),
+                &ProviderResponse::Ok(ProviderOk::bearer("test-token", Granularity::Scope)),
+            )?;
+            return Ok(());
+        }
+        // reads a request and exits without answering it
+        if scenario == "exit-on-request" {
+            return Ok(());
+        }
+        // an answer over the line limit
+        if scenario == "oversized-answer" {
+            let mut stdout = io::stdout();
+            stdout.write_all(&vec![b'x'; 2 * 1024 * 1024])?;
+            stdout.write_all(b"\n")?;
+            stdout.flush()?;
+            continue;
+        }
+        // an `Ok` of another kind than the request's
+        if scenario == "wrong-kind" {
+            write_json_line(
+                &mut io::stdout(),
+                &ProviderResponse::Ok(ProviderOk::done(RequestKind::Login)),
+            )?;
+            continue;
+        }
+        // valid JSON of the wrong shape, with a string in it that stands for a
+        // credential: what a client reports of the line must not quote it
+        if scenario == "secret-in-wrong-field" {
+            println!(r#"{{"Ok":{{"kind":"get","auth":"super-secret-token"}}}}"#);
+            continue;
+        }
+        // answers, then blank lines, which are no stray lines
+        if scenario == "bom-and-blank-lines" {
+            let ok = ProviderResponse::Ok(ProviderOk::bearer("test-token", Granularity::Scope));
+            let mut both = Vec::new();
+            write_json_line(&mut both, &ok)?;
+            both.extend_from_slice(b"\n \t\r\n");
+            let mut stdout = io::stdout();
+            stdout.write_all(&both)?;
+            stdout.flush()?;
+            continue;
+        }
+        // on the second request, writes a line nobody asked for and then the
+        // answer: the client cannot tell the first from the answer and takes
+        // it for one (the limit the specification states)
+        if scenario == "stale-line-before-answer" && served == 2 {
+            let mut both = Vec::new();
+            write_json_line(
+                &mut both,
+                &ProviderResponse::Ok(ProviderOk::bearer("stale-token", Granularity::Scope)),
+            )?;
+            write_json_line(
+                &mut both,
+                &ProviderResponse::Ok(ProviderOk::bearer("real-token", Granularity::Scope)),
+            )?;
+            let mut stdout = io::stdout();
+            stdout.write_all(&both)?;
+            stdout.flush()?;
             continue;
         }
         // answers, and sends a second line nobody asked for, in one write

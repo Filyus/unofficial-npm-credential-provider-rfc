@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from tests.generated_policy import LINE_SIZE_MINIMUM, SENTINEL_ARGUMENT, TIMEOUT_KILLS_BEFORE_NO_RESTART
+from tests.generated_policy import LINE_SIZE_MINIMUM, SENTINEL_ARGUMENT, FAILED_SESSIONS_BEFORE_NO_RESTART
 from tests.protocol_model import (
     CacheKey,
     CredentialClientModel,
@@ -25,7 +25,7 @@ POLICY = json.loads((Path(__file__).resolve().parents[1] / "spec" / "policy-v1.j
 TRANSCRIPTS = Path(__file__).resolve().parent / "transcripts"
 
 
-def client(capabilities=("erase",), **hello):
+def client(capabilities=(), **hello):
     model = CredentialClientModel()
     model.receive_hello({"v": [1], "capabilities": list(capabilities), **hello})
     return model
@@ -99,6 +99,45 @@ class RejectionTests(unittest.TestCase):
         self.assertIsNone(model.reject_credential(context, issuance=first), "the second request carried A too")
         self.assertEqual(model.lookup(REGISTRY, "@scope", "pkg").auth["token"], "B")
         self.assertNotIn(second, model.retired)
+
+    def test_the_retry_names_the_context_the_status_and_the_challenges(self):
+        model = client()
+        context, _ = get(model, token="A")
+        for status in (401, 403):
+            retry = model.retry_request(context, status, ['Bearer realm="r"'])
+            self.assertEqual((retry["kind"], retry["retry"], retry["httpStatus"]), ("get", True, status))
+            self.assertEqual((retry["registry"], retry["scope"], retry["package"]), (REGISTRY, "@scope", "pkg"))
+            self.assertEqual(retry["authChallenges"], ['Bearer realm="r"'])
+        self.assertNotIn("authChallenges", model.retry_request(context, 401))
+
+    def test_a_stale_rejection_on_a_cache_miss_sends_the_retry_get_not_a_plain_one(self):
+        """A 401 on an answer already erased, with nothing in the cache to send
+        again: the `get` that follows is the request's one retry, so it carries
+        `retry: true` and the status, and the provider is not asked as if for the
+        first time (it could hand out the token it has just been told was refused)."""
+        model = client()
+        context, first = get(model, token="A", cache="never")
+        model.reject_credential(context, issuance=first)
+        self.assertIsNone(model.lookup(REGISTRY, "@scope", "pkg"), "a miss")
+
+        for status in (401, 403):
+            request = model.request_after_stale(context, status, first, auth_challenges=["Basic"])
+            self.assertEqual((request["retry"], request["httpStatus"]), (True, status))
+            self.assertEqual(request["authChallenges"], ["Basic"])
+
+    def test_a_stale_rejection_on_a_cache_hit_sends_no_request_to_the_provider(self):
+        model = client()
+        context, first = get(model, token="A", granularity="scope")
+        model.reject_credential(context, issuance=first)
+        get(model, token="B", granularity="scope")
+
+        self.assertIsNone(model.request_after_stale(context, 401, first), "the request goes again with B")
+
+    def test_a_rejection_that_is_not_stale_has_no_stale_path(self):
+        model = client()
+        context, first = get(model, token="A")
+        with self.assertRaises(ProtocolViolation):
+            model.request_after_stale(context, 401, first)
 
     def test_erasing_a_publish_credential_carries_its_version(self):
         model = client()
@@ -302,6 +341,30 @@ class NotFoundMemoTests(unittest.TestCase):
         self.assertEqual(other_scope, ("try-next-provider-not-found", True), "@b is a scope of its own")
         self.assertEqual(self.ask(model, declined, "gitlab", "@b", "z", not_found)[1], False)
 
+    def test_a_not_found_for_the_stage_read_lookup_is_not_remembered_so_the_write_is_asked(self):
+        """`stage approve` looks the record up with `stage-read` before the
+        write, which the memory (per provider, registry and scope, not keyed by
+        operation) would otherwise shut: the lookup names no scope, and the
+        write for an unscoped package is that same key."""
+        model, declined = client(), DeclinedRegistries()
+        not_found = {"Err": {"kind": "not-found"}}
+        lookup = model.request_or_decline(RequestContext(registry=REGISTRY, operation="stage-read", command="stage"),
+                                          declined, "p")
+        self.assertEqual(model.answer_in_chain(lookup, not_found, declined, "p"), "try-next-provider-not-found")
+
+        write = model.request_or_decline(
+            RequestContext(registry=REGISTRY, operation="publish", package="pkg", version="1.0.0", command="stage"),
+            declined, "p")
+        self.assertIsInstance(write, dict, "the write's get reaches the provider")
+
+        # any other operation is remembered, as before
+        read = model.request_or_decline(RequestContext(registry=REGISTRY, package="a"), declined, "q")
+        model.answer_in_chain(read, not_found, declined, "q")
+        self.assertEqual(
+            model.request_or_decline(RequestContext(registry=REGISTRY, package="b"), declined, "q"),
+            "try-next-provider-not-found",
+        )
+
     def test_an_unscoped_package_is_no_scope_and_not_a_scope_named_none(self):
         model, declined = client(), DeclinedRegistries()
         not_found = {"Err": {"kind": "not-found"}}
@@ -345,7 +408,7 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(restarts.on_timeout(queued=[]), [])
         self.assertFalse(restarts.may_start())
         self.assertEqual((restarts.kills, restarts.failed), (2, ["a", "b", "c"]))
-        self.assertEqual(TIMEOUT_KILLS_BEFORE_NO_RESTART, 2)
+        self.assertEqual(FAILED_SESSIONS_BEFORE_NO_RESTART, 2)
         self.assertEqual(POLICY["credentialProvider"]["cacheAfterTimeout"], "keep")
 
     def test_policy_numbers(self):

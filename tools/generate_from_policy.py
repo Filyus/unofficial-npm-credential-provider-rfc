@@ -84,9 +84,10 @@ def render_python(policy: dict) -> str:
             f"OPERATION_BOUND_EXCEPT = frozenset({cache['operationBoundExcept']!r})",
             f"PACKAGE_BOUND_WHEN_PRESENT = {cache['packageBoundWhenPresent']!r}",
             f"LINE_SIZE_MINIMUM = {policy['limits']['lineSizeMinimum']!r}",
-            f"TIMEOUT_KILLS_BEFORE_NO_RESTART = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']!r}",
+            f"FAILED_SESSIONS_BEFORE_NO_RESTART = {policy['credentialProvider']['failedSessionsBeforeNoRestart']!r}",
             f"SENTINEL_ARGUMENT = {policy['credentialProvider']['sentinelArgument']!r}",
             f"ERASE_ERROR_OUTCOMES = {erase_error_outcomes(policy)!r}",
+            f"SESSION_ENDS = {policy['credentialProvider']['sessionEnds']!r}",
             "",
         ]
     )
@@ -121,10 +122,17 @@ def render_rust(policy: dict) -> str:
             f"pub const UNKNOWN_CACHE: &str = {json.dumps(policy['forwardCompatibility']['unknownCache'])};",
             f"pub const UNKNOWN_GRANULARITY: &str = {json.dumps(policy['forwardCompatibility']['unknownGranularity'])};",
             f"pub const LINE_SIZE_MINIMUM: usize = {policy['limits']['lineSizeMinimum']};",
-            f"pub const TIMEOUT_KILLS_BEFORE_NO_RESTART: u32 = {policy['credentialProvider']['timeoutKillsBeforeNoRestart']};",
+            f"pub const FAILED_SESSIONS_BEFORE_NO_RESTART: u32 = {policy['credentialProvider']['failedSessionsBeforeNoRestart']};",
             f"pub const SENTINEL_ARGUMENT: &str = {json.dumps(policy['credentialProvider']['sentinelArgument'])};",
             "pub const ERASE_ERROR_OUTCOMES: &[(&str, &str)] = &["
             + ", ".join(f"({json.dumps(k)}, {json.dumps(v)})" for k, v in erase_error_outcomes(policy).items())
+            + "];",
+            "pub const SESSION_ENDS: &[(&str, &str, &str, &str, bool)] = &["
+            + ", ".join(
+                f"({json.dumps(cause)}, {json.dumps(row['request'])}, {json.dumps(row['session'])}, "
+                f"{json.dumps(row['next'])}, {str(row['counts']).lower()})"
+                for cause, row in policy["credentialProvider"]["sessionEnds"].items()
+            )
             + "];",
             *rust_timeouts(policy),
             "",
@@ -268,6 +276,20 @@ def render_policy_summary(policy: dict) -> str:
     lines.extend(["", "## Provider Timeouts (seconds)", "", "| Request | Timeout |", "| --- | --- |"])
     for request, seconds in policy["credentialProvider"]["timeoutSeconds"].items():
         lines.append(f"| `{request}` | `{seconds}` |")
+
+    lines.extend(
+        [
+            "",
+            "## Provider Session Ends",
+            "",
+            "| Cause | Request in flight | Session | Next request | Counts toward the limit |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for cause, row in policy["credentialProvider"]["sessionEnds"].items():
+        lines.append(
+            f"| `{cause}` | `{row['request']}` | `{row['session']}` | `{row['next']}` | `{json_bool(row['counts'])}` |"
+        )
 
     lines.append("")
     return "\n".join(lines)

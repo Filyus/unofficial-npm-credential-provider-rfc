@@ -36,8 +36,7 @@
     ],
     "capabilities": [
       "login",
-      "logout",
-      "erase"
+      "logout"
     ],
     "authTypes": [
       "bearer",
@@ -151,7 +150,17 @@
       "login": 300,
       "logout": 30
     },
-    "timeoutKillsBeforeNoRestart": 2,
+    "failedSessionsBeforeNoRestart": 2,
+    "sessionEnds": {
+      "timeout": { "request": "fails", "session": "ends", "next": "new-process", "counts": true },
+      "exit-outstanding": { "request": "fails", "session": "ends", "next": "new-process", "counts": true },
+      "oversized-line": { "request": "fails", "session": "ends", "next": "new-process", "counts": true },
+      "malformed-message": { "request": "fails", "session": "ends", "next": "new-process", "counts": true },
+      "stray-line": { "request": "none", "session": "ends", "next": "new-process", "counts": true },
+      "exit-idle": { "request": "none", "session": "ends", "next": "new-process", "counts": false },
+      "hello-failed": { "request": "fails", "session": "ends", "next": "skipped", "counts": false },
+      "error-answer": { "request": "fails", "session": "continues", "next": "same-process", "counts": false }
+    },
     "queuedAfterTimeout": "fail",
     "cacheAfterTimeout": "keep",
     "sentinelArgument": "--npm-credential-provider"
