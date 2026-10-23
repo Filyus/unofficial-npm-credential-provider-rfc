@@ -61,7 +61,7 @@ ROUTES = HONEST.replace(
   if (config.credentialKeysFromCliOrEnv(regKey).length) return undefined
   const { protocol, hostname } = uri ? new URL(uri) : {}
   if (protocol === 'http:' && !/^(localhost|127(\.\d{1,3}){3}|\[::1\])$/.test(hostname)) throw new Error('was not run: its credential is not sent over plain http')
-  if (config.tokenHelperProjectTransport.length) throw new Error('was not run: its credential is not sent over a route that a project chose')""",
+  if (config.tokenHelperProjectTransport.filter(({ key }) => protocol !== 'https:' || !/^(https-)?proxy$/.test(key)).length) throw new Error('was not run: its credential is not sent over a route that a project chose')""",
 )
 assert ROUTES != HONEST
 
@@ -138,7 +138,13 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(self.found_routes(ROUTES.replace("^(localhost|", "^(localhost\\.?|")), {"route"})
 
     def test_a_runner_that_ignores_the_route_a_project_chose_is_found(self) -> None:
-        self.assertEqual(self.found_routes(ROUTES.replace("config.tokenHelperProjectTransport.length", "false")), {"route"})
+        self.assertEqual(self.found_routes(ROUTES.replace("config.tokenHelperProjectTransport.filter", "[].filter")), {"route"})
+
+    def test_a_runner_that_refuses_a_project_proxy_over_https_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("protocol !== 'https:' || !/^(https-)?proxy$/.test(key)", "true")), {"route"})
+
+    def test_a_runner_that_lets_a_project_proxy_through_over_http_is_found(self) -> None:
+        self.assertEqual(self.found_routes(ROUTES.replace("protocol !== 'https:' ||", "false &&")), {"route"})
 
     def test_a_runner_that_runs_the_helper_beside_a_credential_for_the_run_is_found(self) -> None:
         self.assertEqual(self.found_routes(ROUTES.replace("config.credentialKeysFromCliOrEnv(regKey).length", "false")), {"route"})

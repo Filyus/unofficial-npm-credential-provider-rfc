@@ -145,8 +145,19 @@ class TokenHelperRouteTests(unittest.TestCase):
         self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example"), "ran")
 
     def test_a_route_a_project_chose_is_refused_and_the_same_from_the_user_is_not(self) -> None:
-        self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example", project_route_keys=("https-proxy",)), "project-route")
+        for key in ("ca", "cafile", "strict-ssl"):
+            with self.subTest(key=key):
+                self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example", project_route_keys=(key,)), "project-route")
         self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example", project_route_keys=()), "ran")
+
+    def test_a_project_proxy_refuses_an_http_request_not_an_https_one(self) -> None:
+        # over https a proxy sees a CONNECT tunnel, and the credential travels inside it
+        for key in ("proxy", "https-proxy"):
+            with self.subTest(key=key):
+                self.assertEqual(token_helper_route_outcome("http:", "localhost", project_route_keys=(key,)), "project-route")
+                self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example", project_route_keys=(key,)), "ran")
+        # a CA beside the proxy still refuses the https request
+        self.assertEqual(token_helper_route_outcome("https:", "registry.corp.example", project_route_keys=("https-proxy", "ca")), "project-route")
 
     def test_the_http_refusal_comes_before_the_route_refusal(self) -> None:
         self.assertEqual(token_helper_route_outcome("http:", "10.0.0.1", project_route_keys=("proxy",)), "plain-http")

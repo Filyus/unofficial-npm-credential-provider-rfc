@@ -1481,6 +1481,8 @@ def token_helper_header(exit_code: int, stdout: str) -> str:
 # as the host of a parsed URL reads (a WHATWG URL has lowercased it, turned
 # `127.1` into `127.0.0.1` and kept the brackets of an IPv6 address)
 _LOOPBACK_HOST = re.compile(r"^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$")
+# the settings of a proxy, which the route rule leaves alone for an `https:` request
+_PROXY_KEYS = ("proxy", "https-proxy")
 
 
 def token_helper_route_outcome(
@@ -1495,12 +1497,15 @@ def token_helper_route_outcome(
     that credential is used), `plain-http` for an `http:` URL to a host that is
     not this machine, `project-route` when `proxy`, `https-proxy`, `ca`,
     `cafile` (or `strict-ssl=false`) came from the project layer, otherwise
-    `ran`. The checks are made for every request, and in this order."""
+    `ran`. A project's `proxy` and `https-proxy` count for an `http:` request
+    only: over `https:` a proxy sees a CONNECT tunnel and the credential
+    travels inside it. `ca`, `cafile` and `strict-ssl=false` count for both.
+    The checks are made for every request, and in this order."""
     if run_credential:
         return "run-credential"
     if scheme == "http:" and not _LOOPBACK_HOST.match(hostname):
         return "plain-http"
-    if project_route_keys:
+    if any(scheme != "https:" or key not in _PROXY_KEYS for key in project_route_keys):
         return "project-route"
     return "ran"
 
