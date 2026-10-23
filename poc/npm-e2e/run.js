@@ -192,23 +192,46 @@ const main = async () => {
   const helper = writeHelper(root)
   const helperLine = `${nerf}:tokenHelper=${helper}\n`
   const npmCli = path.join(npmCliDir, 'bin', 'npm-cli.js')
+  // A helper that leaves a file behind when it starts, for the checks whose
+  // point is that a helper did not run: an absent file proves nothing unless
+  // the same helper is seen to leave it where it does run. One per scenario.
+  const markedHelper = (name, regKey = nerf) => {
+    const marker = path.join(root, 'ran', name)
+    fs.mkdirSync(path.dirname(marker), { recursive: true })
+    const script = writeHelper(root, `marked-${name}`, [
+      `require('fs').writeFileSync(${JSON.stringify(marker)}, '')`,
+      "process.stdout.write('helper-token\\n')",
+    ].join('\n'))
+    return { line: `${regKey}:tokenHelper=${script}\n`, ran: () => fs.existsSync(marker) }
+  }
 
+  // `<dir>` is the repository and `<home>` the user's home in every value a
+  // scenario gives; `<root>/<name>` holds both, and `<outside>` is a directory
+  // beside them that belongs to neither
   const run = async (name, {
-    args = ['view', 'demo', 'version'], registryUrl = registry, user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {},
+    args = ['view', 'demo', 'version'], registryUrl = registry, user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {}, homeFiles = {}, outsideFiles = {},
+    // false: a repository root that holds no package.json; cwd: where npm starts, inside the repository
+    packageJson = true, cwd = '',
   }) => {
     // the repository, and beside it the user's own files
     const dir = path.join(root, name, 'repo')
     const home = path.join(root, name, 'home')
+    const outside = path.join(root, name, 'outside')
+    const fill = text => text.replaceAll('<dir>', dir).replaceAll('<home>', home).replaceAll('<outside>', outside)
     fs.mkdirSync(dir, { recursive: true })
     fs.mkdirSync(home)
-    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.1', ...pkg }))
-    fs.writeFileSync(path.join(home, 'user.npmrc'), user)
-    fs.writeFileSync(path.join(dir, '.npmrc'), project.replaceAll('<dir>', dir))
+    if (packageJson) {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.1', ...pkg }))
+    }
+    fs.writeFileSync(path.join(home, 'user.npmrc'), fill(user))
+    fs.writeFileSync(path.join(dir, '.npmrc'), fill(project))
     fs.writeFileSync(path.join(dir, 'repo-user.npmrc'), helperLine)
-    // more files the repository carries, relative to it
-    for (const [name, content] of Object.entries(files)) {
-      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
-      fs.writeFileSync(path.join(dir, name), content.replaceAll('<dir>', dir))
+    // more files the repository carries, relative to it; the user's, relative to home
+    for (const [where, list] of [[dir, files], [home, homeFiles], [outside, outsideFiles]]) {
+      for (const [file, content] of Object.entries(list)) {
+        fs.mkdirSync(path.dirname(path.join(where, file)), { recursive: true })
+        fs.writeFileSync(path.join(where, file), fill(content))
+      }
     }
     seen.length = 0
     elsewhereSeen.length = 0
@@ -225,7 +248,7 @@ const main = async () => {
       '--prefer-online',
       // a helper that works shows its stderr at this level
       '--loglevel=verbose',
-    ], { cwd: dir, timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.replaceAll('<dir>', dir)])) } }, (err, out, errOut) =>
+    ], { cwd: path.join(dir, cwd), timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
     return {
       name,
@@ -354,7 +377,9 @@ const main = async () => {
     fs.writeFileSync(nestedConfig, `${nerf}:tokenHelper=${nested}\n`)
     const recursion = await run('recursion-guard', { user: `${nerf}:tokenHelper=${nested}\n` })
     expect(recursion, 'view succeeds with the helper token', !recursion.failed && recursion.requests.at(-1) === 'GET Bearer helper-token')
-    expect(recursion, 'the helper\'s own npm sent nothing', recursion.requests.length === 1)
+    // the control is the same `view` with a helper that runs no npm: how many
+    // requests a view makes is npm's business, not this check's
+    expect(recursion, 'the helper\'s own npm sent nothing', user.requests.length > 0 && recursion.requests.length === user.requests.length)
     expect(recursion, 'and failed with ETOKENHELPER, saying a token helper\'s own npm cannot run one',
       recursion.output.includes('nested npm exited 1 with ETOKENHELPER'))
 
@@ -400,9 +425,69 @@ const main = async () => {
       insideRepo.push(result)
       expect(result, 'view still reaches the registry', !result.failed && result.requests.length > 0)
       expect(result, 'the repository file supplies no credential', auths(result).join() === '-')
-      expect(result, 'the helper is reported as ignored, with the reason',
-        result.notices.some(l => l.includes('chosen on the command line or in the environment and lies inside the project')))
+      expect(result, 'the helper is reported as ignored, with the reason: the directory that holds a package.json',
+        result.notices.some(l => l.includes('chosen on the command line or in the environment and lies inside') &&
+          l.includes('which holds package.json')))
     }
+
+    // The same rule from the file's side: the file's own directory and each one
+    // above it, up to home (never looked at) or, for a file outside home, the
+    // filesystem root. Each refusal is set beside the same layout with the
+    // mark taken away: that one must run its helper, which also proves that
+    // the file a refused helper did not leave is where a run leaves it.
+    const located = []
+    const pair = async (name, mark, build) => {
+      const held = markedHelper(name)
+      const free = markedHelper(`${name}-without-the-mark`)
+      const refusedRun = await run(name, build(held.line, true))
+      const freeRun = await run(`${name}-without-the-mark`, build(free.line, false))
+      located.push(refusedRun, freeRun)
+      expect(refusedRun, 'view still reaches the registry', !refusedRun.failed && refusedRun.requests.length > 0)
+      expect(refusedRun, 'the file supplies no credential, and its helper was not run', auths(refusedRun).join() === '-' && !held.ran())
+      expect(refusedRun, `the warning names the directory and what it holds (${mark})`,
+        refusedRun.notices.some(l => l.includes('lies inside') && l.includes(`which holds ${mark}`)))
+      expect(freeRun, `control: the same layout without the ${mark} is the user's, its helper runs and its token is sent`,
+        !freeRun.failed && free.ran() && auths(freeRun).join() === 'Bearer helper-token')
+    }
+    const ci = { userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<dir>/ci.npmrc' } }
+    // a repository root with a .git and no package.json, the file at the root, npm run from a package below
+    await pair('located-git-root', '.git', (line, mark) => ({
+      ...ci, packageJson: false, cwd: 'pkg',
+      files: { 'ci.npmrc': line, 'pkg/package.json': '{}', ...(mark ? { '.git/HEAD': 'ref: refs/heads/main\n' } : {}) },
+    }))
+    // a worktree or a submodule has a .git that is a file
+    await pair('located-git-file', '.git', (line, mark) => ({
+      ...ci, packageJson: false, cwd: 'pkg',
+      files: { 'ci.npmrc': line, 'pkg/package.json': '{}', ...(mark ? { '.git': 'gitdir: ../main/.git/worktrees/w\n' } : {}) },
+    }))
+    // a project's `location=global` does not switch the rule off
+    await pair('located-location-global', 'package.json', (line, mark) => ({
+      ...ci, packageJson: mark, project: 'location=global\n', files: { 'ci.npmrc': line },
+    }))
+    // below home, one directory down: the walk looks at it, and stops at home itself
+    await pair('located-below-home', 'package.json', (line, mark) => ({
+      userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<home>/cfg/x.npmrc' },
+      homeFiles: { 'cfg/x.npmrc': line, ...(mark ? { 'cfg/package.json': '{}' } : {}) },
+    }))
+    // a git-managed dotfiles directory below home is refused, the false refusal the limits name
+    await pair('located-dotfiles-git', '.git', (line, mark) => ({
+      userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<home>/.config/npm/npmrc' },
+      homeFiles: { '.config/npm/npmrc': line, ...(mark ? { '.config/.git/HEAD': 'ref: refs/heads/main\n' } : {}) },
+    }))
+    // a file outside home, with no repository around it, is the user's: the walk goes up to the root
+    await pair('located-outside-home', 'package.json', (line, mark) => ({
+      userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<outside>/x.npmrc' },
+      outsideFiles: { 'x.npmrc': line, ...(mark ? { 'package.json': '{}' } : {}) },
+    }))
+    // home itself is never looked at: a package.json there does not make the user's file a project's
+    const homeMarked = markedHelper('located-home-with-package-json')
+    const homeRun = await run('located-home-with-package-json', {
+      user: homeMarked.line, homeFiles: { 'package.json': '{}', '.git/HEAD': 'ref: refs/heads/main\n' },
+      userconfigFlag: false, env: { NPM_CONFIG_USERCONFIG: '<home>/user.npmrc' },
+    })
+    located.push(homeRun)
+    expect(homeRun, 'a file chosen in a home that holds a package.json and a .git is the user\'s: its helper runs',
+      !homeRun.failed && homeMarked.ran() && auths(homeRun).join() === 'Bearer helper-token')
 
     // a value that is not an existing file is never printed, whichever message it is in
     const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
@@ -491,8 +576,9 @@ const main = async () => {
       expect(result, 'the child npm reaches the registry', result.requests.length > 0)
       expect(result, 'the repository file supplies no credential to it', auths(result).join() === '-')
     }
-    // a script that drops the marker and leaves the project: the repository's
-    // code already runs, so this is outside what the rule can stop
+    // A script that drops the marker and leaves the project is refused as
+    // well: the file the repository's userconfig names lies in the repository,
+    // and the location rule needs no marker to see that.
     const outside = await run('child-without-the-marker-outside', {
       ...chosenUserconfig,
       args: ['run', 'child'],
@@ -500,10 +586,35 @@ const main = async () => {
       files: { 'child.js': childScript(JSON.stringify(elsewhereDir), true) },
     })
     children.push(outside)
-    // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
     expect(outside, 'a script that drops the marker and starts npm outside the project reaches the registry', outside.requests.length > 0)
-    expect(outside, 'a script that drops the marker and starts npm outside the project gets the repository file\'s helper, the one limit of the rule (accepted)', auths(outside).includes('Bearer helper-token'))
-    notes.push(`a script that drops the marker and starts npm outside the project: ${auths(outside).join(', ')} (accepted: the repository's code is already running)`)
+    expect(outside, 'and gets no credential from the repository file: it lies in the repository, which no marker is needed to see', auths(outside).join() === '-')
+
+    // What the marker is for: a project whose `userconfig` names a file that
+    // is not in the repository, which the child can only know the project
+    // chose from the marker. The helpers leave a file when they run, so that
+    // "not run" is seen against a run of the same helper.
+    const picked = { project: 'userconfig=<outside>/picked.npmrc\n', userconfigFlag: false }
+    const pickedScripts = dropMarker => ({
+      args: ['run', 'child'],
+      pkg: { scripts: { child: `"${process.execPath}" child.js` } },
+      files: { 'child.js': childScript(JSON.stringify(elsewhereDir), dropMarker) },
+    })
+    const markedKept = markedHelper('picked-kept')
+    const pickedKept = await run('project-picked-file-outside', {
+      ...picked, ...pickedScripts(false), outsideFiles: { 'picked.npmrc': markedKept.line },
+    })
+    children.push(pickedKept)
+    expect(pickedKept, 'the child npm reaches the registry', pickedKept.requests.length > 0)
+    expect(pickedKept, 'the helper of a file the project chose is not run in the child, though the file is outside the repository', !markedKept.ran() && auths(pickedKept).join() === '-')
+    const markedDropped = markedHelper('picked-dropped')
+    const pickedDropped = await run('project-picked-file-outside-without-the-marker', {
+      ...picked, ...pickedScripts(true), outsideFiles: { 'picked.npmrc': markedDropped.line },
+    })
+    children.push(pickedDropped)
+    // asserted so that the limit stays stated as it is: if npm ever stopped this, the documents would be out of date
+    expect(pickedDropped, 'control: with the marker dropped the same helper runs, so the file it leaves is where a run leaves it', markedDropped.ran())
+    expect(pickedDropped, 'a script that drops the marker and starts npm outside the project gets the helper of a file outside the repository that the project chose, the one limit of the marker (accepted)', auths(pickedDropped).includes('Bearer helper-token'))
+    notes.push(`a script that drops the marker and starts npm outside the project, with a project-chosen file outside the repository: ${auths(pickedDropped).join(', ')} (accepted: the repository's code is already running)`)
 
     // a repository's node-options would reach a node-based helper through
     // NODE_OPTIONS and could read the credential it prints
@@ -529,6 +640,16 @@ const main = async () => {
     })
     expect(nestedOptions, 'the child npm sends the helper token', nestedOptions.requests.at(-1) === 'GET Bearer helper-token')
     expect(nestedOptions, 'the repository code never ran in the child\'s helper', !fs.existsSync(path.join(root, nestedOptions.name, 'repo', 'pwned')))
+    // the control for both: the same code does run in the helper when the
+    // value is the user's own NODE_OPTIONS, which the helper keeps, so the
+    // `pwned` file is looked for where the code writes it
+    const ownOptions = await run('own-node-options', {
+      user: helperLine,
+      env: { NODE_OPTIONS: '--require=<dir>/evil.js' },
+      files: { 'evil.js': evil },
+    })
+    expect(ownOptions, 'control: the user\'s own NODE_OPTIONS reaches the helper, so the repository code fires there and leaves its file',
+      ownOptions.requests.length > 0 && fs.existsSync(path.join(root, ownOptions.name, 'repo', 'pwned')))
 
     // A helper's credential goes where a stored token goes: redirects, a
     // tarball on another host, a proxy a repository's .npmrc names and an
@@ -550,31 +671,132 @@ const main = async () => {
         sent(viaHelper).length === sent(viaToken).length)
     }
 
+    // Where a helper's credential does not go as a stored token's does (Phase
+    // 1a refuses it, 1b extends the refusal to every credential): over a route
+    // a project chose, and over plain http to a host that is not this machine.
+    // The refusal comes before the helper starts, so every one of these
+    // checks that the helper left no file, and each is set beside the same
+    // helper that does run where it is allowed, which proves the file is where
+    // a run leaves it. A stored token is the control for the route itself.
+    const refused = (r, ...parts) => r.failed && r.output.includes('ETOKENHELPER') && r.output.includes('was not run') &&
+      parts.every(part => r.output.includes(part))
+    const NO_RETRY = ['view', 'demo', 'version', '--fetch-retries=0']
     const viaProject = 'https-proxy=<proxy>\nproxy=<proxy>\nstrict-ssl=false\n'.replaceAll('<proxy>', proxyUrl)
-    const proxied = await run('project-proxy-helper', { user: helperLine, project: viaProject })
+    const proxiedMarked = markedHelper('project-proxy')
+    const proxied = await run('project-proxy-helper', { args: NO_RETRY, user: proxiedMarked.line, project: viaProject })
     const proxiedToken = await run('project-proxy-token', {
-      user: `${nerf}:_authToken=helper-token\n`, project: viaProject,
+      args: NO_RETRY, user: `${nerf}:_authToken=helper-token\n`, project: viaProject,
     })
     const carried = r => r.proxy.filter(line => line.includes('helper-token'))
     expect(proxiedToken, 'control: a stored token goes through the repository\'s proxy, so the proxy is in use', carried(proxiedToken).length > 0)
-    expect(proxied, 'the helper token is treated the same (1b changes this for every credential)',
-      proxied.proxy.length === proxiedToken.proxy.length)
+    expect(proxied, 'the helper is refused with ETOKENHELPER, naming the keys and the project\'s .npmrc',
+      refused(proxied, 'a route that a project chose', '"proxy" comes from', '"https-proxy" comes from', '"strict-ssl" comes from', '.npmrc'))
+    expect(proxied, 'the helper was not run, and neither the proxy nor the registry saw a request',
+      !proxiedMarked.ran() && proxied.proxy.length === 0 && proxied.requests.length === 0)
     parity.push(proxied, proxiedToken)
+    // one key is enough, and each of the others is refused by itself
+    for (const [scenario, key, line] of [
+      ['project-https-proxy-helper', 'https-proxy', `https-proxy=${proxyUrl}\n`],
+      ['project-cafile-helper', 'cafile', `cafile=${path.join(root, 'ca.pem')}\n`],
+      ['project-strict-ssl-helper', 'strict-ssl', 'strict-ssl=false\n'],
+    ]) {
+      const marked = markedHelper(scenario)
+      const alone = await run(scenario, { args: NO_RETRY, user: marked.line, project: line })
+      expect(alone, `a project .npmrc with ${key} alone refuses the helper, which is not run`,
+        refused(alone, `"${key}" comes from`) && !marked.ran() && alone.requests.length === 0)
+      parity.push(alone)
+    }
+    // the same setting from the user's side: the helper runs and the request goes out, and
+    // for `proxy` it goes where the setting says, which is what the project's setting would have done
+    const envMarked = markedHelper('env-https-proxy')
+    const envHttps = await run('env-https-proxy-helper', { args: NO_RETRY, user: envMarked.line, env: { npm_config_https_proxy: proxyUrl } })
+    // npm sends the http: request of this registry through https-proxy as well, so
+    // the helper's token is seen at the proxy, which refuses it: that is the user's own route
+    expect(envHttps, 'the same key in the environment is the user\'s own: the helper runs and the request carries its token to the proxy',
+      !refused(envHttps, 'route') && envMarked.ran() && carried(envHttps).length > 0)
+    const flagMarked = markedHelper('flag-https-proxy')
+    const flagHttps = await run('flag-https-proxy-helper', { args: [...NO_RETRY, `--https-proxy=${proxyUrl}`], user: flagMarked.line })
+    expect(flagHttps, 'and on the command line',
+      !refused(flagHttps, 'route') && flagMarked.ran() && carried(flagHttps).length > 0)
+    const envProxyMarked = markedHelper('env-proxy')
+    const envProxy = await run('env-proxy-helper', { args: NO_RETRY, user: envProxyMarked.line, env: { npm_config_proxy: proxyUrl } })
+    expect(envProxy, 'control: through a proxy the user set the helper token does reach the proxy, the route a project\'s setting would have chosen',
+      envProxyMarked.ran() && carried(envProxy).length > 0)
+    parity.push(envHttps, flagHttps, envProxy)
+
+    // a child npm: the parent took `https-proxy` from the project and exports it as the user's own
+    // value, so the marker is what tells the child (a parent with the key in its own environment sends no marker)
+    const childRoute = (name, options) => {
+      const marked = markedHelper(name)
+      return run(name, {
+        args: ['run', 'child', '--fetch-retries=0'],
+        user: marked.line,
+        pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry} --fetch-retries=0` } },
+        ...options,
+      }).then(result => ({ result, marked }))
+    }
+    const childControl = await childRoute('child-route-control', {})
+    expect(childControl.result, 'control: with no route in the project the child npm runs the helper and sends its token',
+      !childControl.result.failed && childControl.marked.ran() && auths(childControl.result).join() === 'Bearer helper-token')
+    const childProject = await childRoute('child-route-from-the-project', { project: `https-proxy=${proxyUrl}\n` })
+    expect(childProject.result, 'a child npm started with the project\'s https-proxy refuses the helper, which is not run',
+      refused(childProject.result, '"https-proxy" comes from') && !childProject.marked.ran() && childProject.result.requests.length === 0)
+    const childUser = await childRoute('child-route-from-the-user', { env: { npm_config_https_proxy: proxyUrl } })
+    expect(childUser.result, 'the same key in the parent\'s own environment is the user\'s, and the child runs the helper, its token going to that proxy',
+      !refused(childUser.result, 'route') && childUser.marked.ran() && carried(childUser.result).length > 0)
+    parity.push(childControl.result, childProject.result, childUser.result)
+
+    // plain http: to a host that is not this machine is refused whether or
+    // not anything answers there (the name never resolves), and a loopback
+    // name is not
+    const invalidRegistry = 'http://registry.example.invalid:4873/'
+    const invalidMarked = markedHelper('http-invalid-host', '//registry.example.invalid:4873/')
+    const invalid = await run('http-invalid-host-helper', { args: NO_RETRY, registryUrl: invalidRegistry, user: invalidMarked.line })
+    expect(invalid, 'a helper for an http: registry on another host is refused, naming the host, and is not run',
+      refused(invalid, 'plain http to registry.example.invalid') && !invalidMarked.ran() && invalid.requests.length === 0)
+    const localMarked = markedHelper('http-localhost', `//localhost:${port}/`)
+    const local = await run('http-localhost-helper', { registryUrl: `http://localhost:${port}/`, user: localMarked.line })
+    expect(local, 'control: the same over http: to localhost runs the helper and sends its token',
+      !local.failed && localMarked.ran() && auths(local).join() === 'Bearer helper-token')
+    parity.push(invalid, local)
     if (lan) {
       const lanRegistry = `http://${lanAddress}:${lan.address().port}/`
       const lanNerf = `//${lanAddress}:${lan.address().port}/`
+      const lanMarked = markedHelper('http-registry', lanNerf)
       const plain = await run('http-registry-helper', {
-        registryUrl: lanRegistry, user: `${lanNerf}:tokenHelper=${helper}\n`,
+        args: NO_RETRY, registryUrl: lanRegistry, user: lanMarked.line,
       })
       const plainToken = await run('http-registry-token', {
         registryUrl: lanRegistry, user: `${lanNerf}:_authToken=stored-token\n`,
       })
-      expect(plainToken, 'control: a stored token goes over the same http: registry', auths(plainToken).join() === 'Bearer stored-token')
-      expect(plain, 'so does the helper token (1b changes this for every credential)', auths(plain).join() === 'Bearer helper-token')
+      expect(plainToken, 'control: a stored token goes over the same http: registry, which answers', auths(plainToken).join() === 'Bearer stored-token')
+      expect(plain, 'the helper is refused for it, with the address named, and is not run, so no request leaves',
+        refused(plain, `plain http to ${lanAddress}`) && !lanMarked.ran() && plain.requests.length === 0)
       parity.push(plain, plainToken)
     } else {
-      notes.push('no network address that is not a loopback one: the http: registry checks were skipped')
+      notes.push('no network address that is not a loopback one: the check against a registry that answers over http: on one was skipped (the name that never resolves covers the refusal)')
     }
+
+    // a credential given for the run itself is the one in use, and the helper is not
+    const cliMarked = markedHelper('token-on-the-command-line')
+    const cliToken = await run('token-on-the-command-line', {
+      args: ['view', 'demo', 'version', `--${nerf}:_authToken=cli-token`], user: cliMarked.line,
+    })
+    expect(cliToken, 'the request carries the token from the command line', !cliToken.failed && auths(cliToken).join() === 'Bearer cli-token')
+    expect(cliToken, 'the helper was not run', !cliMarked.ran())
+    expect(cliToken, 'npm says so once, naming the key',
+      cliToken.notices.filter(l => l.includes('is not used for') && l.includes(`${nerf}:_authToken`)).length === 1)
+    const envMarkedToken = markedHelper('token-in-the-environment')
+    const envToken = await run('token-in-the-environment', {
+      user: envMarkedToken.line, env: { [`npm_config_${nerf}:_authToken`]: 'env-token' },
+    })
+    expect(envToken, 'the request carries the token from the environment, and the helper was not run',
+      !envToken.failed && auths(envToken).join() === 'Bearer env-token' && !envMarkedToken.ran())
+    const noToken = markedHelper('no-token-for-the-run')
+    const withoutToken = await run('no-token-for-the-run', { user: noToken.line })
+    expect(withoutToken, 'control: the same helper with no token for the run is run, and its token is sent',
+      !withoutToken.failed && noToken.ran() && auths(withoutToken).join() === 'Bearer helper-token')
+    parity.push(cliToken, envToken, withoutToken)
 
     const login = await run('login-with-helper', { args: ['login', '--auth-type=web'], user: helperLine })
     expect(login, 'login refuses with ETOKENHELPER', login.failed && login.notices.some(l => l.includes('ETOKENHELPER')))
@@ -585,7 +807,7 @@ const main = async () => {
     expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
     expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
 
-    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ...parity, ...children, login, logout]
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)
