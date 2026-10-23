@@ -21,8 +21,9 @@ Terms used before they are defined:
 | provider | The program a `credentialProvider` entry names; npm starts it once per command and asks it for credentials. |
 | per-registry list | `//host/path/:credentialProvider[]=…`: the providers for the registries under that key, in order. |
 | global chain | The unscoped `credentialProvider[]=…` list: the providers asked for every other registry ([Session lifecycle](#session-lifecycle)). |
-| `npm:token` | The built-in entry that serves the credential stored in `.npmrc`; a global chain ends with it implicitly, reached only when every provider answered `url-not-supported` ([Legacy fallback](#legacy-fallback)). |
-| hello `registries` | The list a provider may send first, naming the registries it serves; npm then asks it about no other, and a host it lists is a listed host. |
+| `npm:token` | The built-in entry that serves a credential the user stored in a user or global config file, the environment or the command line, never one a project `.npmrc` holds; a global chain ends with it implicitly, reached only when every provider answered `url-not-supported` on a host none of them lists ([Legacy fallback](#legacy-fallback)). |
+| hello `registries` | The list a provider sends first, naming the registries it serves; npm then asks it about no other, and a host it lists is a listed host. A provider in the global chain must send it; one in a per-registry list need not. |
+| anonymous answer | `{"type":"none"}` as `auth`: a provider's answer to a `get` for `read` that npm sends the request without a credential, and says so at `warn` ([Auth types](#auth-types)). |
 | presence | A prompt that the person at the terminal answers, which a provider asks before it releases a write credential when `interactive` is `true`. |
 | write policy | A provider's own rules for releasing a credential that can write: presence, configuration, the operation; the protocol names it but does not define it. |
 | session | One provider process serving one npm command. |
@@ -44,7 +45,7 @@ Out of scope:
 - Credentials for lifecycle scripts. npm gives scripts no provider credential; a script can still run the provider itself, as any process can ([Publishing while a script runs](#publishing-while-a-script-runs)).
 - Trusted publishing (OIDC) and the registry's own token model; both are unchanged.
 - Git dependencies, proxies, and client certificates (`certfile`/`keyfile`).
-- Protecting credentials from code that already runs as the same user: it can run a helper or provider exactly as npm does, as any process can run `git credential fill`. What changes is what it finds: no standing secret in `.npmrc` or the environment, short-lived tokens, and write credentials gated by the provider ([Threat model](#threat-model)).
+- Protecting credentials from code that already runs as the user or in the CI job: it can run a helper or provider exactly as npm does, as any process can run `git credential fill`, and it can read what the provider stores. What changes is what it finds: no standing secret in `.npmrc` or the environment, and credentials that expire. Where a write is gated at all, the gate is the registry's or a hardware key's, not the provider's prompt ([What this protects against, and what it does not](#what-this-protects-against-and-what-it-does-not)).
 
 ## Detailed Explanation
 
@@ -65,7 +66,7 @@ credentialProvider[]=npm-credential-provider-gitlab
 //gitlab.example.com/api/v4/projects/123/packages/npm/:credentialProvider[]=npm-credential-provider-gitlab --instance https://gitlab.example.com
 ```
 
-**The global chain** is the one unscoped setting. It is not the unscoped `tokenHelper` that Phase 1a rejects: that helper's output would go to whatever the default registry is, which a project can change, while a provider is told the registry URL in every request and answers `url-not-supported` for a registry it does not serve ([Threat model](#threat-model)). A provider that hands out the same credential for any URL belongs in the per-registry form only.
+**The global chain** is the one unscoped setting. It is not the unscoped `tokenHelper` that Phase 1a rejects: that helper's output would go to whatever the default registry is, which a project can change, while a provider in the chain lists the registries it serves in its hello, is asked about no other, is told the registry URL in every request and answers `url-not-supported` for one it does not serve ([Version negotiation](#version-negotiation), [Threat model](#threat-model)). A provider that hands out the same credential for any URL belongs in the per-registry form only.
 
 **Resolution.** Provider commands come from trusted sources only, in this order:
 
@@ -90,7 +91,7 @@ The current working directory and project-local `node_modules/.bin` are never se
 
 The client communicates with the provider via **stdin/stdout** using **single-line JSON messages** (no embedded newlines). The provider is invoked as a child process. Stdin is reserved for protocol JSON only; providers must not read interactive secrets, MFA codes, or device-code confirmations from stdin.
 
-A message is UTF-8 JSON, read where JSON readers differ as follows, so that the schema, a Rust reader and a JavaScript one agree:
+A message is UTF-8 JSON, read where JSON readers differ as follows. These rules are for interoperability, not for defence: they make the schema, a Rust reader and a JavaScript one agree on which messages are valid, so that two correct implementations never disagree about what was sent. They are normative:
 
 - A member that is present has its type: `null` is not "absent", and a field to be left out is left out.
 - An integer is a number with no fractional part, however it is written (`1`, `1.0` and `1e0` are one number), from -(2^53 - 1) to 2^53 - 1, the range every reader holds exactly; no number is beyond a double (`1e400`).
@@ -108,20 +109,22 @@ On startup, the provider sends a hello message listing supported protocol versio
 
 The client selects a compatible version and uses it in all subsequent messages. If no version matches, the client terminates the provider and the request fails, naming it, as for any protocol violation ([Legacy fallback](#legacy-fallback)).
 
-A provider may list the registries it serves:
+A provider lists the registries it serves:
 
 ```json
 {"v":[1],"registries":["https://gitlab.example.com/api/v4/projects/"]}
 ```
 
-npm matches each request against the list itself ([Registry matching](#registry-matching)). A registry outside the list is treated as answered `url-not-supported`, and that provider is sent nothing about it: not the host, scope, package or operation. Without the field the provider is asked and decides from `registry` alone.
+npm matches each request against the list itself ([Registry matching](#registry-matching)). A registry outside the list is treated as answered `url-not-supported`, and that provider is sent nothing about it: not the host, scope, package or operation.
 
 The list is handled as follows:
 
+- **A provider in the global chain must send it.** One whose hello has no `registries` field serves no registry: npm treats every registry as answered `url-not-supported`, asks it nothing, and logs at `warn`, once per command, naming the provider and saying that a provider in the global chain must list its registries. A provider that is also named in a per-registry list is asked there, for the registries that list is for. It still answers `url-not-supported` itself for a registry it does not serve.
+- **A provider in a per-registry list need not.** The user named the registry, so the provider is asked about the registries that list is for and decides from `registry` alone.
 - An empty list serves no registry.
 - An entry that is not an absolute `http:` or `https:` URL with the scheme in lowercase, no user info, no backslash and no query or fragment makes the hello malformed, which fails like any protocol violation, naming the provider.
-- A provider in the global chain should list its registries, and still answers `url-not-supported` itself for a registry it does not serve. npm logs at `verbose` each provider in the global chain whose hello has no `registries` field, since that provider is asked about every registry the command touches. The field is optional, and leaving it out costs the guard against a downgrade its list: without one, npm cannot tell a URL form of the user's own host that the provider declined from a registry it never served, so a declined form falls back to the stored token. That fallback is announced at `warn`, not `verbose`, naming the providers that sent no `registries` ([Legacy fallback](#legacy-fallback), [Threat model](#threat-model)).
-- A provider whose hosts follow a pattern, one per region or account, cannot list them as prefixes. It goes in the per-registry form, where the user names each host, or leaves `registries` out and is told every registry the command touches ([Session lifecycle](#session-lifecycle)).
+- The list is what lets npm know, for every registry, which host a provider stands behind: a URL form of a listed host that the provider declined is never served from a stored credential ([Legacy fallback](#legacy-fallback), [Threat model](#threat-model)).
+- A provider whose hosts follow a pattern, one per region or account, cannot list them as prefixes. It goes in the per-registry form, where the user names each host ([Session lifecycle](#session-lifecycle)).
 
 Capabilities are advisory. The client may use them to avoid probing unsupported flows, but it must still handle `{"Err":{"kind":"operation-not-supported"}}`. Unknown capabilities and unknown fields are ignored. Version 1 names two, `login` and `logout`.
 
@@ -214,7 +217,7 @@ Providers that match for themselves should use the same comparison.
 |---|---|---|---|
 | `Ok.kind` | string | yes | Must match the request `kind`. |
 | `Ok.auth` | object | for `get` | Credentials; see Auth types. |
-| `Ok.auth.type` | string | yes | `"bearer"` or `"basic"`. |
+| `Ok.auth.type` | string | yes | `"bearer"`, `"basic"` or `"none"`; `"none"` is valid only as the answer to a `get` for `read` ([Auth types](#auth-types)). |
 | `Ok.cache` | string | no | `"never"`: do not cache. `"session"`: cache for this npm process. `"expires"`: cache until `expiresAt`. Default `"session"`. |
 | `Ok.expiresAt` | number | when `cache` is `"expires"` | Unix timestamp in seconds. |
 | `Ok.operationIndependent` | boolean | no | `false` (default): npm asks again for a different operation. `true`: the credential serves every operation, which a provider says only of one that may (one token for read and write, as a stored `_authToken` is). Answers for operations other than `read` are bound to their operation anyway ([Caching](#5-caching)), so the field matters for a `read` answer: left out, that answer is never reused for a write, whose lookup then finds nothing and sends a `get`, which reaches the provider and its write policy. |
@@ -230,6 +233,37 @@ The type is explicit; nothing is inferred from which fields are present, and not
 ```
 
 npm sends `Authorization: Bearer <token>`, or base64-encodes `username:password` for `Authorization: Basic`; `username` and `password` are non-empty, and a provider whose registry ignores the username sends a fixed placeholder. The legacy `_auth` form is deliberately not carried over.
+
+**An anonymous answer.** A provider that holds nothing it may send for a `read`, and knows the registry serves public reads, answers with the one type that carries no secret:
+
+```json
+{"Ok":{"kind":"get","auth":{"type":"none"},"cache":"session","granularity":"registry"}}
+```
+
+npm then sends the request without `Authorization`. The type is narrow on purpose:
+
+- It is valid only as the answer to a `get` whose `operation` is `read`, and not to a retry (`retry: true`): a rejection is no reason to go anonymous. For any other operation or request kind, with `operationIndependent: true`, or on a retry, npm treats the answer as malformed, as a bearer answer with no token: the request fails and the session ends ([What ends a session](#session-lifecycle)).
+- npm logs at `warn`, once per registry per command, naming the provider and saying that requests to the registry go out anonymously. A broken or lapsed provider therefore cannot turn authenticated requests anonymous without saying so, and a private package then answers 404 or 401 and not another package's content.
+- npm caches the answer as any other, by its `cache`, `granularity` and operation. A provider that wants its next request to be asked again says `cache: "never"`.
+- It gets no `erase` and no provider retry: nothing was sent that a registry could reject, and a 401 or 403 on an anonymous request is reported as it is for a request with no provider.
+- A provider uses it for a lapsed login on a registry whose public reads must survive ([Non-interactive and CI behavior](#non-interactive-and-ci-behavior)), and answers `other` instead where the registry has no public reads. It never uses it to skip a gate: a write has no anonymous form.
+
+#### Which requests get a provider's credential
+
+A provider's credential goes where a stored token goes today only if the route is one npm can vouch for. This holds from the first release of the protocol; it does not wait for [Phase 1b](phase-1b-credential-hardening.md), which extends the same rules to every credential. npm refuses the request, does not send the credential, and says why, naming each setting and the `.npmrc` it comes from, in these cases, for every request and before the HTTP cache:
+
+- **Plain `http:`.** The request URL is `http:` and its host is not this machine (`localhost`, an address in `127.0.0.0/8`, or `[::1]`, as the parsed URL reads it). The remedy is `https:`.
+- **A certificate setting a project chose.** `ca` or `cafile` has its value from a project `.npmrc`, or `strict-ssl` is `false` there.
+- **A proxy a project chose, for a request it can read.** `proxy` or `https-proxy` has its value from a project `.npmrc` and the request is `http:` to this machine. A proxy cannot read an `https:` request, which it tunnels.
+
+What counts as "from a project" is what [Phase 1a](phase-1a-token-helper.md#which-requests-get-the-credential) counts for a helper:
+
+- a project or workspace `.npmrc`;
+- a user or global file that the command line or the environment chose from inside a project ([Where it may be set](phase-1a-token-helper.md#where-it-may-be-set));
+- the values a parent npm passed to a child npm that it had taken from a project;
+- `publishConfig`, for `publish` and `unpublish`: a route key there, when a provider serves the registry the command targets, refuses the command before the provider runs.
+
+The remedy for a setting is to remove it from the project's `.npmrc`, or to set it on the command line or in the environment, which override project config. The message is Phase 1a's runner's, with `credentialProvider` for `tokenHelper`. The refusal does not start the provider and is not remembered.
 
 #### Error response
 
@@ -253,7 +287,8 @@ npm sends `Authorization: Bearer <token>`, or base64-encodes `username:password`
 - npm remembers `not-found` the same way, for that provider, registry and scope (an unscoped package's being no scope), so a provider that holds one scope of many is asked about each other scope once.
 - A provider that serves a registry for some scopes only answers `not-found` for the others, never `url-not-supported`, which is about the registry URL and would be remembered for every scope. A stored credential serves those scopes only where the chain lists `npm:token` after it ([Legacy fallback](#legacy-fallback)).
 - A provider that issues credentials per package answers `Ok` or `other` for one package, never `not-found`: the memory above is per scope, so a `not-found` for one package would stand for every package of the scope, and the provider would not be asked about the next. The memory is not keyed by operation, which holds because one npm command carries one operation ([Operations](#4-operations)). The one exception is the `stage-read` lookup that `stage approve` and `reject` make before their write: npm does not remember a `not-found` answered to a `stage-read` request, so the `get` for the write always reaches the provider ([Appendix A](#appendix-a-operations-in-detail)).
-- The built-in entry `npm:token`, modelled on Cargo's `cargo:token`, serves the credential stored in `.npmrc` for the registry (`_authToken`, `_auth`, `username`/`_password`), or answers `url-not-supported` when none is stored. Listing it puts the stored credential at a place in the chain the user chose, except that neither a listed nor the implicit entry sends it to a URL form a provider declined on a host its hello lists; a global chain that does not list it ends with it implicitly, reached only when every provider answered `url-not-supported` and, on a host a provider's hello lists, not even then ([Legacy fallback](#legacy-fallback)).
+- The built-in entry `npm:token`, modelled on Cargo's `cargo:token`, serves the credential the user stored for the registry (`_authToken`, `_auth`, `username`/`_password`) in a user or global config file, the environment or the command line, or answers `url-not-supported` when none is stored there.
+  - It never serves one written in a project `.npmrc` ([Legacy fallback](#legacy-fallback)). Listing it puts the stored credential at a place in the chain the user chose, except that neither a listed nor the implicit entry sends it to a URL form a provider declined on a host its hello lists; a global chain that does not list it ends with it implicitly, reached only when every provider answered `url-not-supported` and, on a host a provider's hello lists, not even then.
 - Names starting with `npm:` are reserved for built-in sources. Apart from the implicit `npm:token`, a built-in source runs only where a chain lists it, and an `npm:` name this npm does not know fails closed, naming the entry.
 
 ```ini
@@ -273,21 +308,26 @@ This gives the precedence and the cadence, not the set of commands that run an e
 
 #### Legacy fallback
 
-Whether npm uses a credential stored in `.npmrc` (`_authToken`, `_auth`, `username`/`_password`) when the chain does not list `npm:token`; a chain that lists it uses it at that place instead, except for a URL form that a provider declined on a host its hello lists:
+Whether npm uses a stored credential (`_authToken`, `_auth`, `username`/`_password`) when the chain does not list `npm:token`; a chain that lists it uses it at that place instead, except for a URL form that a provider declined on a host its hello lists.
+
+**What a stored credential is here.** `npm:token`, listed or implicit, serves only a credential from the user and global config files, the environment and the command line. A credential written in a project `.npmrc`, or in a user or global file that the command line or the environment chose from inside a project ([Where it may be set](phase-1a-token-helper.md#where-it-may-be-set)), is never served through a chain. A committed `//evil.example/:_authToken=${CI_JOB_TOKEN}` beside `registry=https://evil.example/` therefore sends nothing: a project cannot choose both the host and the secret a chain sends to it. Where the user's own file also holds a credential for the key, that one is served. Where no chain applies to a registry, config is read as today, the project's included.
+
+When a chain applies to a registry and a project file holds a credential for its key, npm warns, once per registry per command, naming the registry and the file, so that the credential is moved to the user's config or removed. This is the cost of adopting a chain: a project that committed `//registry.example/:_authToken=${NPM_TOKEN}` gets that token from the user's own config or environment (`npm_config_//registry.example/:_authToken`), or from a provider.
 
 | Situation | Stored credential used? |
 |---|---|
-| No provider configured for the registry | Yes, as today; without one the request goes out anonymously |
-| Every provider in the global chain answers `url-not-supported` | Yes, with the exceptions in the note below the table; without a stored credential the request goes out anonymously |
+| No provider configured for the registry | Yes, as today, from any source; without one the request goes out anonymously |
+| Every provider in the global chain answers `url-not-supported`, and no provider's hello lists the registry's host | Yes, what `npm:token` serves (above), with no warning: no provider stands behind that host. Without such a credential the request goes out anonymously |
+| Every provider in the global chain answers `url-not-supported`, and some provider's hello lists the registry's host in another form | No: npm fails, naming the provider and the forms it lists, whether or not a credential is stored |
 | Every provider in a per-registry list answers `url-not-supported` | No: the user said this registry uses a provider. npm fails, naming the registry and each provider asked |
 | A listed `npm:token` behind a provider that answered `url-not-supported` for a URL form on a host its hello lists | No: npm fails, naming the provider and the forms it lists, whether or not a credential is stored |
 | No provider answers `Ok` and at least one answered `not-found` | No: npm fails, naming the providers that answered `not-found`. A chain that lists `npm:token` after them uses the stored credential there |
 | Any other error, a provider that shares no protocol version with npm, a spawn failure, a malformed message (an `Ok` whose `kind` is not the request's and a second hello among them), an oversized line, a timeout or a provider that exits mid-session, in either kind of chain | No: npm fails, naming the provider |
 
-When every provider in the global chain answers `url-not-supported`, no provider serves the registry, so it is treated as one without a provider. Two cases differ, and the first also binds a listed `npm:token`:
+When every provider in the global chain answers `url-not-supported`, no provider serves the registry, so it is treated as one without a provider, with two differences:
 
 - **A host that a provider's hello lists.** The request fails whether or not a credential is stored, naming the provider and the forms it lists, since that is a URL form the provider declined (another scheme, port or path on its host) and a stored credential must not stand in for it. A listed `npm:token` behind such a provider fails the same way, even when other entries stand between them: npm's `//host/path/` key carries no scheme, so a token stored for the `https:` form would otherwise go out over `http:`. A listed entry that stands before the provider, or behind one that answered `not-found` or whose hello does not list the host, is unaffected.
-- **Any other host.** npm warns, at `warn`, once per registry per command when it uses a stored credential this way, naming the registry, the file the credential came from and the providers that declined, and marking those that sent no `registries`: for them npm cannot tell a form they declined on the user's own host from a registry they never served, which is why the credential is used at all ([Threat model](#threat-model)). When every provider in the chain lists its registries in hello and none lists this host, it uses the credential without a warning, since no provider stands behind that host.
+- **Any other host.** The credential is what `npm:token` serves, and a project's is never served. Every provider in the global chain lists its registries, so the host test is complete: no provider stands behind a host none of them lists, and npm says nothing when it uses the credential. A provider that sent no `registries` serves no registry and stands behind none; npm has warned about it ([Version negotiation](#version-negotiation)).
 
 The error for a host that a provider's hello lists names the remedy for a user who does want the stored token on that form: a per-registry provider list for that registry that holds just `npm:token`. A per-registry list replaces the global chain, so no provider stands before the entry.
 
@@ -295,18 +335,22 @@ A credential stored for a registry whose per-registry list does not include `npm
 
 After a `not-found` a provider stands behind the registry and holds nothing for it, which is where a leftover long-lived token is least wanted, so the stored credential is used there only at a place the user wrote down: an `npm:token` entry after the provider. There is no setting that changes this.
 
-**Limit: a lapsed session on a registry where public reads must survive.** No answer lets one request go out anonymously. A provider whose only credential has lapsed, such as a two-hour npmjs.com session token, answers `other` with a message telling the user to log in: `not-found` would let a listed `npm:token` stand in, and `url-not-supported` is remembered for the registry. The reason: an anonymous answer would let a broken provider turn authenticated requests anonymous, so a private package looks missing (a 404, as registry.npmjs.org answers an anonymous request for one) instead of failing loudly. The condition that would widen it is a registry where public reads must survive a lapsed credential ([the npmjs.com example](examples/npmjs.md) records the case).
+**A lapsed login on a registry where public reads must survive.** A provider whose login has lapsed, such as a two-hour npmjs.com session token, may answer a `get` for `read` with an [anonymous answer](#auth-types), and npm then sends that request without a credential. Before, no answer let a request go out anonymously, and a provider could only fail the read with `other`, since `not-found` would let a listed `npm:token` stand in and `url-not-supported` is remembered for the registry.
 
-A silent fallback would mask provider failures and bring back the stored secret the user set out to remove. The one fallback that stays, after a global chain declines a registry, is what npm does without providers, and it is announced whenever it uses a stored secret. A broken global provider, in turn, fails every command that goes to the network, including anonymous reads from registry.npmjs.org: the provider cannot be told apart from one that would have answered.
+The objection to an anonymous answer was that a broken provider would turn authenticated requests anonymous without a sound, so that a private package looks missing (a 404, as registry.npmjs.org answers an anonymous request for one) instead of failing loudly. Two rules answer it: npm says so at `warn`, naming the provider, and the answer is valid for `read` only, so a write never goes out anonymously on a provider's say-so.
 
-The implicit `npm:token` is not planned to go. Cargo can let an exhausted chain fail because it asks only for registries that need a credential; npm's global chain is asked about every registry, so without the entry, adding one global provider would change every registry that provider does not serve. Where a stored credential must not stand in for a provider, a per-registry list for that host ignores it.
+Where the registry has no public reads, the provider answers `other` and the read fails loudly. [The npmjs.com example](examples/npmjs.md) shows the case.
+
+A silent fallback would mask provider failures and bring back the stored secret the user set out to remove. The one fallback that stays, after a global chain declines a host none of its providers lists, is what npm does without providers, restricted to what the user stored. A broken provider, in turn, fails every request to a registry it lists, including anonymous reads, if it lists registry.npmjs.org: the provider cannot be told apart from one that would have answered.
+
+The implicit `npm:token` is not planned to go. Cargo can let an exhausted chain fail because it asks only for registries that need a credential; npm's global chain stands before every registry that no provider lists, so without the entry, adding one global provider would change every one of them. Where a stored credential must not stand in for a provider, a per-registry list for that host ignores it.
 
 Providers write diagnostics to stderr, which npm reads line by line and logs at `verbose`. Unlike a Phase 1a helper, whose stderr is the only way it can speak to the user, a provider has `message` and `causedBy` for what the user must see, so a chatty provider does not fill every install with warnings.
 
 Before logging a line, npm:
 
 - removes control characters (C0 and C1 except tab);
-- masks every credential the provider has returned in this command and anything that looks like a credential;
+- masks, best effort, each credential the provider has returned in this command, by exact value: a string a provider derived from one (a re-encoded or split token) is not recognized, so a provider never relies on the masking;
 - drops any line longer than the maximum line size.
 
 npm applies the same stripping and masking to `message` and `causedBy` before it shows them, since both may relay a registry's text.
@@ -330,7 +374,7 @@ The client spawns a provider lazily, on the first request to a registry it appli
 - **A registry with a per-registry `tokenHelper`:** no provider.
 - **Any other registry:** the global chain, including registries that need no credential, such as anonymous reads from registry.npmjs.org.
 
-So a global provider starts with any command that goes to the network, to send its hello. Unless the hello lists the registries it serves, it also learns every registry the command touches, with the scope and package of the first request to each. The per-registry form keeps a provider away from registries it does not serve.
+So a global provider starts with any command that goes to the network, to send its hello. It learns of a registry, with the scope and package of the first request to it, only if its hello lists that registry; one that lists none serves none and is asked nothing. The per-registry form keeps a provider away from registries it does not serve, and needs no list.
 
 No provider starts in these cases:
 
@@ -357,7 +401,7 @@ The cost of one channel is that a prompt that waits on the person holds the requ
 
 The client closes stdin to end the session, and the provider exits. npm need not wait for it to exit and sets no deadline, so a provider must not depend on work after stdin closes, such as revoking a credential it minted: that rests on an expiry the provider chose, since `erase` is sent only after a rejection. When npm exits with a request still outstanding, after Ctrl-C or a failure elsewhere, it kills the provider as for a timeout, so a provider waiting on a prompt is not left behind.
 
-Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1a output limit; an oversized line is rejected whole, not partially processed.
+Clients and providers enforce a maximum line size of their choosing, at least 1 MiB (the newline counted), the Phase 1a output limit; an oversized line is rejected whole, not partially processed. The limit is a robustness measure, so that a line cannot make a peer allocate without bound, not an access control; a provider's code is trusted ([Security model](#6-security-model)). Nor does a provider write into an `.npmrc` as a side effect of a request: config changes are explicit user actions, and a provider that did so would be breaking the protocol, not attacking npm.
 
 A provider that receives such a line, or any line that is not a request the schema allows (not UTF-8, not JSON, not an object), answers it with one `Err` (`other`: it is "anything else" in the table above) and serves the next line: it never answers `Ok` to it, and it does not exit for it. A line that is empty or holds nothing but spaces, tabs and carriage returns is skipped.
 
@@ -367,12 +411,12 @@ A provider that receives such a line, or any line that is not a request the sche
 |---|---|---|
 | hello (after spawn) | 10 seconds | Start-up and one line; covers vendor CLIs that start slowly. |
 | `get` | 30 seconds | Network call to a credential store or API. |
-| `get` with `interactive: true` | 5 minutes | May wait for the user, as `login` does: an OS prompt, a hardware key, an SSO page. |
+| `get` with `interactive: true` | 5 minutes | May wait for the person, as `login` does: an OS prompt, a hardware key, a step-up for a write. |
 | `erase` | 10 seconds | Local cleanup. |
 | `login` | 5 minutes | User interaction: browser OAuth, SSO redirect, MFA. |
 | `logout` | 30 seconds | May include server-side revocation. |
 
-**What ends a session.** A provider that exceeds its timeout is killed, and it is not the only cause. What each does to the request in flight, to the session, to the next request, and whether it counts toward the limit is in the table, which is part of the conformance policy (`credentialProvider.sessionEnds`):
+**What ends a session.** A provider that exceeds its timeout is killed, and it is not the only cause. What each does to the request in flight, to the session, to the next request, and whether it counts toward the limit is in the table, which is part of the conformance policy (`credentialProvider.sessionEnds`). The table is a correctness rule, not a defence: it says what npm does when a peer breaks the protocol, so that every client and the model agree and a request is never left waiting on a session that cannot answer. It is normative. A provider's code is trusted, so none of these causes is something an attacker brings about ([Security model](#6-security-model)).
 
 | Cause | Request in flight | Session | Next request | Counts toward the two |
 |---|---|---|---|---|
@@ -393,18 +437,27 @@ A provider that receives such a line, or any line that is not a request the sche
 
 #### Non-interactive and CI behavior
 
+**A read never starts a login.** A provider starts no interactive login or re-authentication (a browser, a device code) on a `get` for `read`, whatever `interactive` says, and none on any request with `interactive: false`. A read is made by every install, and by a lockfile URL a project chose: a sign-in page opened by one is a prompt the person did not ask for and cannot tell from a phishing one. Where a login for a read has lapsed, the provider answers:
+
+- `other`, with a message naming the command that renews it (`npm login`), where the registry has no public reads, so the read fails loudly; or
+- an [anonymous answer](#auth-types), where the registry serves public reads that must survive a lapsed login. npm sends the request without a credential and says so at `warn`.
+
 When `interactive` is `false`, providers must not open browsers, prompt for MFA, wait for device-code approval, or ask the user to approve a new trust decision. They may only use credentials and trust decisions that already exist.
 
 A provider answers `other`, with a message naming what was needed, when it holds a credential for the registry and operation but:
 
 - its policy will not release it without user presence it may not ask for; or
-- its login for it has lapsed and can be renewed only by a flow `interactive: false` forbids.
+- its login for it has lapsed and can be renewed only by a flow `interactive: false` forbids, or, for a `read`, by any flow.
 
 `not-found` would let a listed `npm:token` serve a stored credential in place of the one the provider meant to withhold. A provider with nothing stored, not even a lapsed login, still answers `not-found`.
 
 A chain meant to serve CI from a later entry therefore needs the earlier provider to answer `not-found` or `url-not-supported` there, which a provider with nothing stored for CI does.
 
-When `interactive` is `true`, providers may use browser flows, OS-native prompts, or status text written to the controlling terminal. Before npm hands the terminal to a provider for an interactive request, it prints one line, its own and needing no protocol field, that names the provider and the registry and says that Ctrl-C stops it. Then it pauses its own progress output while the request is outstanding, as it already does for OTP prompts. A provider that hangs before its prompt shows that line and nothing else, and the person presses Ctrl-C, on which npm kills the provider as it exits. A provider whose user declines a presence prompt, or lets it time out, answers `other`, not `not-found`.
+**A write at a terminal may.** For `publish`, `stage`, `access` and the other operations that are not `read`, when `interactive` is `true`, providers may use browser flows, OS-native prompts, or status text written to the controlling terminal: a step-up, a code typed for MFA, a device flow for a write scope.
+
+Before npm hands the terminal to a provider for an interactive request, it prints one line, its own and needing no protocol field, that names the provider and the registry and says that Ctrl-C stops it. Then it pauses its own progress output while the request is outstanding, as it already does for OTP prompts. A provider that hangs before its prompt shows that line and nothing else, and the person presses Ctrl-C, on which npm kills the provider as it exits.
+
+A provider whose user declines a presence prompt, or lets it time out, answers `other`, not `not-found`. Even so, a provider starts no login on the strength of a 401 alone ([`erase`](#erase-a-credential-was-rejected)).
 
 **Limit: a device code that lives longer than the ceiling.** An interactive `get` and a `login` get the same 5 minutes, so a device code that lives longer (GitHub's and Entra's last 15 minutes; [the GitHub example](examples/github-packages.md) records it) expires on npm's side at 5, when npm kills the provider, and the provider's own limit must be shorter. The reason is that one ceiling for every interactive request lets npm treat them alike without asking a provider how long it needs or reading a message that extends it ([Rationale](#why-no-request-id-or-progress-message)). The condition that would widen it is a registry whose login flow a person at the terminal cannot finish in 5 minutes in ordinary use.
 
@@ -479,7 +532,7 @@ A 401 does not prove the login is dead, because the URL may be one a lockfile ch
 
 - An erase answered `not-found`, `url-not-supported` or `operation-not-supported` is ignored, one answered `other` is shown as a warning, and in all these cases the retry still goes out; an erase that times out fails the request, as any timeout does ([Session lifecycle](#session-lifecycle)).
 - The retry `get` goes only to the provider that served the rejected credential; any answer but `Ok` fails the request, naming that provider. A rejection is no reason to switch sources, and a fall-through to `npm:token` would hand a lockfile-chosen 401 a downgrade to a stored secret. A provider with no other credential it would release for the request answers `other`, saying so, rather than the credential just refused: the retry could only fail the same way, and a 403 is not always about the credential, so the message names what the provider knows, not a cause it guesses.
-- A credential from `npm:token`, listed or implicit, or from an OIDC exchange gets no erase and no provider retry; npm handles its rejection as it does today.
+- A credential from `npm:token`, listed or implicit, from an OIDC exchange, or an anonymous answer gets no erase and no provider retry; npm handles its rejection as it does today.
 - npm keeps the response's `granularity` with the credential it sent, cached or not (`cache: "never"`), so every erase carries it.
 
 #### `login`: authenticate with a registry
@@ -593,8 +646,8 @@ Install scripts are chosen by package authors and the dependency graph; helpers 
 - **Resolution** never searches the current directory or project `node_modules`, local packages cannot shadow global providers, and ambiguous names fail closed.
 - **The provider's process** starts in its own directory, without the environment variables that carry a project's config.
 - **Input** is the protocol fields only: nothing in a request is an environment variable or a file path, and stdin is not an interactive channel. The environment the provider is started with ([Spawning](#1-configuration)) is separate from the request and is its own affair; CI needs some of it. npm strips only the variables that carry a project's config, so a provider treats any other variable as set by whoever ran npm: one that releases credentials only on user presence takes the settings that choose its identity, or name a program it runs, from its own configuration where it can.
-- **Output** is validated by the client; unknown fields are ignored. Stdout is protocol JSON only, and stderr must not carry secrets; npm strips control characters and masks credentials in whatever it shows or logs from stderr and error messages.
-- **Storage:** npm keeps no credential store of its own and writes no credential to disk itself; what its HTTP cache may record is covered under [Caching](#5-caching). Providers own their storage (OS keychain, encrypted file) and never write credentials or configuration into an `.npmrc` as a side effect of a request.
+- **Output** is validated by the client; unknown fields are ignored. Stdout is protocol JSON only, and stderr must not carry secrets; npm strips control characters and masks, best effort and by exact value, the credentials the provider returned in whatever it shows or logs from stderr and error messages.
+- **Storage:** npm keeps no credential store of its own and writes no credential to disk itself; what its HTTP cache may record is covered under [Caching](#5-caching). Providers own their storage and never write credentials or configuration into an `.npmrc` as a side effect of a request. The requirement on a provider's store is that other processes of the user cannot read it (a hardware-bound key, or a store whose access list names the provider and which the OS enforces against other processes); where the store is an OS keychain that other processes of the same user can read ([below](#what-this-protects-against-and-what-it-does-not)), the provider accepts that what protects a write is the registry's gate, not the store.
 
 **What it does not guarantee:**
 
@@ -607,6 +660,58 @@ The user pins against it, outside the protocol:
 - npm checks no hash or signature: a hash of a node provider's entry file leaves its dependencies open, and code signing pins a publisher, not the bytes.
 - Against code already running as the user, the path and the config that names it must also be files the account cannot write, which only an administrator arranges.
 
+#### What this protects against, and what it does not
+
+**It protects against three things.**
+
+1. **A repository's config, with no code running.** A project `.npmrc`, `publishConfig`, a lockfile URL or a `registry=` line cannot choose a provider, serve a project-written credential through a chain, or choose the route a provider's credential takes. This holds for commands that run no repository code: `npm view`, `npm publish --ignore-scripts`, `npm install` and `npm ci` with `--ignore-scripts`. A bare `npm install` runs the root project's lifecycle scripts and its `.npm-extension.mjs`, and a project `.npmrc` can opt into `allow-git` and `allow-scripts` and name the `git=` program. That is code the repository chose, running as the user: the next paragraph applies to it.
+2. **Leaks and theft that are not live code execution.** A token copied from a log, a backup, a disk image, a laptop's `.npmrc` or a CI cache is useless once it expires, and a provider that mints short-lived credentials makes that the common case.
+3. **Scrapers that look only for npm's own token files** (`.npmrc`, `NPM_TOKEN`): a provider's store is elsewhere and in another format.
+
+**It does not protect against code already running as the user or in the CI job.** A dependency's install script, a compromised build step or a repository's own code in a command that runs it can:
+
+- run the provider itself, with the fields npm sends ([Publishing while a script runs](#publishing-while-a-script-runs));
+- read the provider's store. OS keychains are readable by other processes of the same user on Linux and Windows, and on macOS for items that a `node` binary created, since any script run by that binary is the application that created them;
+- read the vendor CLI's own caches (an AWS SSO cache, a gcloud or az token cache, a `gh` or `glab` config), which hold what a provider mints from.
+
+**A presence prompt protects a write only where the second factor is enforced out of the script's reach.** That is the registry (a one-time password, a stage-only token with an approval, AWS MFA required by the role's trust policy, an identity provider's step-up) or a hardware-bound key with a user-presence check (Secure Enclave, TPM, Windows Hello). A keystroke on the terminal is not one: a script can start the provider on a terminal of its own and type the answer. Where no such factor exists, the prompt guards the request and nothing else, and a provider says so rather than call it a gate.
+
+**Where each example gains.** Each row says what the example's own page shows; the attackers are a scraper of files and environment, an active script of the same user, a repository's config, and the network.
+
+| Example | File or env scraper | Active same-user script | Hostile repository config | Network |
+|---|---|---|---|---|
+| [Corporate SSO](examples/corporate-sso.md) | Gain: the refresh token is in the keychain, npm holds 15-minute read and 5-minute publish tokens | Real gain for a publish: the gateway needs an IdP step-up it enforces; a script can still read the refresh token | Gain: the IdP address is the provider's own, a read never starts a login, a 403 never widens | Gain: short-lived, scope-bound tokens |
+| [AWS CodeArtifact](examples/aws-codeartifact.md) | Gain: no standing secret, 15-minute tokens (in CI, exported IAM user keys would be one) | Real gain for a publish, only if the publish role needs an MFA code in its trust policy; none for a read | Gain: per-registry key, `--allow-owner`, exact `registries`, no project `AWS_CONFIG_FILE` | Gain: short-lived, but domain-wide |
+| [Google Artifact Registry](examples/google-artifact-registry.md) | Modest: a refresh token in the provider's store; 1-hour tokens | Real gain only through IAM: the everyday identity cannot impersonate the writer account | Gain: exact repositories, no `GOOGLE_APPLICATION_CREDENTIALS` | Gain through a reader-only identity; otherwise a whole-cloud token for an hour |
+| [Verdaccio](examples/verdaccio.md) | Gain: no token in `.npmrc`; installs use a read-only token | Partial: a script without a terminal gets the read-only token, a write is `other` unless `ciAccount` is set; the full token is in the store | Gain: the registry is the provider's own | None on lifetime (tokens do not expire); scope separation and a CIDR allowlist |
+| [npmjs.com](examples/npmjs.md) | At rest only: the user's tokens move out of `.npmrc`; a provider can mint none | None beyond the registry's own one-time password; the stored tokens are readable | Gain: a lockfile URL on another host gets nothing | None: tokens last days |
+| [Azure Artifacts](examples/azure-artifacts.md) | At rest: no `_authToken`, 4-hour session tokens | None for a read (the read answer can write); only the 15-minute manage token for `unpublish` is gated | Gain: one organization per host | Modest: organization-wide tokens |
+| [GitLab](examples/gitlab.md) | At rest: the OAuth refresh token (`api` scope) is in the keychain; in a job the token is ambient | None | Gain: the job token goes only to the job's own project | None beyond short lifetimes |
+| [GitHub Packages](examples/github-packages.md) | At rest, with a classic PAT outside Actions; none in Actions | None | Weak: any project can name an owner on the host | None |
+| [JFrog Artifactory](examples/jfrog-artifactory.md) | Modest: the long-lived login is in the keychain, npm holds a 1-hour token with the user's full rights | None: one token serves read and publish | Some: the URL is configuration | Modest: a 1-hour token |
+
+#### In CI
+
+In CI the credential is usually ambient: an environment variable, a metadata server, an OIDC request URL. Every process of the job reaches it without npm, and a provider cannot hide it. What a provider adds there is a credential minted on demand and short-lived instead of one in the environment or `.npmrc`, and a check of where npm sends it.
+
+**The write gate in CI is the platform's:** a trusted-publisher binding, a role, a separation of jobs, not a presence prompt. The principle for a provider: where the write credential is already ambient in the job, its gate adds nothing, and releasing it is honest; where it is not ambient, `interactive: false` alone is not enough to release it, since a dependency's lifecycle script also runs with `interactive: false`. A provider releases a write credential in CI only where its own configuration, never an environment variable, says that the credential is ambient or that the machine is a publisher. The examples follow this ([npmjs.com](examples/npmjs.md#ci), [GitLab](examples/gitlab.md), [Azure Artifacts](examples/azure-artifacts.md), [Google Artifact Registry](examples/google-artifact-registry.md), [GitHub Packages](examples/github-packages.md)).
+
+What protects in CI:
+
+- no secrets in untrusted runs (fork pull requests);
+- never running repository code, or `npm install`, with credentials in `pull_request_target` or in parent-run merge request pipelines for forks;
+- separate build and publish jobs;
+- `--ignore-scripts`;
+- OIDC trusted publishing;
+- staged publish with an approval;
+- scoped, short-lived tokens.
+
+Other points for CI:
+
+- **`docker build`:** pass the secret as a BuildKit secret mount, run `npm ci --ignore-scripts` with it, and run scripts in a later step without it. A provider usually has no ambient identity inside a build.
+- **Do not cache `~/.npm` across trust levels:** a cache written by a run that held a credential, or by untrusted code, is read by the next.
+- **Pin the provider's version and integrity** when installing it in a job; npm checks neither ([Security model](#6-security-model)).
+
 #### Threat model
 
 | Threat | Example | Mitigation |
@@ -614,28 +719,28 @@ The user pins against it, outside the protocol:
 | Malicious project `.npmrc` | A repository makes `npm install` run a program it chose. | The key is ignored in project and workspace `.npmrc`. |
 | Project relocates user or global config | A project sets `userconfig=./x.npmrc`, `globalconfig` or `prefix`, so a repository file loads as the user's. | Phase 1a: a helper or provider is honoured only when a project `.npmrc` set none of `userconfig`, `globalconfig` and `prefix` ([Where it may be set](phase-1a-token-helper.md#where-it-may-be-set)). [Phase 1b](phase-1b-credential-hardening.md#project-config-cannot-choose-the-user-or-global-file) refuses those settings in a project `.npmrc`. |
 | `publishConfig` in `package.json` | A pull request adds a helper there, and a CI publish job sends its output instead of the real token. | The key is ignored in `publishConfig`. |
-| Project chooses the transport | A project's `.npmrc` sets `https-proxy`, `proxy`, `ca`, `cafile` or `strict-ssl=false`, so a fresh credential goes through the repository's proxy or past a certificate it chose. | [Phase 1b](phase-1b-credential-hardening.md#which-settings-a-credentialed-request-may-take-from-a-project): a request that carries any credential, a provider's included, takes those settings, and `noproxy` and `local-address`, only from config a project cannot write, child npm processes included. Until it lands, a provider's credential follows the transport rules of a stored token. |
-| Project chooses the registry | A project sets `registry=` to an attacker's host, so npm asks for a credential for it. | Phase 1a has only per-registry keys. In Phase 2 every request names the registry, and a provider in the global chain answers `url-not-supported` for one it does not serve. An exhausted global chain falls back only to a credential stored under that host's own key, so a host a project chooses gets nothing the user did not store for it. |
-| Downgrade by URL variant | A project points `@scope:registry=` at a URL form on the user's own host that a strict global provider declines, so a leftover long-lived stored token for that host replaces the provider's short-lived one. | npm sends no stored credential to a URL form declined on a host that a provider's hello lists, and the request fails. Elsewhere it warns at `warn` ([Legacy fallback](#legacy-fallback)). The guard rests on `registries`, which is optional: for a provider that sent none, a declined form on the user's own host falls back to the stored token on that warning alone. A per-registry list removes the fallback, and listing `npm:token` puts the stored credential where the user chose, though not past a form declined on a listed host. [Phase 1b](phase-1b-credential-hardening.md#where-a-credential-may-go) also withholds any credential from a non-loopback `http:` form. |
-| A global provider sees all traffic | A provider in the global chain is asked about every registry a command touches, with a scope and package. | A provider that lists its registries in hello is sent nothing about any other; otherwise `url-not-supported` is remembered per provider and registry. The per-registry form keeps a provider from even starting for registries it does not serve. |
+| Project chooses the transport | A project's `.npmrc` sets `https-proxy`, `proxy`, `ca`, `cafile` or `strict-ssl=false`, so a fresh credential goes through the repository's proxy or past a certificate it chose; a lockfile URL names a plain `http:` host. | [Which requests get a provider's credential](#which-requests-get-a-providers-credential): from the first release, npm does not send a provider's credential over `http:` except to this machine, nor while `ca`, `cafile` or `strict-ssl=false` comes from project config, nor over `http:` to this machine while a project `proxy` or `https-proxy` is set. [Phase 1b](phase-1b-credential-hardening.md#which-settings-a-credentialed-request-may-take-from-a-project) extends the rules to every credential. |
+| Project chooses the registry | A project sets `registry=` to an attacker's host, so npm asks for a credential for it; a committed `//evil.example/:_authToken=${CI_JOB_TOKEN}` names a secret for it. | Phase 1a has only per-registry keys. In Phase 2 every request names the registry, and a provider in the global chain lists the registries it serves and is asked about no other. An exhausted global chain falls back only to what `npm:token` serves, which is a credential the user stored in a user or global file, the environment or the command line, and never one a project `.npmrc` holds: a project cannot choose both the host and the secret sent to it. |
+| Downgrade by URL variant | A project points `@scope:registry=` at a URL form on the user's own host that a strict global provider declines, so a leftover long-lived stored token for that host replaces the provider's short-lived one. | npm sends no stored credential to a URL form declined on a host that a provider's hello lists, and the request fails. Every provider in the global chain must list its registries, so the host test is complete. A per-registry list removes the fallback, and listing `npm:token` puts the stored credential where the user chose, though not past a form declined on a listed host ([Legacy fallback](#legacy-fallback)). [Phase 1b](phase-1b-credential-hardening.md#where-a-credential-may-go) also withholds any credential from a non-loopback `http:` form. |
+| A global provider sees all traffic | A provider in the global chain would be asked about every registry a command touches, with a scope and package. | A provider in the global chain must list its registries in hello and is sent nothing about any other; one that lists none serves none, and npm warns. The per-registry form keeps a provider from even starting for registries it does not serve. |
 | Project config reaches the helper's process | A project's `node-options`, exported as `NODE_OPTIONS`, loads code into a node-based helper; a committed `node.cmd` is found by a cmd-shim's bare `node`. | The helper or provider starts in its own directory, without `NODE_OPTIONS`, `npm_config_*`, `EDITOR`, `NODE_ENV` and the other variables npm sets from config. |
 | Another tool passes project config to npm-registry-fetch | A tool that reads a repository's `.npmrc` and hands its keys to npm-registry-fetch, as npm-check-updates does, would run a helper the repository names. | The library ignores helper and provider config keys and takes them only from a dedicated option that npm fills from trusted files. |
 | Project-local binary shadowing | A dependency puts a provider-like binary in `node_modules/.bin`. | Project `node_modules` and the current directory are never searched. |
 | PATH poisoning | Shell startup files, `.env` tooling or CI setup redirect a provider name; inside `npm run`, a dependency's `node_modules/.bin` leads `PATH` for the tools a provider calls by name. | Absolute paths or trusted npm locations only; neither key is read from the environment; npm removes from the `PATH` a provider gets the `node_modules/.bin` directories and the `node-gyp-bin` it added for a script; a project's own script can still set any `PATH`, and runs as the user ([Scope](#scope)). |
 | Typosquatting | Lookalike `npm-credential-provider-*` packages. | npm never discovers, suggests, installs or runs a provider it was not configured with; a name resolves only in npm-managed global bin directories, after the user wrote it into user or global config. |
 | Compromised provider package | A trusted provider is replaced or updated maliciously upstream. | An absolute path to an install that does not update in place, chosen by the user; an administrator enforces it with OS application control and file permissions, outside npm ([Security model](#6-security-model)). |
-| Silent plaintext fallback | A provider failure quietly re-enables a stored token. | A failure, `not-found` among them, falls back to a stored credential only where the chain lists `npm:token`; the fallback after a global chain declines a registry comes with a warning ([Legacy fallback](#legacy-fallback)). |
-| Secrets in logs | A provider prints a token or an authorization header. | Stdout is protocol only; stderr and logs must not carry secrets. npm masks the credentials it received, and credential-like strings, in what it logs. |
-| Provider mutates npm config | A provider writes into `.npmrc` during an install. | Forbidden for protocol requests; config changes are explicit user actions. |
-| Oversized messages | A peer causes memory or CPU pressure. | A maximum line size; an oversized line is rejected whole. |
-| Code already running as the user | An install script runs the configured provider itself, as any process can run `git credential fill`. | Not preventable by the protocol. Providers issue short-lived read credentials, narrow where the registry allows it, and require user presence (an OS prompt, only when `interactive` is `true`) for write credentials. |
+| Silent plaintext fallback | A provider failure quietly re-enables a stored token. | A failure, `not-found` among them, falls back to a stored credential only where the chain lists `npm:token`; after a global chain declines a host none of its providers lists, npm uses what the user stored, as without a provider ([Legacy fallback](#legacy-fallback)). |
+| Secrets in logs | A provider prints a token or an authorization header. | Stdout is protocol only; stderr and logs must not carry secrets. npm masks, best effort and by exact value, the credentials the provider returned, in what it logs. A provider never relies on the masking. |
+| Untrusted code in a privileged job | A CI job runs a fork's code, or `npm install` with scripts, while holding a publish credential or a provider's identity. | Not preventable by a provider. [In CI](#in-ci): no secrets in untrusted runs, no repository code or `npm install` with credentials in `pull_request_target`, separate build and publish jobs, `--ignore-scripts`. |
+| Fork pull request | A pull request from a fork reaches a job that holds a registry credential, an OIDC token or a provider's store. | The platform's: secrets are not given to fork runs, and a job that runs fork code has no write identity. A provider cannot tell a fork's job from another. |
+| Code already running as the user | An install script runs the configured provider itself, as any process can run `git credential fill`, or reads the provider's store or the vendor CLI's cache. | Not preventable by the protocol ([What this protects against, and what it does not](#what-this-protects-against-and-what-it-does-not)). Providers issue short-lived credentials, narrow where the registry allows it, and gate a write only where the registry or a hardware key enforces the second factor; a presence prompt alone is not a gate. |
 
 #### Publishing while a script runs
 
-The last row is the honest limit of the design, and also where it improves most on today:
+The row for code already running as the user is the honest limit of the design, and also where it improves most on today:
 
 - **Today,** a script that finds a publish token in `.npmrc` or `NPM_TOKEN` takes it away and publishes later, from anywhere, without a prompt.
-- **With a provider that gates write credentials on user presence,** a script that runs when no publish is under way gets nothing it can use later, unless it can rewrite the provider or the config that names it.
+- **With a provider that mints short-lived write credentials,** a script that takes one when no publish is under way holds it only until it expires. Where the second factor is enforced by the registry or a hardware key ([above](#what-this-protects-against-and-what-it-does-not)), the script cannot get a write credential without it. Where the gate is only the provider's prompt, the script can run the provider itself on a terminal of its own.
 - **During a publish** it still can: `prepublishOnly`, `prepack`, `prepare` and `postpack` run before the upload, with the user's terminal, and a script there can ask the provider for a write credential with the same fields npm would send, at the moment the user expects npm's own prompt. No field in a request can tell npm's request from the script's, since a process of the same user can send the same bytes.
 
 npm does not ask for the write credential before these scripts. Before they run it does not know the final name, version or registry (it reads the manifest and `publishConfig` again after packing); the prompt would come before a build that a short-lived credential may not outlast; the scripts can change the tarball without any credential; and npm's own one-time-password prompt and OIDC exchange sit in the same window. What narrows it is the provider's own policy, which needs no protocol field:
@@ -719,7 +824,7 @@ Cargo, Git and NuGet ask for a credential only when one is needed: Cargo for reg
 
 A first `get` that names only the registry, asked before the real one, was considered and rejected: it is the same message as a registry-level request such as `npm search`, so it invites a registry-wide credential where a scope-bound one was wanted, and it costs a round trip per registry. A provider that lists its registries in hello lets npm, not each provider, decide which URLs are the same registry.
 
-So the global chain is asked up front, and the costs are bounded instead: `url-not-supported` is remembered per provider and registry, and a provider that should not see a registry belongs in the per-registry form.
+So the global chain is asked up front, and the costs are bounded instead: a provider in the chain lists the registries it serves and is asked about no other, and `url-not-supported` is remembered per provider and registry. A provider whose hosts cannot be listed belongs in the per-registry form.
 
 ### Why no discovery suggestions?
 
@@ -826,7 +931,7 @@ NuGet's plugins are the closest prior art to Phase 2: one long-lived process, a 
 
 No phase changes behavior for anyone who has not configured a provider. Phase 1a ships first ([its plan](phase-1a-token-helper.md#migration-plan)); Phase 1b, which hardens how every credential travels, has [its own](phase-1b-credential-hardening.md#migration-plan).
 
-In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentialProvider` and reads only what `.npmrc` stores, so a stored token that older installs still need keeps working for them; the warning that a newer npm gives for it, under a global chain, goes once the older versions are gone or the token is moved to a per-registry list that names `npm:token`.
+In a team on mixed npm versions, an npm that predates Phase 2 ignores `credentialProvider` and reads only what `.npmrc` stores, so a stored token that older installs still need keeps working for them; a newer npm with a chain configured does not serve a token written in the project's `.npmrc` and warns about it, so the token moves to the user's own config or environment, or goes once the older versions are gone.
 
 | Phase | Release | Ships | Done when |
 |---|---|---|---|

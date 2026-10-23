@@ -1,7 +1,7 @@
 use credential_provider_protocol::{
-    ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderErr, ProviderOk,
-    ProviderResponse, Request, RequestKind, generated::SENTINEL_ARGUMENT, read_json_line,
-    write_json_line,
+    Auth, CachePolicy, ErrorKind, Granularity, Hello, Operation, ProtocolError, ProviderErr,
+    ProviderOk, ProviderResponse, Request, RequestKind, generated::SENTINEL_ARGUMENT,
+    read_json_line, write_json_line,
 };
 use std::io::{self, BufReader, Write};
 
@@ -12,7 +12,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("mock-provider: run by npm with {SENTINEL_ARGUMENT}; no standalone mode");
         std::process::exit(2);
     }
+    // `listed:<scenario>` is `<scenario>` from a provider whose hello lists
+    // the registry the client asks about, as a provider of the global chain
+    // must; without it the hello has no `registries`
     let scenario = parse_scenario();
+    let (listed, scenario) = match scenario.strip_prefix("listed:") {
+        Some(rest) => (true, rest.to_string()),
+        None => (false, scenario),
+    };
 
     if scenario == "no-hello" {
         return Ok(());
@@ -60,6 +67,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut stdout = io::stdout();
         stdout.write_all(b"\xEF\xBB\xBF{\"v\":[1]}\r\n\n  \r\n")?;
         stdout.flush()?;
+    } else if listed {
+        write_json_line(
+            &mut io::stdout(),
+            &Hello {
+                registries: Some(vec!["https://registry.example.test/".into()]),
+                ..Hello::v1()
+            },
+        )?;
     } else {
         write_json_line(&mut io::stdout(), &Hello::v1())?;
     }
@@ -265,6 +280,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "expires-missing-expiration" => ProviderResponse::Ok(ProviderOk {
                 expires_at: None,
                 ..ProviderOk::expiring("test-token", 0)
+            }),
+            // no credential for a read, and it says so
+            "anonymous" => ProviderResponse::Ok(ProviderOk {
+                auth: Some(Auth::Anonymous),
+                cache: Some(CachePolicy::Session),
+                granularity: Some(Granularity::Registry),
+                ..ProviderOk::done(RequestKind::Get)
             }),
             "expiring-token" => {
                 ProviderResponse::Ok(ProviderOk::expiring("short-lived-token", 1_893_456_000))

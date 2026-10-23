@@ -209,6 +209,15 @@
           "then": {
             "required": ["auth"]
           }
+        },
+        {
+          "if": {
+            "properties": { "auth": { "properties": { "type": { "const": "none" } }, "required": ["type"] } },
+            "required": ["auth"]
+          },
+          "then": {
+            "properties": { "operationIndependent": { "const": false } }
+          }
         }
       ],
       "additionalProperties": true
@@ -217,6 +226,7 @@
       "oneOf": [
         { "$ref": "#/$defs/bearerAuth" },
         { "$ref": "#/$defs/basicAuth" },
+        { "$ref": "#/$defs/noneAuth" },
         { "$ref": "#/$defs/unknownAuth" }
       ]
     },
@@ -248,6 +258,15 @@
       },
       "additionalProperties": true
     },
+    "noneAuth": {
+      "description": "An anonymous answer: npm sends the request without a credential and says so at warn. Valid only as the answer to a get for read that is not a retry, which a client checks against the request; it is never operation independent.",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "none" }
+      },
+      "additionalProperties": true
+    },
     "unknownAuth": {
       "description": "An auth.type this version does not know: npm has nothing it can send, so it fails the request as an other answer naming the provider.",
       "type": "object",
@@ -256,7 +275,7 @@
         "type": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])",
-          "not": { "enum": ["bearer", "basic"] }
+          "not": { "enum": ["bearer", "basic", "none"] }
         }
       },
       "additionalProperties": true

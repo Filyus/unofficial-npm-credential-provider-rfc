@@ -9,6 +9,10 @@ from urllib.parse import urlsplit
 
 from tests.generated_policy import (
     ALLOWED_CONFIG_SOURCES,
+    ANONYMOUS_AUTH_TYPE,
+    ANONYMOUS_OPERATIONS,
+    ANONYMOUS_REQUEST_KINDS,
+    STORED_CREDENTIAL_SOURCES,
     DEFAULT_CACHE_POLICY,
     DEFAULT_GRANULARITY,
     ERASE_ERROR_OUTCOMES,
@@ -135,16 +139,18 @@ class CredentialClientModel:
     # hello `registries`: None when the provider did not list any
     registries: list[str] | None = None
 
-    def serves(self, registry: str) -> bool:
+    def serves(self, registry: str, global_chain: bool = False) -> bool:
         """Registry matching against hello `registries`: a registry outside
         the list counts as `url-not-supported`, and the provider is sent
-        nothing about it."""
+        nothing about it. A provider with no list is asked in a per-registry
+        list, which names the registry, and serves none in the global chain,
+        where it must list what it serves."""
         if self.registries is None:
-            return True
+            return not global_chain
         return any(registry_matches(served, registry) for served in self.registries)
 
     def request_or_decline(self, context: RequestContext, declined: DeclinedRegistries | None = None,
-                           provider: str = "provider") -> dict[str, Any] | str:
+                           provider: str = "provider", global_chain: bool = False) -> dict[str, Any] | str:
         """The `get` npm sends, or the answer npm already has without sending
         anything: `try-next-provider` when the provider's hello leaves this
         registry out or it declined it earlier in the command, and
@@ -154,7 +160,7 @@ class CredentialClientModel:
             remembered = declined.remembered(provider, context.registry, context.scope)
             if remembered is not None:
                 return remembered
-        if not self.serves(context.registry):
+        if not self.serves(context.registry, global_chain):
             if declined is not None:
                 declined.record(provider, context.registry, "try-next-provider")
             return "try-next-provider"
@@ -229,6 +235,15 @@ class CredentialClientModel:
         if kind != request.get("kind"):
             raise ProtocolViolation("Ok.kind must match request kind")
         auth, cache, expires_at, granularity, operation_independent = validate_ok(ok)
+        if isinstance(auth, dict) and auth.get("type") == ANONYMOUS_AUTH_TYPE:
+            # valid only as the answer to a first `get` for `read`: anything
+            # else is a malformed answer, as a bearer answer with no token is
+            if (
+                kind not in ANONYMOUS_REQUEST_KINDS
+                or request.get("operation") not in ANONYMOUS_OPERATIONS
+                or request.get("retry")
+            ):
+                raise ProtocolViolation("an anonymous answer is valid only for a get for read that is not a retry")
         if kind != "get":
             return kind
         granularity, operation_independent = self._binding(request, granularity, operation_independent)
@@ -780,6 +795,8 @@ def validate_ok(ok: dict[str, Any]) -> tuple[Any, str, int | None, str, bool]:
     operation_independent = ok.get("operationIndependent", OPERATION_INDEPENDENT_DEFAULT)
     if not isinstance(operation_independent, bool):
         raise ProtocolViolation("operationIndependent must be boolean")
+    if operation_independent and isinstance(auth, dict) and auth.get("type") == ANONYMOUS_AUTH_TYPE:
+        raise ProtocolViolation("an anonymous answer is never operation independent")
     if unknown_auth is not None:
         raise unknown_auth
     return auth, cache, expires_at, granularity, operation_independent
@@ -811,10 +828,6 @@ class ChainOutcome(NamedTuple):
     entry: int | None = None
     warnings: tuple[str, ...] = ()
     message: str = ""
-    # what npm logs at `verbose`: each provider of a global chain whose hello
-    # sent no `registries`, which is asked about every registry the command
-    # touches. Everything in `warnings` is logged at `warn`.
-    verbose: tuple[str, ...] = ()
 
 
 class ProviderListing(NamedTuple):
@@ -839,11 +852,34 @@ def listed_forms(registries: list[str] | None, registry: str) -> list[str]:
     return [entry for entry in registries if _host(entry) == wanted]
 
 
+def global_chain_hello_warning(name: str, registries: list[str] | None) -> str | None:
+    """What npm logs at `warn`, once per command, when the hello of a provider
+    in the global chain has no `registries`: it serves no registry."""
+    if registries is not None:
+        return None
+    return f"{name} sent no registries: a provider in the global chain must list them, so it serves no registry"
+
+
+def npm_token_serves(source: str) -> bool:
+    """Whether `npm:token`, listed or implicit, serves a credential written in
+    a config source: the user and global files, the environment and the command
+    line, never a project `.npmrc` (or a user or global file the command line
+    or the environment chose from inside a project, which is a `project`)."""
+    return source in STORED_CREDENTIAL_SOURCES
+
+
+PROJECT_CREDENTIAL_WARNING = (
+    "a credential in project config is not sent through a credentialProvider chain: "
+    "move it to the user's config or the environment, or remove it"
+)
+
+
 def resolve_chain(
     answers: list[str],
     *,
     per_registry: bool,
     stored_credential: bool,
+    project_credential: bool = False,
     oidc_token: bool = False,
     registry: str | None = None,
     providers: list[ProviderListing] | None = None,
@@ -853,6 +889,11 @@ def resolve_chain(
     `try-next-provider` (url-not-supported), `try-next-provider-not-found`,
     `no-common-version`, or `fail` (any other error, a spawn failure, an
     oversized line, a timeout).
+
+    `stored_credential` says that a credential `npm:token` may serve exists
+    (see `npm_token_serves`); `project_credential` that one written in project
+    config does, which no chain ever serves and which is warned about, once per
+    registry per command, wherever a chain applies.
 
     A global chain that does not list `npm:token` ends with it implicitly, but
     only while every provider before it declined the registry: after a
@@ -866,30 +907,30 @@ def resolve_chain(
     registry does not fall back to a stored credential where some provider's
     hello lists the registry's host in any form: that is a URL form the
     provider declined, so the request fails, naming the provider and the forms
-    it lists. Elsewhere the fallback warns, except where every provider lists
-    its registries and none lists this host: no provider stands behind it.
-    A listed `npm:token` follows the same rule: where an earlier provider
-    answered url-not-supported for a registry whose host its hello lists, the
-    entry sends no stored credential and the request fails the same way."""
+    it lists. On a host no hello lists no provider stands behind it, and the
+    fallback is what npm does without providers, restricted to what
+    `npm:token` serves, without a warning. A listed `npm:token` follows the
+    same rule: where an earlier provider answered url-not-supported for a
+    registry whose host its hello lists, the entry sends no stored credential
+    and the request fails the same way."""
     if oidc_token:
         # a token from a successful trusted-publishing exchange: no provider is
         # asked, and it is not a stored credential, so nothing is "ignored"
         return ChainOutcome("oidc")
     entries = list(answers)
     listed = STORED_CREDENTIAL_ENTRY in entries
-    without_list = [] if providers is None else [provider.name for provider in providers if provider.registries is None]
-    verbose = () if per_registry else tuple(
-        f"{name} sent no registries: it is asked about every registry this command touches" for name in without_list
-    )
 
     def done(result: str, entry: int | None = None, *warnings: str) -> ChainOutcome:
         if per_registry and stored_credential and not listed and result != "stored-credential":
             warnings = ("stored credential ignored: the per-registry list does not include npm:token", *warnings)
-        return ChainOutcome(result, entry, tuple(warnings), verbose=verbose)
+        if entries and project_credential:
+            warnings = (PROJECT_CREDENTIAL_WARNING, *warnings)
+        return ChainOutcome(result, entry, tuple(warnings))
 
     if not entries:
-        # no provider configured for the registry: what npm does today
-        return done("stored-credential" if stored_credential else "anonymous")
+        # no provider configured for the registry: what npm does today, from
+        # every source
+        return done("stored-credential" if (stored_credential or project_credential) else "anonymous")
     not_found = False
     declined_before: list[ProviderListing] = []
     provider_index = 0
@@ -901,14 +942,7 @@ def resolve_chain(
                 forms = [(provider.name, listed_forms(provider.registries, registry)) for provider in declined_before]
                 forms = [(name, listing) for name, listing in forms if listing]
                 if forms:
-                    named = "; ".join(f"{name} lists {', '.join(listing)}" for name, listing in forms)
-                    return ChainOutcome(
-                        GLOBAL_CHAIN_LISTED_HOST_OUTCOME, index, (),
-                        f"{registry} is a URL form a provider declined on a host its hello lists, "
-                        f"so npm sends no stored credential: {named}"
-                        f"; the remedy is a per-registry list for it that holds just {STORED_CREDENTIAL_ENTRY}",
-                        verbose,
-                    )
+                    return _listed_host_failure(registry, forms, index)
             if stored_credential:
                 return done("stored-credential", index)
             continue
@@ -931,25 +965,52 @@ def resolve_chain(
         forms = [(provider.name, listed_forms(provider.registries, registry)) for provider in providers]
         forms = [(name, listing) for name, listing in forms if listing]
         if forms:
-            named = "; ".join(f"{name} lists {', '.join(listing)}" for name, listing in forms)
-            return ChainOutcome(
-                GLOBAL_CHAIN_LISTED_HOST_OUTCOME, None, (),
-                f"{registry} is a URL form a provider declined on a host its hello lists, "
-                f"so npm sends no stored credential: {named}"
-                f"; the remedy is a per-registry list for it that holds just {STORED_CREDENTIAL_ENTRY}",
-                verbose,
-            )
+            return _listed_host_failure(registry, forms, None)
     if stored_credential and not listed:
-        # every provider lists its registries and none lists this host: no
-        # provider stands behind the host, and nothing is said about the
-        # stored credential
-        if providers is not None and all(provider.registries is not None for provider in providers):
-            return done("stored-credential")
-        said = "stored credential used after every global provider declined the registry"
-        if without_list:
-            said += f"; no registries from {', '.join(without_list)}"
-        return done("stored-credential", None, said)
+        # no provider's hello lists this host, so none stands behind it: what
+        # `npm:token` serves, with nothing said about it
+        return done("stored-credential")
     return done("anonymous")
+
+
+def _listed_host_failure(registry: str, forms: list[tuple[str, list[str]]], entry: int | None) -> ChainOutcome:
+    named = "; ".join(f"{name} lists {', '.join(listing)}" for name, listing in forms)
+    return ChainOutcome(
+        GLOBAL_CHAIN_LISTED_HOST_OUTCOME, entry, (),
+        f"{registry} is a URL form a provider declined on a host its hello lists, "
+        f"so npm sends no stored credential: {named}"
+        f"; the remedy is a per-registry list for it that holds just {STORED_CREDENTIAL_ENTRY}",
+    )
+
+
+# The checks npm makes before it sends a provider's credential, from the first
+# release (the same rules Phase 1a's runner makes for a helper)
+_LOOPBACK_HOST_PROVIDER = re.compile(r"^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$")
+
+
+def provider_route_outcome(
+    scheme: str,
+    hostname: str,
+    project_route_keys: tuple[str, ...] = (),
+) -> str:
+    """What npm does with a provider's credential before it sends a request:
+    `plain-http` for an `http:` URL to a host that is not this machine,
+    `project-route` when `ca`, `cafile` or `strict-ssl=false` came from the
+    project layer, or when `proxy` or `https-proxy` did and the request is
+    `http:` to this machine (a proxy tunnels an `https:` request and cannot
+    read it), otherwise `sent`. The checks are made for every request and in
+    this order, and a refusal starts no provider."""
+    loopback = bool(_LOOPBACK_HOST_PROVIDER.match(hostname))
+    if scheme == "http:" and not loopback:
+        return "plain-http"
+    certificate = {"ca", "cafile", "strict-ssl"}
+    proxy = {"proxy", "https-proxy"}
+    keys = set(project_route_keys)
+    if keys & certificate:
+        return "project-route"
+    if keys & proxy and scheme == "http:" and loopback:
+        return "project-route"
+    return "sent"
 
 
 def resolve_login_chain(answers: list[str], *, per_registry: bool) -> ChainOutcome:
@@ -1142,8 +1203,8 @@ class ProviderPool:
 @dataclass
 class CommandWarnings:
     """The warnings of one npm command. Each is said once per registry per
-    command: a stored credential used after a global chain declined the
-    registry, and one that a per-registry list ignores. A second command is a
+    command: a credential in project config that a chain never serves, one
+    that a per-registry list ignores, and an anonymous answer. A second command is a
     new object and says them again, which is what "on every command, so that it
     gets deleted" means."""
 
@@ -1158,6 +1219,17 @@ class CommandWarnings:
                 new.append(f"{registry}: {text}")
         self.lines.extend(new)
         return new
+
+    def say_anonymous(self, registry: str, provider: str) -> list[str]:
+        """An anonymous answer is said at `warn`, once per registry per
+        command, naming the provider."""
+        text = f"{provider} answered without a credential: requests to {registry} go out anonymously"
+        if (registry, text) in self.said:
+            return []
+        self.said.add((registry, text))
+        line = f"{registry}: {text}"
+        self.lines.append(line)
+        return [line]
 
 
 class CommandRefused(RuntimeError):

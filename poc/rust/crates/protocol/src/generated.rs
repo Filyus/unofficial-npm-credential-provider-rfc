@@ -40,6 +40,7 @@ pub const CAPABILITIES: &[&str] = &[
 pub const AUTH_TYPES: &[&str] = &[
     "bearer",
     "basic",
+    "none",
 ];
 pub const CACHE_POLICIES: &[&str] = &[
     "never",

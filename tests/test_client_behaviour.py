@@ -11,6 +11,7 @@ import re
 import unittest
 
 from tests.protocol_model import (
+    global_chain_hello_warning,
     CommandRefused,
     CommandWarnings,
     ProviderListing,
@@ -106,29 +107,30 @@ class LoggingTests(unittest.TestCase):
         request = {"v": 1, "kind": "get", "registry": REGISTRY, "operation": "read", "interactive": False}
         self.assertEqual(loggable(request), request)
 
-    def test_a_provider_without_registries_is_logged_at_verbose_and_the_fallback_at_warn(self) -> None:
+    def test_a_global_provider_without_registries_is_warned_about_by_name_and_the_fallback_says_nothing(self) -> None:
         providers = [ProviderListing("listed", [REGISTRY]), ProviderListing("open", None)]
+
+        self.assertIsNone(global_chain_hello_warning("listed", [REGISTRY]))
+        warning = global_chain_hello_warning("open", None)
+        self.assertIn("open sent no registries", warning)
+        self.assertIn("serves no registry", warning)
 
         outcome = resolve_chain([DECLINE, DECLINE], per_registry=False, stored_credential=True,
                                 registry="https://other.example.test/", providers=providers)
 
         self.assertEqual(outcome.result, "stored-credential")
-        self.assertEqual(len(outcome.verbose), 1)
-        self.assertIn("open sent no registries", outcome.verbose[0])
-        self.assertNotIn("listed", outcome.verbose[0])
-        self.assertEqual(len(outcome.warnings), 1, "the fallback is a warning, not a verbose line")
-        self.assertIn("open", outcome.warnings[0])
-        self.assertNotIn("listed", outcome.warnings[0])
+        self.assertEqual(outcome.warnings, (), "no provider stands behind a host none lists")
 
-    def test_a_per_registry_list_logs_nothing_at_verbose_about_registries(self) -> None:
+    def test_a_per_registry_provider_is_not_warned_about_for_having_no_list(self) -> None:
+        # the warning is the global chain's: a per-registry list names the registry itself
         outcome = resolve_chain([DECLINE], per_registry=True, stored_credential=False,
                                 registry=REGISTRY, providers=[ProviderListing("open", None)])
-        self.assertEqual(outcome.verbose, ())
+        self.assertEqual(outcome.warnings, ())
 
     def test_a_chain_in_which_every_provider_lists_its_registries_logs_nothing(self) -> None:
         outcome = resolve_chain([DECLINE], per_registry=False, stored_credential=True, registry=REGISTRY,
                                 providers=[ProviderListing("a", ["https://elsewhere.example.test/"])])
-        self.assertEqual((outcome.verbose, outcome.warnings), ((), ()))
+        self.assertEqual(outcome.warnings, ())
 
     def test_the_error_for_a_declined_form_names_the_remedy(self) -> None:
         outcome = resolve_chain([DECLINE], per_registry=False, stored_credential=True, registry="http://host.example/",
@@ -139,10 +141,10 @@ class LoggingTests(unittest.TestCase):
 
 class WarningCountTests(unittest.TestCase):
     def fallback(self, registry: str):
-        return resolve_chain([DECLINE], per_registry=False, stored_credential=True,
-                             registry=registry, providers=[ProviderListing("p", None)])
+        return resolve_chain([DECLINE], per_registry=False, stored_credential=False, project_credential=True,
+                             registry=registry, providers=[ProviderListing("p", [])])
 
-    def test_the_fallback_is_said_once_per_registry_per_command(self) -> None:
+    def test_a_project_credential_a_chain_does_not_serve_is_said_once_per_registry_per_command(self) -> None:
         command = CommandWarnings()
         a, b = "https://a.example.test/", "https://b.example.test/"
 

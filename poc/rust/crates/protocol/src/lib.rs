@@ -149,8 +149,16 @@ impl Hello {
     /// `https://bücher.example/` and `https://xn--bcher-kva.example/` differ
     /// here and agree in the Python model.
     pub fn serves(&self, registry: &str) -> bool {
+        self.serves_in(registry, false)
+    }
+
+    /// `serves`, for a provider that may be in the global chain: there a
+    /// hello with no `registries` serves no registry, since a provider in
+    /// the global chain must list what it serves. In a per-registry list the
+    /// user named the registry, so no list means the provider is asked.
+    pub fn serves_in(&self, registry: &str, global_chain: bool) -> bool {
         let Some(registries) = &self.registries else {
-            return true;
+            return !global_chain;
         };
         let Some(wanted) = canonical(registry) else {
             return false;
@@ -646,6 +654,10 @@ pub enum Auth {
         username: String,
         password: Secret,
     },
+    /// An anonymous answer, `{"type": "none"}`: npm sends the request with no
+    /// credential. Valid only as the answer to a first `get` for `read` (see
+    /// `ProviderOk::validate_answer_to`).
+    Anonymous,
     /// An `auth.type` this build does not know, sent by a newer provider: a
     /// well-formed name (`is_identifier`) it has no variant for. npm has
     /// nothing it can send, so a client fails the request as an `other` answer.
@@ -664,6 +676,7 @@ enum KnownAuthRef<'a> {
         username: &'a str,
         password: &'a Secret,
     },
+    None {},
 }
 
 impl Serialize for Auth {
@@ -674,6 +687,7 @@ impl Serialize for Auth {
             Self::Basic { username, password } => {
                 KnownAuthRef::Basic { username, password }.serialize(serializer)
             }
+            Self::Anonymous => KnownAuthRef::None {}.serialize(serializer),
             Self::Unknown(name) => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry("type", name)?;
@@ -688,6 +702,7 @@ impl Serialize for Auth {
 enum KnownAuth {
     Bearer { token: Secret },
     Basic { username: String, password: Secret },
+    None {},
 }
 
 impl<'de> Deserialize<'de> for Auth {
@@ -699,10 +714,11 @@ impl<'de> Deserialize<'de> for Auth {
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| D::Error::custom("auth.type must be a string"))?;
         match name {
-            "bearer" | "basic" => KnownAuth::deserialize(value.clone())
+            "bearer" | "basic" | "none" => KnownAuth::deserialize(value.clone())
                 .map(|known| match known {
                     KnownAuth::Bearer { token } => Self::Bearer { token },
                     KnownAuth::Basic { username, password } => Self::Basic { username, password },
+                    KnownAuth::None {} => Self::Anonymous,
                 })
                 .map_err(D::Error::custom),
             other if is_identifier(other) => Ok(Self::Unknown(other.to_owned())),
@@ -715,7 +731,7 @@ impl Auth {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         match self {
             // well formed: what to do with it is the client's business
-            Self::Unknown(_) => Ok(()),
+            Self::Unknown(_) | Self::Anonymous => Ok(()),
             Self::Bearer { token } => require(!token.expose().is_empty(), "bearer token is empty"),
             Self::Basic { username, password } => require(
                 !username.is_empty() && !password.expose().is_empty(),
@@ -821,8 +837,33 @@ impl ProviderOk {
             .unwrap_or(generated::OPERATION_INDEPENDENT_DEFAULT)
     }
 
+    /// `validate_for`, and the rule that needs the request: an anonymous
+    /// answer (`auth.type` `none`) is valid only for a first `get` for `read`,
+    /// not for another operation or kind, nor for a retry. Anything else is a
+    /// malformed answer, as a bearer answer with no token is.
+    pub fn validate_answer_to(&self, request: &Request) -> Result<(), ProtocolError> {
+        self.validate_for(&request.kind)?;
+        if self.auth == Some(Auth::Anonymous) {
+            require(
+                request.kind == RequestKind::Get
+                    && request.operation == Some(Operation::Read)
+                    && request.retry != Some(true),
+                "an anonymous answer is valid only for a get for read that is not a retry",
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         require(&self.kind == kind, "Ok.kind must match request kind")?;
+        // an anonymous answer is never operation independent: it serves a
+        // read, and nothing else may find it in a cache
+        if self.auth == Some(Auth::Anonymous) {
+            require(
+                self.operation_independent != Some(true),
+                "an anonymous answer is never operation independent",
+            )?;
+        }
         // the schema's cache=expires rule carries no kind condition
         if self.cache == Some(CachePolicy::Expires) {
             require(
@@ -984,6 +1025,16 @@ impl<'de> Deserialize<'de> for ProviderResponse {
 }
 
 impl ProviderResponse {
+    /// `validate_for` with the request itself, for the rules that need more
+    /// than its kind (an anonymous answer is valid for a first `get` for
+    /// `read` only).
+    pub fn validate_answer_to(&self, request: &Request) -> Result<(), ProtocolError> {
+        match self {
+            ProviderResponse::Ok(ok) => ok.validate_answer_to(request),
+            ProviderResponse::Err(_) => Ok(()),
+        }
+    }
+
     pub fn validate_for(&self, kind: &RequestKind) -> Result<(), ProtocolError> {
         match self {
             ProviderResponse::Ok(ok) => ok.validate_for(kind),
@@ -1690,6 +1741,60 @@ mod tests {
     }
 
     #[test]
+    fn an_anonymous_answer_is_valid_for_a_first_get_for_read_only() {
+        let ok: ProviderOk = serde_json::from_str(
+            r#"{"kind":"get","auth":{"type":"none"},"cache":"session","granularity":"registry"}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.auth, Some(Auth::Anonymous));
+        let read = Request::get_install("https://registry.example.test/", None, "left-pad");
+        ok.validate_answer_to(&read).unwrap();
+
+        let publish = Request::get_publish("https://registry.example.test/", None, "p", "1.0.0");
+        assert!(ok.validate_answer_to(&publish).is_err());
+        let retry = Request {
+            retry: Some(true),
+            http_status: Some(401),
+            ..read.clone()
+        };
+        assert!(ok.validate_answer_to(&retry).is_err());
+        let login = Request::bare(RequestKind::Login, "https://registry.example.test/");
+        let answer = ProviderOk {
+            kind: RequestKind::Login,
+            ..ok.clone()
+        };
+        assert!(answer.validate_answer_to(&login).is_err());
+    }
+
+    #[test]
+    fn an_anonymous_answer_is_never_operation_independent() {
+        let ok: ProviderOk = serde_json::from_str(
+            r#"{"kind":"get","auth":{"type":"none"},"operationIndependent":true}"#,
+        )
+        .unwrap();
+        assert!(ok.validate_for(&RequestKind::Get).is_err());
+        let ok: ProviderOk = serde_json::from_str(
+            r#"{"kind":"get","auth":{"type":"none"},"operationIndependent":false}"#,
+        )
+        .unwrap();
+        ok.validate_for(&RequestKind::Get).unwrap();
+    }
+
+    #[test]
+    fn a_provider_in_the_global_chain_without_registries_serves_none() {
+        let without = Hello::v1();
+        assert!(without.serves("https://registry.example.test/"));
+        assert!(without.serves_in("https://registry.example.test/", false));
+        assert!(!without.serves_in("https://registry.example.test/", true));
+        let with = Hello {
+            registries: Some(vec!["https://registry.example.test/".into()]),
+            ..Hello::v1()
+        };
+        assert!(with.serves_in("https://registry.example.test/", true));
+        assert!(!with.serves_in("https://other.example.test/", true));
+    }
+
+    #[test]
     fn debug_output_redacts_secrets() {
         let bearer = ProviderOk::expiring("bearer-secret", 1_893_456_000);
         let basic = ProviderOk {
@@ -1901,9 +2006,11 @@ mod tests {
             password: "secret".into(),
         })
         .unwrap();
+        let none = serde_json::to_value(Auth::Anonymous).unwrap();
         let actual = vec![
             bearer["type"].as_str().unwrap().to_string(),
             basic["type"].as_str().unwrap().to_string(),
+            none["type"].as_str().unwrap().to_string(),
         ];
 
         assert_eq!(actual, generated::AUTH_TYPES);

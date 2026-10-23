@@ -308,9 +308,15 @@ impl ProviderSession {
     /// Whether the provider's hello leaves `registry` in; a registry it leaves
     /// out counts as `url-not-supported`, and the provider is sent nothing.
     pub fn serves(&self, registry: &str) -> bool {
+        self.serves_in(registry, ChainKind::PerRegistry)
+    }
+
+    /// `serves`, for the list the provider came from: in the global chain a
+    /// provider whose hello has no `registries` serves none.
+    pub fn serves_in(&self, registry: &str, kind: ChainKind) -> bool {
         self.hello
             .as_ref()
-            .is_none_or(|hello| hello.serves(registry))
+            .is_none_or(|hello| hello.serves_in(registry, kind == ChainKind::Global))
     }
 
     pub fn request(&mut self, request: &Request) -> Result<ProviderResponse, ExchangeError> {
@@ -319,7 +325,7 @@ impl ProviderSession {
             .timeouts
             .for_request(&request.kind, request.interactive == Some(true));
         let response = self.exchange(request, limit, kind_name(&request.kind))?;
-        if let Err(error) = response.validate_for(&request.kind) {
+        if let Err(error) = response.validate_answer_to(request) {
             // an answer that does not fit its request (an `Ok` of another
             // kind, an expiry that is missing) is a malformed message: the
             // session ends
@@ -578,6 +584,17 @@ pub fn run_exchange_with(
     scenario: ClientScenario,
     timeouts: Timeouts,
 ) -> Result<ExchangeSummary, ExchangeError> {
+    run_exchange_in(provider_command, scenario, timeouts, ChainKind::PerRegistry)
+}
+
+/// One exchange with a provider of the given kind of list: a provider of the
+/// global chain that sent no `registries` serves none.
+pub fn run_exchange_in(
+    provider_command: ProviderCommand,
+    scenario: ClientScenario,
+    timeouts: Timeouts,
+    kind: ChainKind,
+) -> Result<ExchangeSummary, ExchangeError> {
     let mut session = ProviderSession::spawn_with(provider_command, timeouts)?;
     let request = request_for(scenario);
     let listed_forms = session
@@ -585,7 +602,7 @@ pub fn run_exchange_with(
         .as_ref()
         .map(|hello| hello.listed_forms(&request.registry))
         .unwrap_or_default();
-    if !session.serves(&request.registry) {
+    if !session.serves_in(&request.registry, kind) {
         let selected_version = session.version;
         session.close()?;
         return Ok(ExchangeSummary {
@@ -776,7 +793,7 @@ pub fn run_provider_chain_with(
             .get_program()
             .to_string_lossy()
             .into_owned();
-        let mut summary = run_exchange_with(provider_command, scenario, timeouts)?;
+        let mut summary = run_exchange_in(provider_command, scenario, timeouts, kind)?;
         selected_version = summary.selected_version;
         if !summary.listed_forms.is_empty() {
             listing.push(format!("{name} lists {}", summary.listed_forms.join(", ")));
@@ -860,6 +877,10 @@ fn summarize(request: &RequestKind, response: &ProviderResponse) -> Result<Strin
                 RequestKind::Login | RequestKind::Logout | RequestKind::Erase
             ) {
                 return Ok(kind_name(&ok.kind).into());
+            }
+            if ok.auth == Some(Auth::Anonymous) {
+                // npm sends the request with no credential and says so at warn
+                return Ok("anonymous".into());
             }
             Ok("ok".into())
         }

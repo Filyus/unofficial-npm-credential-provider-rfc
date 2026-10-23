@@ -40,7 +40,8 @@
     ],
     "authTypes": [
       "bearer",
-      "basic"
+      "basic",
+      "none"
     ],
     "cachePolicies": [
       "never",
@@ -90,10 +91,10 @@
   },
   "fallback": {
     "noProviderConfigured": "stored-credential-or-anonymous",
-    "globalChainAllUrlNotSupported": "stored-credential-or-anonymous-with-warning",
+    "globalChainAllUrlNotSupported": "stored-credential-or-anonymous",
     "globalChainAllUrlNotSupportedOnListedHost": "fail",
     "listedStoredCredentialOnListedHost": "fail",
-    "globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries": true,
+    "projectCredentialThroughChain": "never-served-and-warned",
     "registryChainAllUrlNotSupported": "fail",
     "registryChainIgnoresStoredCredential": "warn",
     "notFoundAtEnd": "fail",
@@ -105,6 +106,8 @@
     "urlNotSupportedRemembered": "per-provider-and-registry-for-the-command",
     "notFoundRemembered": "per-provider-registry-and-scope-for-the-command",
     "storedCredentialEntry": "npm:token",
+    "storedCredentialSources": ["user", "global", "env", "cli"],
+    "globalChainProviderWithoutRegistries": "serves-no-registry-and-warns",
     "implicitStoredCredentialEntry": "end-of-global-chain-unless-a-provider-answered-not-found",
     "builtinPrefix": "npm:",
     "unknownBuiltin": "fail",
@@ -186,8 +189,28 @@
     "packageBoundWhenPresent": true,
     "schemeInKey": true
   },
+  "anonymousAnswer": {
+    "authType": "none",
+    "validOperations": ["read"],
+    "validRequestKinds": ["get"],
+    "validOnRetry": false,
+    "operationIndependentTrue": "malformed",
+    "otherwise": "malformed",
+    "log": "warn-once-per-registry-per-command",
+    "erase": "none",
+    "retry": "none"
+  },
+  "providerRoute": {
+    "plainHttp": "refused-except-loopback",
+    "projectTransportKeys": ["ca", "cafile", "strict-ssl=false"],
+    "projectProxyKeys": ["proxy", "https-proxy"],
+    "projectProxyRefuses": "http-loopback-only",
+    "appliesFrom": "first-release"
+  },
   "nonInteractive": {
     "interactiveFalseAllowsPrompts": false,
+    "readMayStartLogin": false,
+    "lapsedLoginOnRead": "other-or-anonymous-answer",
     "ciRequiresPreconfiguredTrust": true,
     "missingCredentialBehavior": "fail",
     "interactiveRule": "stdin and stdout are TTYs and no CI is detected"

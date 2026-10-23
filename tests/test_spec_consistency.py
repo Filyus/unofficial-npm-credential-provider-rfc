@@ -131,6 +131,7 @@ class SpecConsistencyTests(unittest.TestCase):
         schema_auth_types = {
             self.schema["$defs"]["bearerAuth"]["properties"]["type"]["const"],
             self.schema["$defs"]["basicAuth"]["properties"]["type"]["const"],
+            self.schema["$defs"]["noneAuth"]["properties"]["type"]["const"],
         }
 
         self.assertEqual(schema_auth_types, set(self.policy["wire"]["authTypes"]))

@@ -213,6 +213,19 @@
       }
     },
     {
+      "name": "response-ok-anonymous-read",
+      "message": {
+        "Ok": {
+          "kind": "get",
+          "auth": {
+            "type": "none"
+          },
+          "cache": "session",
+          "granularity": "registry"
+        }
+      }
+    },
+    {
       "name": "response-ok-unknown-auth-type",
       "message": {
         "Ok": {
@@ -523,6 +536,18 @@
             "token": "token"
           },
           "granularity": ""
+        }
+      }
+    },
+    {
+      "name": "response-anonymous-operation-independent",
+      "message": {
+        "Ok": {
+          "kind": "get",
+          "auth": {
+            "type": "none"
+          },
+          "operationIndependent": true
         }
       }
     },

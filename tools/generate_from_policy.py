@@ -88,6 +88,10 @@ def render_python(policy: dict) -> str:
             f"SENTINEL_ARGUMENT = {policy['credentialProvider']['sentinelArgument']!r}",
             f"ERASE_ERROR_OUTCOMES = {erase_error_outcomes(policy)!r}",
             f"SESSION_ENDS = {policy['credentialProvider']['sessionEnds']!r}",
+            f"ANONYMOUS_AUTH_TYPE = {policy['anonymousAnswer']['authType']!r}",
+            f"ANONYMOUS_OPERATIONS = frozenset({policy['anonymousAnswer']['validOperations']!r})",
+            f"ANONYMOUS_REQUEST_KINDS = frozenset({policy['anonymousAnswer']['validRequestKinds']!r})",
+            f"STORED_CREDENTIAL_SOURCES = frozenset({policy['chain']['storedCredentialSources']!r})",
             "",
         ]
     )
@@ -265,6 +269,8 @@ def render_policy_summary(policy: dict) -> str:
         lines.append(f"| `{setting}` | `{json_value(value)}` |")
 
     for title, section in (
+        ("Anonymous Answer", policy["anonymousAnswer"]),
+        ("Provider Credential Route", policy["providerRoute"]),
         ("Forward Compatibility", policy["forwardCompatibility"]),
         ("Token Helper (Phase 1)", policy["tokenHelper"]),
     ):
@@ -461,6 +467,10 @@ def render_vectors(policy: dict) -> str:
             },
         },
         {
+            "name": "response-ok-anonymous-read",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "none"}, "cache": "session", "granularity": "registry"}},
+        },
+        {
             "name": "response-ok-unknown-auth-type",
             "message": {"Ok": {"kind": "get", "auth": {"type": "digest", "realm": "registry"}}},
         },
@@ -646,6 +656,10 @@ def render_vectors(policy: dict) -> str:
         {
             "name": "response-granularity-not-an-identifier",
             "message": {"Ok": {"kind": "get", "auth": {"type": "bearer", "token": "token"}, "granularity": ""}},
+        },
+        {
+            "name": "response-anonymous-operation-independent",
+            "message": {"Ok": {"kind": "get", "auth": {"type": "none"}, "operationIndependent": True}},
         },
         {
             "name": "response-auth-type-not-an-identifier",

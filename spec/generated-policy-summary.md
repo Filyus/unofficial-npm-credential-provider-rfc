@@ -14,7 +14,7 @@ Source: `spec/policy-v1.json`.
 | Operations that require `version` | `publish`, `stage`, `stage-reject` |
 | Known npm commands (informational, open-ended) | `install`, `ci`, `publish`, `search`, `view` |
 | Capabilities | `login`, `logout` |
-| Auth types | `bearer`, `basic` |
+| Auth types | `bearer`, `basic`, `none` |
 | Cache policies | `never`, `session`, `expires` |
 | Granularities | `registry`, `scope`, `package` |
 | Error kinds | `url-not-supported`, `not-found`, `operation-not-supported`, `other` |
@@ -59,10 +59,10 @@ Source: `spec/policy-v1.json`.
 | Context | Outcome |
 | --- | --- |
 | `noProviderConfigured` | `stored-credential-or-anonymous` |
-| `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous-with-warning` |
+| `globalChainAllUrlNotSupported` | `stored-credential-or-anonymous` |
 | `globalChainAllUrlNotSupportedOnListedHost` | `fail` |
 | `listedStoredCredentialOnListedHost` | `fail` |
-| `globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries` | `True` |
+| `projectCredentialThroughChain` | `never-served-and-warned` |
 | `registryChainAllUrlNotSupported` | `fail` |
 | `registryChainIgnoresStoredCredential` | `warn` |
 | `notFoundAtEnd` | `fail` |
@@ -77,6 +77,8 @@ Source: `spec/policy-v1.json`.
 | `urlNotSupportedRemembered` | `per-provider-and-registry-for-the-command` |
 | `notFoundRemembered` | `per-provider-registry-and-scope-for-the-command` |
 | `storedCredentialEntry` | `npm:token` |
+| `storedCredentialSources` | `['user', 'global', 'env', 'cli']` |
+| `globalChainProviderWithoutRegistries` | `serves-no-registry-and-warns` |
 | `implicitStoredCredentialEntry` | `end-of-global-chain-unless-a-provider-answered-not-found` |
 | `builtinPrefix` | `npm:` |
 | `unknownBuiltin` | `fail` |
@@ -88,6 +90,8 @@ Source: `spec/policy-v1.json`.
 | Setting | Value |
 | --- | --- |
 | `interactiveFalseAllowsPrompts` | `false` |
+| `readMayStartLogin` | `false` |
+| `lapsedLoginOnRead` | `other-or-anonymous-answer` |
 | `ciRequiresPreconfiguredTrust` | `true` |
 | `missingCredentialBehavior` | `fail` |
 | `interactiveRule` | `stdin and stdout are TTYs and no CI is detected` |
@@ -99,6 +103,30 @@ Source: `spec/policy-v1.json`.
 | `lineSize` | `implementation-defined` |
 | `oversizeBehavior` | `fail` |
 | `lineSizeMinimum` | `1048576` |
+
+## Anonymous Answer
+
+| Setting | Value |
+| --- | --- |
+| `authType` | `none` |
+| `validOperations` | `read` |
+| `validRequestKinds` | `get` |
+| `validOnRetry` | `false` |
+| `operationIndependentTrue` | `malformed` |
+| `otherwise` | `malformed` |
+| `log` | `warn-once-per-registry-per-command` |
+| `erase` | `none` |
+| `retry` | `none` |
+
+## Provider Credential Route
+
+| Setting | Value |
+| --- | --- |
+| `plainHttp` | `refused-except-loopback` |
+| `projectTransportKeys` | `ca`, `cafile`, `strict-ssl=false` |
+| `projectProxyKeys` | `proxy`, `https-proxy` |
+| `projectProxyRefuses` | `http-loopback-only` |
+| `appliesFrom` | `first-release` |
 
 ## Forward Compatibility
 

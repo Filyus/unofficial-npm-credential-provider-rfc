@@ -239,8 +239,8 @@ fn client_tries_next_on_url_not_supported() {
 fn provider_chain_uses_second_provider_after_url_not_supported() {
     let summary = run_provider_chain(
         vec![
-            provider_command("url-not-supported"),
-            provider_command("get-success"),
+            provider_command("listed:url-not-supported"),
+            provider_command("listed:get-success"),
         ],
         ClientScenario::InstallGet,
         ChainKind::Global,
@@ -272,8 +272,8 @@ fn provider_chain_fails_when_nobody_has_a_credential() {
     for kind in [ChainKind::Global, ChainKind::PerRegistry] {
         let error = run_provider_chain(
             vec![
-                provider_command("url-not-supported"),
-                provider_command("not-found"),
+                provider_command("listed:url-not-supported"),
+                provider_command("listed:not-found"),
             ],
             ClientScenario::InstallGet,
             kind,
@@ -288,8 +288,8 @@ fn provider_chain_fails_when_nobody_has_a_credential() {
 fn global_chain_that_declines_the_registry_leaves_it_without_a_provider() {
     let summary = run_provider_chain(
         vec![
-            provider_command("url-not-supported"),
-            provider_command("url-not-supported"),
+            provider_command("serves-elsewhere"),
+            provider_command("serves-elsewhere"),
         ],
         ClientScenario::InstallGet,
         ChainKind::Global,
@@ -566,8 +566,8 @@ fn an_unknown_error_kind_does_not_move_a_chain_on() {
     // not read as url-not-supported or not-found: the next provider is not asked
     let error = run_provider_chain(
         vec![
-            provider_command("unknown-error-kind"),
-            provider_command("get-success"),
+            provider_command("listed:unknown-error-kind"),
+            provider_command("listed:get-success"),
         ],
         ClientScenario::InstallGet,
         ChainKind::Global,
@@ -663,4 +663,44 @@ fn a_global_chain_that_declined_an_unlisted_host_still_leaves_it_without_a_provi
     .expect("a host no hello lists falls back as before");
 
     assert_eq!(summary.outcome, "as-no-provider");
+}
+
+#[test]
+fn a_global_chain_provider_that_sent_no_registries_serves_none() {
+    // it would have answered, but a provider of the global chain must list what
+    // it serves, so it is asked nothing and the chain moves past it
+    let summary = run_provider_chain(
+        vec![
+            provider_command("get-success"),
+            provider_command("listed:get-success"),
+        ],
+        ClientScenario::InstallGet,
+        ChainKind::Global,
+    )
+    .expect("the second provider lists the registry");
+
+    assert_eq!(summary.provider_index, 1);
+
+    // in a per-registry list the user named the registry: no list, and it is asked
+    let summary = run_provider_chain(
+        vec![provider_command("get-success")],
+        ClientScenario::InstallGet,
+        ChainKind::PerRegistry,
+    )
+    .expect("a per-registry provider needs no list");
+    assert_eq!(summary.provider_index, 0);
+}
+
+#[test]
+fn an_anonymous_answer_to_a_read_is_taken_and_to_a_write_is_malformed() {
+    let summary = run_exchange(provider_command("anonymous"), ClientScenario::InstallGet)
+        .expect("an anonymous answer to a get for read");
+    assert_eq!(summary.outcome, "anonymous");
+
+    let error = run_exchange(provider_command("anonymous"), ClientScenario::PublishGet)
+        .expect_err("a write has no anonymous form");
+    assert!(
+        error.to_string().contains("anonymous answer is valid only"),
+        "{error}"
+    );
 }

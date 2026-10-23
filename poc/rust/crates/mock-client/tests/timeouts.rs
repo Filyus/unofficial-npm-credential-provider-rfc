@@ -191,8 +191,8 @@ fn an_exchange_and_a_chain_fail_on_a_timeout() {
     // the chain stops: the next provider is not asked
     let error = run_provider_chain_with(
         vec![
-            provider_command("hang-get"),
-            provider_command("get-success"),
+            provider_command("listed:hang-get"),
+            provider_command("listed:get-success"),
         ],
         ClientScenario::InstallGet,
         ChainKind::Global,

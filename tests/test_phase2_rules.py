@@ -204,32 +204,31 @@ class HelloRegistriesTests(unittest.TestCase):
         self.assertEqual(inside["registry"], "https://gitlab.example.com/api/v4/")
         self.assertEqual(model.request_or_decline(RequestContext(registry="http://gitlab.example.com/")), "try-next-provider")
 
-    def test_an_empty_list_declines_everything_and_no_list_asks(self):
+    def test_an_empty_list_declines_everything_and_no_list_asks_only_in_a_per_registry_list(self):
         self.assertEqual(client(registries=[]).request_or_decline(RequestContext(registry=REGISTRY)), "try-next-provider")
         self.assertIsInstance(client().request_or_decline(RequestContext(registry=REGISTRY)), dict)
+        # a provider in the global chain that sent no list serves no registry
+        self.assertEqual(client().request_or_decline(RequestContext(registry=REGISTRY), global_chain=True),
+                         "try-next-provider")
+        self.assertIsInstance(
+            client(registries=[REGISTRY]).request_or_decline(RequestContext(registry=REGISTRY), global_chain=True), dict)
 
-    def test_the_policy_says_when_the_fallback_warning_is_limited(self):
-        fallback = POLICY["fallback"]
-        key = "globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries"
-        self.assertIs(fallback[key], True)
-        self.assertNotIn("globalChainWarningOnlyWhenAProviderListsTheHost", fallback)
-        self.assertEqual(fallback["globalChainAllUrlNotSupportedOnListedHost"], "fail")
+    def test_the_policy_says_a_global_provider_without_a_list_serves_none(self):
+        self.assertEqual(POLICY["chain"]["globalChainProviderWithoutRegistries"], "serves-no-registry-and-warns")
+        self.assertNotIn("globalChainWarningLimitedToListedHostsWhenEveryProviderListsRegistries", POLICY["fallback"])
+        self.assertEqual(POLICY["fallback"]["globalChainAllUrlNotSupportedOnListedHost"], "fail")
 
-    def test_the_fallback_warning_is_dropped_only_when_every_provider_lists_its_registries(self):
-        def warn(registry, *lists):
+    def test_the_fallback_after_a_global_chain_is_never_warned_about(self):
+        def fall(registry, *lists):
             providers = [ProviderListing(f"p{n}", registries) for n, registries in enumerate(lists)]
             return resolve_chain(["try-next-provider"] * len(lists), per_registry=False, stored_credential=True,
                                  registry=registry, providers=providers)
 
         gitlab = ["https://gitlab.example.com/"]
-        outcome = warn("https://registry.npmjs.org/", gitlab, ["https://other.example.com/"])
-        self.assertEqual((outcome.result, outcome.warnings), ("stored-credential", ()), "every provider lists, none this host")
-        for lists in ((gitlab, None), (None,)):
-            outcome = warn("https://registry.npmjs.org/", *lists)
-            self.assertEqual(outcome.result, "stored-credential")
-            self.assertTrue(outcome.warnings, "a provider without a list leaves the warning on")
-        # without the hellos the chain knows nothing and warns, as before
-        self.assertTrue(resolve_chain(["try-next-provider"], per_registry=False, stored_credential=True).warnings)
+        for lists in ((gitlab, ["https://other.example.com/"]), (gitlab, None), (None,)):
+            outcome = fall("https://registry.npmjs.org/", *lists)
+            self.assertEqual((outcome.result, outcome.warnings), ("stored-credential", ()), lists)
+        self.assertEqual(resolve_chain(["try-next-provider"], per_registry=False, stored_credential=True).warnings, ())
 
 
 class ListedHostFallbackTests(unittest.TestCase):
@@ -267,10 +266,10 @@ class ListedHostFallbackTests(unittest.TestCase):
     def test_it_fails_with_or_without_a_stored_credential(self):
         self.assertEqual(self.chain("http://registry.example.test/npm/", self.LISTS, stored=False).result, "fail")
 
-    def test_an_unlisted_host_still_falls_back_with_the_warning(self):
+    def test_an_unlisted_host_still_falls_back_without_a_warning(self):
         outcome = self.chain("https://registry.npmjs.org/", self.LISTS, None)
         self.assertEqual(outcome.result, "stored-credential")
-        self.assertEqual(len(outcome.warnings), 1)
+        self.assertEqual(outcome.warnings, ())
         self.assertEqual(self.chain("https://registry.npmjs.org/", None).result, "stored-credential")
         self.assertEqual(self.chain("https://registry.npmjs.org/", None, stored=False).result, "anonymous")
 
