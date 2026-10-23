@@ -1,4 +1,4 @@
-From 752e04e49dc5bf6b5d5bd777f7f607677bdcab61 Mon Sep 17 00:00:00 2001
+From 32ef4b8f008dc8aee2542204ed29b0ccdc7bc5e6 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 11:03:20 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -1334,7 +1334,7 @@ index 8291b09..85b4e2d 100644
 +  t.equal(joinedOutput(), username, 'asks the registry instead of refusing')
 +})
 diff --git a/test/lib/npm.js b/test/lib/npm.js
-index 0957baa..1033bc9 100644
+index 0957baa..2dfc0f9 100644
 --- a/test/lib/npm.js
 +++ b/test/lib/npm.js
 @@ -739,3 +739,72 @@ t.test('usage', async t => {
@@ -1377,7 +1377,7 @@ index 0957baa..1033bc9 100644
 +  await npm.exec('config', ['list'])
 +})
 +
-+t.test('the token helper is not run over a route a project chose, and a credential for this run replaces it', async t => {
++t.test('the helper, the route a project chose and a credential for this run', async t => {
 +  const helper = require('../fixtures/token-helper')
 +  const homeDir = { '.npmrc': `//helper.example/:tokenHelper=${helper}\n` }
 +  const regKey = '//helper.example/'
@@ -3321,7 +3321,7 @@ index 9426265..a82ed55 100644
 2.52.0.windows.1
 
 
-From dc1e20f6f1843a48bbbaa94492c058d6ac5f41aa Mon Sep 17 00:00:00 2001
+From 4eb5f05c9bc2edeac22d2cb670d42572e5ca57c7 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 11:03:27 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
