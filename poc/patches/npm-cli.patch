@@ -1,4 +1,4 @@
-From 5de4820a8318858ee2ac9fc4098eb44de8673b11 Mon Sep 17 00:00:00 2001
+From b51be79dc61dccf41a070047ea4455a3fdb154f7 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -106,7 +106,7 @@ replaces.
  lib/utils/get-identity.js                  |   2 +-
  lib/utils/oidc.js                          |   3 +
  lib/utils/publish-config.js                |  24 +
- lib/utils/token-helper.js                  | 426 ++++++++++++
+ lib/utils/token-helper.js                  | 426 +++++++++++
  package.json                               |   2 +-
  test/fixtures/mock-npm.js                  |   6 +
  test/fixtures/token-helper/helper          |   2 +
@@ -115,19 +115,19 @@ replaces.
  test/lib/cli/update-notifier.js            |  18 +
  test/lib/commands/login.js                 |  42 ++
  test/lib/commands/logout.js                |  44 ++
- test/lib/commands/publish.js               |  78 +++
+ test/lib/commands/publish.js               |  78 ++
  test/lib/commands/unpublish.js             |  53 ++
  test/lib/commands/whoami.js                |  11 +
  test/lib/npm.js                            | 104 +++
  test/lib/utils/oidc.js                     |  30 +
  test/lib/utils/publish-config.js           |  26 +
- test/lib/utils/token-helper.js             | 746 ++++++++++++++++++++
+ test/lib/utils/token-helper.js             | 746 +++++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 297 ++++++++
+ workspaces/config/lib/index.js             | 320 ++++++++-
  workspaces/config/lib/set-envs.js          |  22 +
- workspaces/config/test/index.js            | 749 ++++++++++++++++++++-
- workspaces/config/test/set-envs.js         |  76 +++
- 31 files changed, 2933 insertions(+), 9 deletions(-)
+ workspaces/config/test/index.js            | 797 ++++++++++++++++++++-
+ workspaces/config/test/set-envs.js         |  76 ++
+ 31 files changed, 3003 insertions(+), 10 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -405,7 +405,7 @@ index fc390a2..1dd7684 100644
  
      const versions = await Unpublish.getKeysOfVersions(spec.name, opts)
 diff --git a/lib/npm.js b/lib/npm.js
-index 5c42dbe..00029a5 100644
+index 5c42dbe..d26f08e 100644
 --- a/lib/npm.js
 +++ b/lib/npm.js
 @@ -294,6 +294,22 @@ class Npm {
@@ -435,9 +435,9 @@ index 5c42dbe..00029a5 100644
      return this.#command?.name
    }
  
-+  // The environment npm was started with, before npm.load() sets NODE_ENV and
-+  // COLOR and config.setEnvs() sets EDITOR and NODE_OPTIONS from config: a
-+  // token helper gets those four back as the user had them.
++  // The environment npm was started with, before config.setEnvs() sets
++  // NODE_OPTIONS from config: a token helper gets NODE_OPTIONS back as the
++  // user had it. NODE_ENV, COLOR and EDITOR stay as npm left them.
 +  #startEnv = { ...process.env }
 +  #getAuthorization = null
 +
@@ -2291,7 +2291,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..6f2778e 100644
+index 37dfecf..d2f2e59 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -5,6 +5,7 @@ const nopt = require('nopt')
@@ -2411,7 +2411,29 @@ index 37dfecf..6f2778e 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -858,13 +938,221 @@ class Config {
+@@ -780,7 +860,20 @@ class Config {
+     // up loading the "project" config where the "userconfig" will be,
+     // which causes some calamities.  So, we only load project config if
+     // it doesn't match what the userconfig will be.
+-    if (projectFile !== this.#get('userconfig')) {
++    // The same file under two spellings (a HOME that is a link, the case of a
++    // drive letter) is the same file: loaded as the project's, the user's own
++    // `cafile` would count as the project's route.
++    const sameFile = (a, b) => {
++      if (a === b) {
++        return true
++      }
++      try {
++        return realpathSync.native(a) === realpathSync.native(b)
++      } catch {
++        return false
++      }
++    }
++    if (!sameFile(projectFile, this.#get('userconfig'))) {
+       return this.#loadFile(projectFile, 'project')
+     } else {
+       this.data.get('project').source = '(same as "user" config, ignored)'
+@@ -858,13 +951,229 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2452,8 +2474,10 @@ index 37dfecf..6f2778e 100644
 +        this.#tokenHelperRefusals.set(where,
 +          'its path was chosen on the command line or in the environment and lies ' +
 +          `inside ${inside.dir}, which holds ${inside.marker}: a repository can have written it. ` +
-+          'Use the default path, ~/.npmrc, for the file (a link there does), ' +
-+          'or move the tokenHelper line into the default user file')
++          (where === 'user'
++            ? 'Unset userconfig (NPM_CONFIG_USERCONFIG, --userconfig) so that the default path, ~/.npmrc, ' +
++              'is the file (a link there does), or keep the file outside any repository'
++            : 'Keep the file outside any repository, or move the tokenHelper line into the user file, ~/.npmrc'))
 +      } else {
 +        this.#tokenHelperTrusted.add(where)
 +      }
@@ -2488,18 +2512,24 @@ index 37dfecf..6f2778e 100644
 +  #chosenInsideProject (where) {
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
 +    // asked of the raw input: a value for globalconfig is stored beneath every layer.
-+    // A value in the environment that is the default path is the parent npm's own
-+    // export (setEnvs passes all three on), not a choice: nothing chose it. The
-+    // strings are compared, not the real paths, so that a link at the default
-+    // path of the user file (stow, dotbot) is still the user's own file.
++    // A value that is the default path is not a choice: nothing chose it, and a
++    // parent npm exports all three to every npm it starts. The default is what
++    // npm's own files leave, the builtin npmrc included (Homebrew writes the
++    // prefix there). The strings are compared, not the real paths, so that a
++    // link at the default path of the user file (stow, dotbot) is still the
++    // user's own file.
++    // (what that file holds itself: the layers inherit one another's values)
++    const builtin = this.data.get('builtin').data
++    const own = key => Object.hasOwn(builtin, key) ? builtin[key] : undefined
++    const prefix = resolve(own('prefix') ?? this.globalPrefix)
 +    const defaults = {
-+      userconfig: resolve(this.home, '.npmrc'),
-+      globalconfig: resolve(this.globalPrefix, 'etc/npmrc'),
-+      prefix: resolve(this.globalPrefix),
++      userconfig: resolve(own('userconfig') ?? join(this.home, '.npmrc')),
++      globalconfig: resolve(own('globalconfig') ?? join(prefix, 'etc/npmrc')),
++      prefix,
 +    }
 +    const set = (key, layer) => {
 +      const value = this.data.get(layer).raw[key]
-+      return value !== undefined && !(layer === 'env' && resolve(value) === defaults[key])
++      return value !== undefined && resolve(value) !== defaults[key]
 +    }
 +    const chosen = keys.some(key => ['cli', 'env'].some(layer => set(key, layer))) ||
 +      (where === 'global' && !!this.env.PREFIX)
@@ -2633,7 +2663,7 @@ index 37dfecf..6f2778e 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1264,15 @@ class Config {
+@@ -976,6 +1285,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2683,7 +2713,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..6f7e742 100644
+index 9f83d98..37323db 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -3,7 +3,7 @@ const t = require('tap')
@@ -2695,7 +2725,7 @@ index 9f83d98..6f7e742 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2468,750 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2468,798 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2709,7 +2739,7 @@ index 9f83d98..6f7e742 100644
 +// fixture (the fixture itself by default: the walk up from a chosen file stops
 +// there, and so never reaches the repository that holds these tests), `cwd`
 +// overrides the current directory
-+const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false, tree = {}, home = '', cwd = null, execPath = process.execPath, homeLink = '' } = {}) => {
++const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false, tree = {}, home = '', cwd = null, execPath = process.execPath, homeLink = '', builtin = '' } = {}) => {
 +  const path = t.testdir({
 +    home: { '.npmrc': user },
 +    prefix: { etc: { npmrc: global } },
@@ -2749,6 +2779,11 @@ index 9f83d98..6f7e742 100644
 +  if (project !== null) {
 +    fs.writeFileSync(join(path, 'project', '.npmrc'), fill(project))
 +  }
++  if (builtin) {
++    // the npmrc beside npm itself, where a package manager writes the prefix
++    fs.mkdirSync(join(path, 'npm'), { recursive: true })
++    fs.writeFileSync(join(path, 'npm', 'npmrc'), fill(builtin))
++  }
 +  const config = new Config({
 +    // outside any project the walk up the tree would end in the repository
 +    // that holds these tests, unless it meets npm's own directory first
@@ -2770,6 +2805,33 @@ index 9f83d98..6f7e742 100644
 +  const warned = logs.filter(l => l[0] === 'warn').map(l => l.join(' '))
 +  return { config, warned, path, linked }
 +}
++
++t.test('the user file under another spelling is not loaded again as the project file', async t => {
++  // a HOME that is a link, the case of a drive letter: the working directory's
++  // spelling is the real one, and the file is the same
++  const path = t.testdir({
++    real: { 'package.json': '{}', '.npmrc': `//h.registry/:tokenHelper=${HELPER}\nstrict-ssl=false\n` },
++  })
++  try {
++    fs.symlinkSync(join(path, 'real'), join(path, 'hl'), 'junction')
++  } catch {
++    return t.skip('links cannot be made here')
++  }
++  const config = new Config({
++    npmPath: `${path}/npm`,
++    env: { HOME: join(path, 'hl') },
++    argv: [process.execPath, __filename],
++    cwd: join(path, 'real'),
++    excludeNpmCwd: true,
++    shorthands,
++    definitions,
++    nerfDarts,
++    flatten,
++  })
++  await config.load()
++  t.equal(helperIn(config.flat, '//h.registry/'), HELPER, 'the helper in the user\'s own file is honoured')
++  t.same(config.tokenHelperProjectTransport, [], 'and its strict-ssl is not the project\'s')
++})
 +
 +t.test('tokenHelper is honored only from user and global config', async t => {
 +  const { config, warned } = await loadHelperConfig(t, {
@@ -2840,14 +2902,15 @@ index 9f83d98..6f7e742 100644
 +  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
 +  const real = (path, ...parts) => fs.realpathSync.native(join(path, ...parts))
 +  // the refusal names the directory that made it a project, and says what to do
-+  const refusedFor = (path, dir, marker) => [
++  const refusedFor = (path, dir, marker, where) => [
 +    `lies inside ${real(path, dir)}, which holds ${marker}`,
-+    'Use the default path, ~/.npmrc, for the file',
-+    'or move the tokenHelper line into the default user file',
++    ...where === 'user'
++      ? ['Unset userconfig (NPM_CONFIG_USERCONFIG, --userconfig)', 'so that the default path, ~/.npmrc, is the file']
++      : ['move the tokenHelper line into the user file, ~/.npmrc'],
 +  ]
 +  const isRefused = (t, { config, warned, path }, where, dir, marker, what = 'no helper from the file') => {
 +    t.notOk(helperIn(config.flat, '//helper.registry/'), what)
-+    for (const part of refusedFor(path, dir, marker)) {
++    for (const part of refusedFor(path, dir, marker, where)) {
 +      t.ok(warned.some(w => w.includes(part)), `reported: ${part}`)
 +    }
 +    t.ok(config.tokenHelperUntrusted.includes(where), 'and passed on to child processes')
@@ -2993,6 +3056,17 @@ index 9f83d98..6f7e742 100644
 +    t.notOk(helperIn(other.config.flat, '//helper.registry/'), 'a prefix that is not the default is still a choice')
 +  })
 +
++  t.test('a prefix that the builtin npmrc sets is the default too', async t => {
++    // Homebrew writes its prefix into the npmrc beside npm; a child gets it back from its parent
++    const { config } = await loadHelperConfig(t, {
++      files: false,
++      tree: { n: { '.git': {}, etc: { npmrc: keyed } } },
++      builtin: 'prefix=<path>/n\n',
++      env: { npm_config_prefix: '<path>/n', npm_config_globalconfig: '<path>/n/etc/npmrc' },
++    })
++    t.equal(helperIn(config.flat, '//helper.registry/'), HELPER)
++  })
++
 +  t.test('the default user file a parent npm passed on is not a choice, even as a link', async t => {
 +    const tree = { dotfiles: { '.git': {}, npmrc: keyed } }
 +    const linked = await loadHelperConfig(t, {
@@ -3002,6 +3076,10 @@ index 9f83d98..6f7e742 100644
 +      return t.skip('symbolic links cannot be made here')
 +    }
 +    t.equal(helperIn(linked.config.flat, '//helper.registry/'), HELPER, 'a link at ~/.npmrc is the remedy the refusal names')
++    const typed = await loadHelperConfig(t, {
++      files: false, tree, homeLink: 'dotfiles/npmrc', argv: ['--userconfig=<path>/.npmrc'],
++    })
++    t.equal(helperIn(typed.config.flat, '//helper.registry/'), HELPER, 'the same when the default path is typed on the command line')
 +    const chosen = await loadHelperConfig(t, {
 +      files: false, tree, env: { npm_config_userconfig: '<path>/dotfiles/npmrc' },
 +    })
@@ -3534,7 +3612,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From c3414bd15df1d2fa0f25371a07752da337c86de5 Mon Sep 17 00:00:00 2001
+From 5cba020169a84793f0961b7be360baf77cf22eb3 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
@@ -3554,14 +3632,14 @@ exit status 127 or 9009 says that a tool the script calls was not found and to
 give its absolute path, and a .ps1 or .js file on Windows, which Windows does
 not start directly, is refused with a pointer to a .cmd wrapper.
 ---
- docs/lib/content/configuring-npm/npmrc.md |  6 ++--
- lib/commands/profile.js                   | 12 ++++++-
- lib/utils/error-message.js                | 34 ++++++++++++++++++++
- lib/utils/token-helper.js                 | 39 ++++++++++++++++++++++-
- test/lib/commands/profile.js              | 19 +++++++++++
- test/lib/utils/error-message.js           | 26 +++++++++++++++
- test/lib/utils/token-helper.js            | 35 +++++++++++++++++++-
- 7 files changed, 166 insertions(+), 5 deletions(-)
+ docs/lib/content/configuring-npm/npmrc.md |  6 ++-
+ lib/commands/profile.js                   | 12 +++++-
+ lib/utils/error-message.js                | 34 +++++++++++++++++
+ lib/utils/token-helper.js                 | 45 ++++++++++++++++++++++-
+ test/lib/commands/profile.js              | 19 ++++++++++
+ test/lib/utils/error-message.js           | 26 +++++++++++++
+ test/lib/utils/token-helper.js            | 36 +++++++++++++++++-
+ 7 files changed, 172 insertions(+), 6 deletions(-)
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
 index 0a3b90c..a0d513c 100644
@@ -3672,21 +3750,29 @@ index 41e35bd..645684d 100644
          // npm ERR! code E401
          // npm ERR! Unable to authenticate, need: Basic
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
-index 036c85b..c14a97e 100644
+index 036c85b..9642ecb 100644
 --- a/lib/utils/token-helper.js
 +++ b/lib/utils/token-helper.js
-@@ -76,6 +76,9 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
+@@ -76,6 +76,11 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
    '(a shell script, or a .cmd file on Windows) and give the path of the script'
  const BARE_NAME = 'must be an absolute path: give the full path of the program ' +
    '(a bare name would be looked up on a PATH that a project can extend)'
++const TILDE = 'must be an absolute path: npm does not expand `~` in it, so give the full path ' +
++  '(`${HOME}` is expanded: `${HOME}/bin/helper`)'
 +const WINDOWS_SCRIPT = 'is a .ps1 or .js file, which Windows does not start directly: ' +
 +  'use a .cmd wrapper that starts it and give the path of the wrapper'
 +
  // `aws codeartifact get-authorization-token` is not a path, and neither is
  // `/usr/bin/aws codeartifact ...`; a real path with a space in it is. A path
  // with whitespace in it that does not exist is told apart by what comes before
-@@ -88,6 +91,9 @@ const refusal = (helper, platform) => {
-     return typeof helper === 'string' && /\s/.test(helper) ? ARGUMENTS : BARE_NAME
+@@ -85,9 +90,14 @@ const BARE_NAME = 'must be an absolute path: give the full path of the program '
+ const refusal = (helper, platform) => {
+   const paths = platform === 'win32' ? path.win32 : path.posix
+   if (typeof helper !== 'string' || !paths.isAbsolute(helper)) {
+-    return typeof helper === 'string' && /\s/.test(helper) ? ARGUMENTS : BARE_NAME
++    return typeof helper === 'string' && /\s/.test(helper) ? ARGUMENTS
++      : typeof helper === 'string' && helper.startsWith('~') ? TILDE
++      : BARE_NAME
    }
    if (platform === 'win32') {
 +    if (/\.(ps1|js)$/i.test(helper)) {
@@ -3695,7 +3781,7 @@ index 036c85b..c14a97e 100644
      if (path.win32.dirname(helper).length > MAX_WIN_CWD) {
        return `is in a directory whose path is longer than ${MAX_WIN_CWD} characters, ` +
          'where Windows cannot start a program: move it to a shorter path'
-@@ -134,6 +140,31 @@ const toHeader = (label, stdout) => {
+@@ -134,6 +144,31 @@ const toHeader = (label, stdout) => {
    return /^[A-Za-z]+ /.test(token) ? token : `Bearer ${token}`
  }
  
@@ -3727,7 +3813,7 @@ index 036c85b..c14a97e 100644
  // Why the helper failed, in words for the user. For a failure to start the
  // message of the error is "spawn <path> ENOENT" and never contains output.
  const failure = (helper, label, err) => {
-@@ -142,12 +173,18 @@ const failure = (helper, label, err) => {
+@@ -142,12 +177,18 @@ const failure = (helper, label, err) => {
    let reason
    if (signal) {
      reason = `was killed by ${signal}`
@@ -3815,7 +3901,7 @@ index 44a57ec..1e270e1 100644
    const { errorMessage } = await loadMockNpm(t)
  
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
-index c2c59e0..0cb51ac 100644
+index c2c59e0..871a517 100644
 --- a/test/lib/utils/token-helper.js
 +++ b/test/lib/utils/token-helper.js
 @@ -147,10 +147,17 @@ t.test('a failure names the helper, carries signal and never the output', async
@@ -3868,7 +3954,11 @@ index c2c59e0..0cb51ac 100644
  t.test('values that are not an absolute path with no arguments say what to do', async t => {
    const dir = t.testdir({
      script: '#!/bin/sh\n',
-@@ -184,6 +215,8 @@ t.test('values that are not an absolute path with no arguments say what to do',
+@@ -181,9 +212,12 @@ t.test('values that are not an absolute path with no arguments say what to do',
+   await refused('aws', /must be an absolute path: give the full path of the program/, 'linux')
+   await refused('./relative/token', /must be an absolute path: give the full path/, 'linux')
+   await refused(true, /must be an absolute path: give the full path.*PATH that a project can extend/, 'linux')
++  await refused('~/bin/helper', /npm does not expand `~`.*\$\{HOME\}\/bin\/helper/, 'linux')
    await refused(`${absolute('script')} --domain x`, /put the command in a two-line script/, HOST)
    await refused(`${join(absolute('dir with space'), 'script')} --domain x`, /two-line script/, HOST)
    await refused(`${absolute('missing')} --domain x`, /was not found/, HOST)
