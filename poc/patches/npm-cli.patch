@@ -1,4 +1,4 @@
-From e67e337d0f4079eb7fbe332d9fbf77a80f27ffc0 Mon Sep 17 00:00:00 2001
+From 34c82c52b0cb0836d3bcff9d3a6972286806171d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -114,20 +114,20 @@ replaces.
  test/fixtures/token-helper/index.js        |   5 +
  test/lib/cli/update-notifier.js            |  18 +
  test/lib/commands/login.js                 |  42 +
- test/lib/commands/logout.js                |  44 ++
+ test/lib/commands/logout.js                |  44 +
  test/lib/commands/publish.js               |  78 ++
  test/lib/commands/unpublish.js             |  82 ++
  test/lib/commands/whoami.js                |  11 +
  test/lib/npm.js                            | 104 +++
  test/lib/utils/oidc.js                     |  30 +
  test/lib/utils/publish-config.js           |  26 +
- test/lib/utils/token-helper.js             | 746 ++++++++++++++++++
+ test/lib/utils/token-helper.js             | 746 +++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 345 +++++++-
+ workspaces/config/lib/index.js             | 351 +++++++-
  workspaces/config/lib/set-envs.js          |  22 +
- workspaces/config/test/index.js            | 876 ++++++++++++++++++++-
+ workspaces/config/test/index.js            | 885 ++++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  76 ++
- 31 files changed, 3140 insertions(+), 10 deletions(-)
+ 31 files changed, 3155 insertions(+), 10 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -2333,7 +2333,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..98741ce 100644
+index 37dfecf..0c73b96 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -5,6 +5,7 @@ const nopt = require('nopt')
@@ -2475,7 +2475,7 @@ index 37dfecf..98741ce 100644
        return this.#loadFile(projectFile, 'project')
      } else {
        this.data.get('project').source = '(same as "user" config, ignored)'
-@@ -858,13 +951,254 @@ class Config {
+@@ -858,13 +951,260 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2516,7 +2516,7 @@ index 37dfecf..98741ce 100644
 +        this.#tokenHelperRefusals.set(where,
 +          'its path was chosen on the command line or in the environment and npm cannot tell where ' +
 +          'the file comes from (a pipe, or a path it cannot resolve): write it to a file outside any repository')
-+      } else if (inside) {
++      } else if (inside?.dir) {
 +        this.#tokenHelperRefusals.set(where,
 +          'its path was chosen on the command line or in the environment and lies ' +
 +          `inside ${inside.dir}, which holds ${inside.marker}: a repository can have written it. ` +
@@ -2544,9 +2544,10 @@ index 37dfecf..98741ce 100644
 +  // `location`, which project config can set. The walk stops at the home
 +  // directory, which is never looked at: the user's own files are there or
 +  // below it, and a stray package.json in home must not make them a project's.
-+  // Returns the directory and the mark that made it a project, `{ unresolved:
-+  // true }` for a file that is there and has no real path to look at, or null.
-+  // A file that does not exist has no key to refuse.
++  // Returns the directory and the mark that made it a project; `{ unresolved:
++  // true }` for a file that is there and is no regular file or has no real path
++  // to look at (a pipe, a device); an object with neither for anything else. A
++  // file that does not exist has no key to refuse.
 +  //
 +  // Limits, documented in the RFC: HOME set to the checkout (every tool
 +  // trusts HOME, and the default user file is then the repository's own
@@ -2602,12 +2603,17 @@ index 37dfecf..98741ce 100644
 +    let file
 +    try {
 +      file = realpathSync.native(configured)
++      // a pipe or a device has a path and no origin to look at: on macOS
++      // /dev/fd/N resolves to itself
++      if (!statSync(file).isFile()) {
++        return { unresolved: true }
++      }
 +    } catch {
 +      // a file that is not there has no key to refuse; one that is there and
 +      // has no real path (a pipe: NPM_CONFIG_USERCONFIG=<(cat .npmrc),
 +      // --userconfig /dev/stdin) or that cannot be resolved has an origin
 +      // npm cannot check
-+      return existsSync(configured) ? { unresolved: true } : null
++      return { unresolved: existsSync(configured) }
 +    }
 +    let home = null
 +    try {
@@ -2730,7 +2736,7 @@ index 37dfecf..98741ce 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1310,15 @@ class Config {
+@@ -976,6 +1316,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2780,7 +2786,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..bd587f9 100644
+index 9f83d98..c6c2f3e 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,8 +2,9 @@ const t = require('tap')
@@ -2794,7 +2800,7 @@ index 9f83d98..bd587f9 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2469,876 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2469,885 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -3140,6 +3146,15 @@ index 9f83d98..bd587f9 100644
 +    t.same(out.untrusted, ['user'], 'and passed on to child processes')
 +    t.ok(out.logs.some(l => l.includes('npm cannot tell where the file comes from (a pipe, or a path it cannot resolve)')),
 +      'reported, with the remedy')
++  })
++
++  t.test('a path that is not a file is no file to place, and holds nothing to refuse', async t => {
++    // a directory, and on POSIX also /dev/null, which people give to switch the user file off
++    for (const chosen of ['<path>/project/sub', ...process.platform === 'win32' ? [] : ['/dev/null']]) {
++      const { config } = await loadHelperConfig(t, { files: false, argv: [`--userconfig=${chosen}`] })
++      t.notOk(helperIn(config.flat, '//helper.registry/'), chosen)
++      t.same(config.tokenHelperUntrusted, [], 'it holds no tokenHelper line, so nothing is passed on')
++    }
 +  })
 +
 +  t.test('the default global prefix a parent npm passed on is not a choice', async t => {
@@ -3759,7 +3774,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From 77cf4f88fbb0c8b8bc3ab2e8d7d10b82fc60ab9c Mon Sep 17 00:00:00 2001
+From 6b5caba2f41fe663daf79d7774049f7be92eefcf Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
