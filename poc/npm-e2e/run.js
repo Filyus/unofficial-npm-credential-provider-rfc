@@ -511,6 +511,68 @@ const main = async () => {
     expect(homeRun, 'a file chosen in a home that holds a package.json and a .git is the user\'s: its helper runs',
       !homeRun.failed && homeMarked.ran() && auths(homeRun).join() === 'Bearer helper-token')
 
+    // A user file that was refused (the project chose it, or it lies in the
+    // checkout) names no global file: its `globalconfig=` is the repository's
+    // word as much as the file is, so the global file it names is untrusted
+    // too, though that file lies where nothing marks it. A repository alone is
+    // enough: its .npmrc chooses u.npmrc, which names g.npmrc, which holds the
+    // helper. The control is the user's own file, given the usual way, naming a
+    // global file outside the repository: the helper runs.
+    const chain = { userconfigFlag: false, globalconfigFlag: false }
+    const named = markedHelper('user-file-names-global')
+    const namedRun = await run('user-file-names-global', {
+      ...chain, project: 'userconfig=<dir>/u.npmrc\n',
+      files: { 'u.npmrc': 'globalconfig=<dir>/g.npmrc\n', 'g.npmrc': named.line },
+    })
+    const namedControl = markedHelper('user-file-names-global-control')
+    const namedControlRun = await run('user-file-names-global-control', {
+      globalconfigFlag: false, user: 'globalconfig=<outside>/g.npmrc\n', outsideFiles: { 'g.npmrc': namedControl.line },
+    })
+    // CI pointing a file in the checkout, the environment form of the same chain
+    const namedEnv = markedHelper('user-file-names-global-env')
+    const namedEnvRun = await run('user-file-names-global-env', {
+      ...chain, env: { NPM_CONFIG_USERCONFIG: '<dir>/u.npmrc' },
+      files: { 'u.npmrc': 'globalconfig=<dir>/g.npmrc\n', 'g.npmrc': namedEnv.line },
+    })
+    located.push(namedRun, namedControlRun, namedEnvRun)
+    for (const [result, marked, what] of [
+      [namedRun, named, 'a user file the project chose'],
+      [namedEnvRun, namedEnv, 'a user file the environment put inside the checkout'],
+    ]) {
+      expect(result, 'view still reaches the registry', !result.failed && result.requests.length > 0)
+      expect(result, `the global file that ${what} names supplies no credential, and its helper was not run`,
+        auths(result).join() === '-' && !marked.ran())
+      expect(result, 'the global config is reported as ignored, because the user file that names it is not the user\'s own',
+        result.notices.some(l => l.includes('Ignoring global config') && l.includes('sets globalconfig')))
+    }
+    expect(namedControlRun, 'control: the global file that the user\'s own file names, outside the repository, is the user\'s: its helper runs and its token is sent',
+      !namedControlRun.failed && namedControl.ran() && auths(namedControlRun).join() === 'Bearer helper-token')
+
+    // DESTDIR moves npm's default global prefix on Unix (/usr/local becomes
+    // $DESTDIR/usr/local), so a repository that holds the file at that path
+    // and is the DESTDIR makes it the global file. The path comes from this
+    // node's own prefix, as npm computes it. The control is the helper in the
+    // global file the harness uses everywhere else, with no DESTDIR.
+    if (process.platform === 'win32') {
+      notes.push('DESTDIR is only used on Unix: the destdir-into-the-checkout checks were skipped')
+    } else {
+      const destdir = markedHelper('destdir-into-the-checkout')
+      const destdirFile = path.join(path.dirname(path.dirname(process.execPath)), 'etc', 'npmrc')
+      const destdirRun = await run('destdir-into-the-checkout', {
+        globalconfigFlag: false, env: { DESTDIR: '<dir>' }, files: { [destdirFile]: destdir.line },
+      })
+      const destdirControl = markedHelper('destdir-into-the-checkout-control')
+      const destdirControlRun = await run('destdir-into-the-checkout-control', {
+        homeFiles: { 'global.npmrc': destdirControl.line },
+      })
+      located.push(destdirRun, destdirControlRun)
+      expect(destdirRun, 'view still reaches the registry', !destdirRun.failed && destdirRun.requests.length > 0)
+      expect(destdirRun, 'a DESTDIR that is the checkout makes its global file the repository\'s: no credential is sent, and its helper was not run',
+        auths(destdirRun).join() === '-' && !destdir.ran())
+      expect(destdirControlRun, 'control: the same helper in the global file the user gave, with no DESTDIR, runs and its token is sent',
+        !destdirControlRun.failed && destdirControl.ran() && auths(destdirControlRun).join() === 'Bearer helper-token')
+    }
+
     // a value that is not an existing file is never printed, whichever message it is in
     const pasted = '/9j/4AAQSkZJRgABAQAAAQABAAD+AbCdEfGh=='
     const pastedToken = await run('pasted-token-is-not-shown', { user: `${nerf}:tokenHelper=${pasted}\n` })
