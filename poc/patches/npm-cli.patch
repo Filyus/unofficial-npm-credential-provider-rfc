@@ -1,4 +1,4 @@
-From 3a84c65fa05c1dff2266fefd829f4848eb93e623 Mon Sep 17 00:00:00 2001
+From 80acb281b643fc559c99b1ac251bbb6bb101dac7 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -125,9 +125,9 @@ replaces.
  workspaces/config/lib/definitions/index.js |    8 +
  workspaces/config/lib/index.js             |  370 ++++++-
  workspaces/config/lib/set-envs.js          |   22 +
- workspaces/config/test/index.js            | 1063 +++++++++++++++++++-
+ workspaces/config/test/index.js            | 1059 +++++++++++++++++++-
  workspaces/config/test/set-envs.js         |   76 ++
- 31 files changed, 3352 insertions(+), 10 deletions(-)
+ 31 files changed, 3348 insertions(+), 10 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -2805,7 +2805,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..ee5629c 100644
+index 9f83d98..70d49ff 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,8 +2,9 @@ const t = require('tap')
@@ -2819,7 +2819,7 @@ index 9f83d98..ee5629c 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2469,1063 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2469,1059 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2860,6 +2860,14 @@ index 9f83d98..ee5629c 100644
 +      // the test skips itself when there is no link
 +    }
 +  }
++  // contents that name files of the fixture by path
++  const fillIn = s => s.replaceAll('<path>', path.replaceAll('\\', '/'))
++  for (const [file, text] of [['home/.npmrc', user], ['prefix/etc/npmrc', global], ['project/ci.npmrc', sub],
++    ['project/sub/etc/npmrc', sub], ['outside/x.npmrc', sub]]) {
++    if (text.includes('<path>')) {
++      fs.writeFileSync(join(path, file), fillIn(text))
++    }
++  }
 +  let linked = true
 +  if (homeLink) {
 +    // the default user file is a link into a dotfiles directory (stow, dotbot)
@@ -2895,15 +2903,7 @@ index 9f83d98..ee5629c 100644
 +    nerfDarts,
 +    flatten,
 +  })
-+  // a relative path in a config value is resolved against the process's own
-+  // current directory, which is the config's in a real run
-+  const before = process.cwd()
-+  process.chdir(workDir)
-+  try {
-+    await config.load()
-+  } finally {
-+    process.chdir(before)
-+  }
++  await config.load()
 +  config.logWarnings()
 +  const warned = logs.filter(l => l[0] === 'warn').map(l => l.join(' '))
 +  return { config, warned, path, linked }
@@ -2995,17 +2995,13 @@ index 9f83d98..ee5629c 100644
 +  const { config, path } = loaded
 +  // a file that is not written where it should be lands in the current
 +  // directory, named for the ignored layer
-+  const before = process.cwd()
-+  process.chdir(path)
-+  try {
-+    config.set('save-prefix', '~', 'project')
-+    await config.save('project')
-+  } finally {
-+    process.chdir(before)
-+  }
++  const junk = '(same as "user" config, ignored)'
++  t.teardown(() => fs.rmSync(junk, { force: true }))
++  config.set('save-prefix', '~', 'project')
++  await config.save('project')
 +  t.equal(fs.readFileSync(join(path, 'real', '.npmrc'), 'utf8').trim().split(/\r?\n/).sort().join('|'),
 +    'save-exact=true|save-prefix=~', 'the real file keeps its lines and gets the new one')
-+  t.same(fs.readdirSync(path).filter(f => f.startsWith('(same')), [], 'no file is named for an ignored layer')
++  t.notOk(fs.existsSync(junk), 'no file is named for an ignored layer')
 +})
 +
 +t.test('a user file that project config chose is the repository\'s, and so is its route', async t => {
@@ -3104,9 +3100,9 @@ index 9f83d98..ee5629c 100644
 +    t.ok(config.tokenHelperUntrusted.includes('global'), 'and passed on to child processes')
 +  }
 +  for (const [name, user, key] of [
-+    ['globalconfig', 'globalconfig=./ci.npmrc\n', 'globalconfig'],
-+    ['prefix', 'prefix=./sub\n', 'prefix'],
-+    ['prefix spelled through an expansion', 'pre${EMPTY}fix=./sub\n', 'prefix'],
++    ['globalconfig', 'globalconfig=<path>/project/ci.npmrc\n', 'globalconfig'],
++    ['prefix', 'prefix=<path>/project/sub\n', 'prefix'],
++    ['prefix spelled through an expansion', 'pre${EMPTY}fix=<path>/project/sub\n', 'prefix'],
 +  ]) {
 +    t.test(name, async t => {
 +      refused(t, await loadHelperConfig(t, {
@@ -3117,14 +3113,14 @@ index 9f83d98..ee5629c 100644
 +
 +  t.test('a user file that the environment put inside the checkout', async t => {
 +    refused(t, await loadHelperConfig(t, {
-+      sub: `globalconfig=./sub/etc/npmrc\n${keyed}`,
++      sub: `globalconfig=<path>/project/sub/etc/npmrc\n${keyed}`,
 +      files: false,
 +      env: { NPM_CONFIG_USERCONFIG: '<path>/project/ci.npmrc' },
 +    }), 'globalconfig')
 +  })
 +
 +  t.test('a user file that is the user\'s own names its global file', async t => {
-+    for (const user of ['globalconfig=./ci.npmrc\n', 'prefix=./sub\n']) {
++    for (const user of ['globalconfig=<path>/project/ci.npmrc\n', 'prefix=<path>/project/sub\n']) {
 +      const { config } = await loadHelperConfig(t, {
 +        user, sub: keyed, files: false, argv: ['--userconfig=<path>/home/.npmrc'],
 +      })
@@ -3138,7 +3134,7 @@ index 9f83d98..ee5629c 100644
 +  })
 +
 +  t.test('a child npm refuses it too', async t => {
-+    const parent = await loadHelperConfig(t, { project: chose, user: 'globalconfig=./ci.npmrc\n', sub: keyed, files: false })
++    const parent = await loadHelperConfig(t, { project: chose, user: 'globalconfig=<path>/project/ci.npmrc\n', sub: keyed, files: false })
 +    const inherited = Object.fromEntries(Object.entries(parent.config.env)
 +      .filter(([key]) => /^npm_config_(userconfig|globalconfig|token_helper_untrusted)$/.test(key)))
 +    t.same(Object.keys(inherited).sort(),
@@ -3971,7 +3967,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From 315664bccf05a3490a968a185abb5d89a88808b2 Mon Sep 17 00:00:00 2001
+From 6c340b859970310f32a1bf71b1bb3749d4439978 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
