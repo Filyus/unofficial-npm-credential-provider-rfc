@@ -1,4 +1,4 @@
-From 34c82c52b0cb0836d3bcff9d3a6972286806171d Mon Sep 17 00:00:00 2001
+From 3a84c65fa05c1dff2266fefd829f4848eb93e623 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -96,38 +96,38 @@ says that the setting has to be removed and names a token stored beside it
 without revoking it, instead of revoking a token the helper's credential
 replaces.
 ---
- docs/lib/content/configuring-npm/npmrc.md  |  83 +-
- lib/cli/update-notifier.js                 |   2 +
- lib/commands/login.js                      |  13 +
- lib/commands/logout.js                     |  23 +
- lib/commands/publish.js                    |  11 +-
- lib/commands/unpublish.js                  |  11 +-
- lib/npm.js                                 |  28 +
- lib/utils/get-identity.js                  |   2 +-
- lib/utils/oidc.js                          |   3 +
- lib/utils/publish-config.js                |  24 +
- lib/utils/token-helper.js                  | 426 ++++++++++
- package.json                               |   2 +-
- test/fixtures/mock-npm.js                  |   6 +
- test/fixtures/token-helper/helper          |   2 +
- test/fixtures/token-helper/helper.cmd      |   1 +
- test/fixtures/token-helper/index.js        |   5 +
- test/lib/cli/update-notifier.js            |  18 +
- test/lib/commands/login.js                 |  42 +
- test/lib/commands/logout.js                |  44 +
- test/lib/commands/publish.js               |  78 ++
- test/lib/commands/unpublish.js             |  82 ++
- test/lib/commands/whoami.js                |  11 +
- test/lib/npm.js                            | 104 +++
- test/lib/utils/oidc.js                     |  30 +
- test/lib/utils/publish-config.js           |  26 +
- test/lib/utils/token-helper.js             | 746 +++++++++++++++++
- workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 351 +++++++-
- workspaces/config/lib/set-envs.js          |  22 +
- workspaces/config/test/index.js            | 885 ++++++++++++++++++++-
- workspaces/config/test/set-envs.js         |  76 ++
- 31 files changed, 3155 insertions(+), 10 deletions(-)
+ docs/lib/content/configuring-npm/npmrc.md  |   83 +-
+ lib/cli/update-notifier.js                 |    2 +
+ lib/commands/login.js                      |   13 +
+ lib/commands/logout.js                     |   23 +
+ lib/commands/publish.js                    |   11 +-
+ lib/commands/unpublish.js                  |   11 +-
+ lib/npm.js                                 |   28 +
+ lib/utils/get-identity.js                  |    2 +-
+ lib/utils/oidc.js                          |    3 +
+ lib/utils/publish-config.js                |   24 +
+ lib/utils/token-helper.js                  |  426 ++++++++
+ package.json                               |    2 +-
+ test/fixtures/mock-npm.js                  |    6 +
+ test/fixtures/token-helper/helper          |    2 +
+ test/fixtures/token-helper/helper.cmd      |    1 +
+ test/fixtures/token-helper/index.js        |    5 +
+ test/lib/cli/update-notifier.js            |   18 +
+ test/lib/commands/login.js                 |   42 +
+ test/lib/commands/logout.js                |   44 +
+ test/lib/commands/publish.js               |   78 ++
+ test/lib/commands/unpublish.js             |   82 ++
+ test/lib/commands/whoami.js                |   11 +
+ test/lib/npm.js                            |  104 ++
+ test/lib/utils/oidc.js                     |   30 +
+ test/lib/utils/publish-config.js           |   26 +
+ test/lib/utils/token-helper.js             |  746 ++++++++++++++
+ workspaces/config/lib/definitions/index.js |    8 +
+ workspaces/config/lib/index.js             |  370 ++++++-
+ workspaces/config/lib/set-envs.js          |   22 +
+ workspaces/config/test/index.js            | 1063 +++++++++++++++++++-
+ workspaces/config/test/set-envs.js         |   76 ++
+ 31 files changed, 3352 insertions(+), 10 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -2333,7 +2333,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..0c73b96 100644
+index 37dfecf..cd4b822 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -5,6 +5,7 @@ const nopt = require('nopt')
@@ -2366,7 +2366,7 @@ index 37dfecf..0c73b96 100644
  const fileExists = (...p) => stat(resolve(...p))
    .then((st) => st.isFile())
    .catch(() => false)
-@@ -64,6 +78,13 @@ class Config {
+@@ -64,6 +78,16 @@ class Config {
    // Entries: { where, key, baseKey, source }. `baseKey` is non-null only for scoped keys (e.g. `<nerfdart>:foo`) and holds the trailing segment.
    // `env` and `publishConfig` entries warn instead of error.
    #unknownConfigs = []
@@ -2377,10 +2377,13 @@ index 37dfecf..0c73b96 100644
 +  #tokenHelperRefusals = new Map()
 +  #publishConfigRoute = {}
 +  #tokenHelperSeen = new Set()
++  // The project .npmrc is the user file under another spelling (see
++  // loadProjectConfig): the project layer is the user's own file.
++  #projectIsUserFile = false
  
    static get typeDefs () {
      return typeDefs
-@@ -645,6 +666,18 @@ class Config {
+@@ -645,6 +669,22 @@ class Config {
        conf.raw = obj
        outer: for (const [key, value] of Object.entries(obj)) {
          const k = envReplace(key, this.env)
@@ -2390,16 +2393,20 @@ index 37dfecf..0c73b96 100644
 +        if (/(^|:)tokenHelper$/.test(k)) {
 +          this.#tokenHelperSeen.add(where)
 +          if (!this.#tokenHelperTrusted.has(where)) {
-+            const why = this.#tokenHelperRefusals.get(where) ||
-+              'tokenHelper may only be set in user or global config'
-+            this.queueWarning(`token-helper:${where}:${k}`, `Ignoring ${where} config "${k}": ${why}.`)
++            // the user file loaded again as the project's: its own layer
++            // honours the key, or warns when it may not
++            if (where !== 'project' || !this.#projectIsUserFile) {
++              const why = this.#tokenHelperRefusals.get(where) ||
++                'tokenHelper may only be set in user or global config'
++              this.queueWarning(`token-helper:${where}:${k}`, `Ignoring ${where} config "${k}": ${why}.`)
++            }
 +            continue
 +          }
 +        }
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +711,53 @@ class Config {
+@@ -678,6 +718,53 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -2453,29 +2460,27 @@ index 37dfecf..0c73b96 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -780,7 +860,20 @@ class Config {
+@@ -780,7 +867,18 @@ class Config {
      // up loading the "project" config where the "userconfig" will be,
      // which causes some calamities.  So, we only load project config if
      // it doesn't match what the userconfig will be.
 -    if (projectFile !== this.#get('userconfig')) {
-+    // The same file under two spellings (a HOME that is a link, the case of a
-+    // drive letter) is the same file: loaded as the project's, the user's own
-+    // `cafile` would count as the project's route.
-+    const sameFile = (a, b) => {
-+      if (a === b) {
-+        return true
-+      }
++    const userFile = this.#get('userconfig')
++    if (projectFile !== userFile) {
++      // The same file under two spellings (a HOME that is a link, the case of
++      // a drive letter) is loaded twice, as it always was, so that saving the
++      // project config writes it. The token helper rules need to know: the
++      // user's own `cafile` is not the project's route. userFile is the path
++      // before the project file is read, which may set `userconfig` itself.
 +      try {
-+        return realpathSync.native(a) === realpathSync.native(b)
++        this.#projectIsUserFile = realpathSync.native(projectFile) === realpathSync.native(userFile)
 +      } catch {
-+        return false
++        // a file that is not there, or cannot be resolved, is not the user's
 +      }
-+    }
-+    if (!sameFile(projectFile, this.#get('userconfig'))) {
        return this.#loadFile(projectFile, 'project')
      } else {
        this.data.get('project').source = '(same as "user" config, ignored)'
-@@ -858,13 +951,260 @@ class Config {
+@@ -858,13 +956,274 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2494,7 +2499,9 @@ index 37dfecf..0c73b96 100644
 +  // treats as "user" or "global". So a token helper counts from the user file
 +  // only when project config does not set `userconfig`, and from the global
 +  // file only when it sets neither `globalconfig` nor `prefix`; the default
-+  // path of the user file does not depend on the other two. Keys are compared
++  // path of the user file does not depend on the other two. A user file that
++  // is not trusted is the repository's too, and so is the global file it
++  // names with `globalconfig` or `prefix`. Keys are compared
 +  // as npm applies them, after ${VAR} expansion: `user${UNSET?}config=` is
 +  // `userconfig`. A child npm inherits the chosen paths as environment values,
 +  // so its parent passes on which files it did not trust. A file that is not
@@ -2502,12 +2509,20 @@ index 37dfecf..0c73b96 100644
 +  // settings of the route of a request too (tokenHelperProjectTransport), not
 +  // only for the tokenHelper key.
 +  #trustTokenHelpers (where) {
-+    const { raw } = this.data.get('project')
++    // the project layer that is the user's own file chose nothing
++    const projectRaw = this.#projectIsUserFile ? {} : this.data.get('project').raw
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
-+    const chosen = keys.find(key => Object.keys(raw).some(k => envReplace(k, this.env) === key))
++    const setIn = (raw, key) => Object.keys(raw).some(k => envReplace(k, this.env) === key)
++    const chosen = keys.find(key => setIn(projectRaw, key))
++    // a user file that is not the user's own can name the global file as well
++    const viaUser = where === 'global' && this.#tokenHelperRefusals.has('user') &&
++      keys.find(key => setIn(this.data.get('user').raw, key))
 +    if (chosen) {
 +      this.#tokenHelperRefusals.set(where,
 +        `project config sets ${chosen}, so the ${where} file may not be the user's own`)
++    } else if (viaUser) {
++      this.#tokenHelperRefusals.set(where,
++        `the user file is not the user's own and sets ${viaUser}, so the ${where} file may not be either`)
 +    } else if (this.#inheritedUntrusted().includes(where)) {
 +      this.#tokenHelperRefusals.set(where, 'the parent npm process did not trust it')
 +    } else {
@@ -2594,8 +2609,9 @@ index 37dfecf..0c73b96 100644
 +      return value !== undefined &&
 +        ![defaults[key], userOwn(key)].includes(resolve(value))
 +    }
++    // PREFIX and DESTDIR (Unix) move the default global prefix: loadGlobalPrefix
 +    const chosen = keys.some(key => ['cli', 'env'].some(layer => set(key, layer))) ||
-+      (where === 'global' && !!this.env.PREFIX)
++      (where === 'global' && !!(this.env.PREFIX || this.env.DESTDIR))
 +    if (!chosen) {
 +      return null
 +    }
@@ -2672,7 +2688,8 @@ index 37dfecf..0c73b96 100644
 +  // repository chose a setting when it comes from
 +  // - the project .npmrc, or a user or global file that #trustTokenHelpers did
 +  //   not trust, which the repository chose or can have written: it is the
-+  //   project's layer for this rule as for the tokenHelper key;
++  //   project's layer for this rule as for the tokenHelper key. A project
++  //   .npmrc that is the trusted user file under another spelling is not;
 +  // - the environment, for a key that a parent npm listed in
 +  //   npm_config_token_helper_project_transport: a parent exports its project
 +  //   config to a child as npm_config_* values, which the child reads as the
@@ -2690,6 +2707,8 @@ index 37dfecf..0c73b96 100644
 +    if (!inherited.length && !configured) {
 +      return []
 +    }
++    // the project layer that is the user's own file, which is trusted, is the user's
++    const projectIsUser = this.#projectIsUserFile && this.#tokenHelperTrusted.has('user')
 +    const found = []
 +    for (const key of ROUTE_KEYS) {
 +      const overridden = Object.hasOwn(this.#publishConfigRoute, key)
@@ -2700,7 +2719,7 @@ index 37dfecf..0c73b96 100644
 +      const where = overridden ? 'publishConfig' : this.find(key)
 +      if (where === 'publishConfig') {
 +        found.push({ key, source: 'the publishConfig of package.json' })
-+      } else if (where === 'project' || this.#tokenHelperRefusals.has(where)) {
++      } else if ((where === 'project' && !projectIsUser) || this.#tokenHelperRefusals.has(where)) {
 +        found.push({ key, source: this.data.get(where).source })
 +      } else if (where === 'env' && inherited.includes(key)) {
 +        found.push({ key, source: 'the environment, where a parent npm put its project config' })
@@ -2736,7 +2755,7 @@ index 37dfecf..0c73b96 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1316,15 @@ class Config {
+@@ -976,6 +1335,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2786,7 +2805,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..c6c2f3e 100644
+index 9f83d98..ee5629c 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,8 +2,9 @@ const t = require('tap')
@@ -2800,7 +2819,7 @@ index 9f83d98..c6c2f3e 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2469,885 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2469,1063 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2859,6 +2878,7 @@ index 9f83d98..c6c2f3e 100644
 +    fs.mkdirSync(join(path, 'npm'), { recursive: true })
 +    fs.writeFileSync(join(path, 'npm', 'npmrc'), fill(builtin))
 +  }
++  const workDir = `${path}/${cwd ?? (outside ? 'outside' : inWorkspace ? 'project/packages/a' : 'project')}`
 +  const config = new Config({
 +    // outside any project the walk up the tree would end in the repository
 +    // that holds these tests, unless it meets npm's own directory first
@@ -2868,7 +2888,52 @@ index 9f83d98..c6c2f3e 100644
 +    argv: [process.execPath, __filename,
 +      ...(files ? [`--userconfig=${path}/home/.npmrc`, `--globalconfig=${path}/prefix/etc/npmrc`] : []),
 +      ...argv.map(fill)],
-+    cwd: `${path}/${cwd ?? (outside ? 'outside' : inWorkspace ? 'project/packages/a' : 'project')}`,
++    cwd: workDir,
++    excludeNpmCwd: true,
++    shorthands,
++    definitions,
++    nerfDarts,
++    flatten,
++  })
++  // a relative path in a config value is resolved against the process's own
++  // current directory, which is the config's in a real run
++  const before = process.cwd()
++  process.chdir(workDir)
++  try {
++    await config.load()
++  } finally {
++    process.chdir(before)
++  }
++  config.logWarnings()
++  const warned = logs.filter(l => l[0] === 'warn').map(l => l.join(' '))
++  return { config, warned, path, linked }
++}
++
++// The checkout's .npmrc and the user file are one file under two spellings:
++// `hl` is a junction to the checkout, `real`, which is the working directory
++// (a HOME that is a link, the case of a drive letter). HOME is `hl` unless
++// `home` (relative to the fixture) says otherwise, and `argv` may put the user
++// file there.
++const SAME_FILE = `//h.registry/:tokenHelper=${HELPER}\nstrict-ssl=false\n`
++const loadSameFile = async (t, { file = SAME_FILE, home = 'hl', argv = [], env = {} } = {}) => {
++  const path = t.testdir({
++    real: { 'package.json': '{}', '.npmrc': file },
++    prefix: { etc: { npmrc: `//g.registry/:tokenHelper=${HELPER}\n` } },
++  })
++  try {
++    fs.symlinkSync(join(path, 'real'), join(path, 'hl'), 'junction')
++  } catch {
++    return null
++  }
++  const logs = []
++  const logHandler = (...args) => logs.push(args)
++  process.on('log', logHandler)
++  t.teardown(() => process.off('log', logHandler))
++  const config = new Config({
++    npmPath: `${path}/npm`,
++    env: { HOME: join(path, home), ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.replaceAll('<path>', path.replaceAll('\\', '/'))])) },
++    argv: [process.execPath, __filename, ...argv.map(a => a.replaceAll('<path>', path.replaceAll('\\', '/')))],
++    cwd: join(path, 'real'),
 +    excludeNpmCwd: true,
 +    shorthands,
 +    definitions,
@@ -2877,24 +2942,37 @@ index 9f83d98..c6c2f3e 100644
 +  })
 +  await config.load()
 +  config.logWarnings()
-+  const warned = logs.filter(l => l[0] === 'warn').map(l => l.join(' '))
-+  return { config, warned, path, linked }
++  return { config, path, warned: logs.filter(l => l[0] === 'warn').map(l => l.join(' ')) }
 +}
 +
-+t.test('the user file under another spelling is not loaded again as the project file', async t => {
-+  // a HOME that is a link, the case of a drive letter: the working directory's
-+  // spelling is the real one, and the file is the same
-+  const path = t.testdir({
-+    real: { 'package.json': '{}', '.npmrc': `//h.registry/:tokenHelper=${HELPER}\nstrict-ssl=false\n` },
-+  })
-+  try {
-+    fs.symlinkSync(join(path, 'real'), join(path, 'hl'), 'junction')
-+  } catch {
++t.test('the user file under another spelling is the project file too, as the user\'s own', async t => {
++  const loaded = await loadSameFile(t)
++  if (!loaded) {
 +    return t.skip('links cannot be made here')
 +  }
++  const { config, warned } = loaded
++  t.equal(helperIn(config.flat, '//h.registry/'), HELPER, 'the helper in the user\'s own file is honoured')
++  t.same(config.tokenHelperProjectTransport, [], 'and its strict-ssl is not the project\'s')
++  t.notOk(warned.some(w => w.includes('Ignoring project config')), 'the project layer does not warn about its copy')
++  t.equal(config.data.get('project').source, join(loaded.path, 'real', '.npmrc'), 'it is loaded as the project file, as npm always did')
++})
++
++t.test('a prefix in the user file does not distrust the global file because the file is the project\'s too', async t => {
++  const loaded = await loadSameFile(t, { file: `${SAME_FILE}prefix=\${PFX}\n`, env: { PFX: '<path>/prefix' } })
++  if (!loaded) {
++    return t.skip('links cannot be made here')
++  }
++  const { config, warned } = loaded
++  t.equal(helperIn(config.flat, '//g.registry/'), HELPER, 'the global file the user\'s own file names is the user\'s')
++  t.equal(helperIn(config.flat, '//h.registry/'), HELPER, 'and so is the user file')
++  t.notOk(warned.some(w => w.includes('may not be the user\'s own')), 'nothing is refused')
++})
++
++t.test('the user file under the same spelling is not loaded again as the project file', async t => {
++  const path = t.testdir({ real: { 'package.json': '{}', '.npmrc': SAME_FILE } })
 +  const config = new Config({
 +    npmPath: `${path}/npm`,
-+    env: { HOME: join(path, 'hl') },
++    env: { HOME: join(path, 'real') },
 +    argv: [process.execPath, __filename],
 +    cwd: join(path, 'real'),
 +    excludeNpmCwd: true,
@@ -2904,8 +2982,51 @@ index 9f83d98..c6c2f3e 100644
 +    flatten,
 +  })
 +  await config.load()
++  t.equal(config.data.get('project').source, '(same as "user" config, ignored)')
 +  t.equal(helperIn(config.flat, '//h.registry/'), HELPER, 'the helper in the user\'s own file is honoured')
-+  t.same(config.tokenHelperProjectTransport, [], 'and its strict-ssl is not the project\'s')
++  t.same(config.tokenHelperProjectTransport, [], 'and its strict-ssl is the user\'s')
++})
++
++t.test('saving the project config where it is the user file under another spelling writes that file', async t => {
++  const loaded = await loadSameFile(t, { file: 'save-exact=true\n' })
++  if (!loaded) {
++    return t.skip('links cannot be made here')
++  }
++  const { config, path } = loaded
++  // a file that is not written where it should be lands in the current
++  // directory, named for the ignored layer
++  const before = process.cwd()
++  process.chdir(path)
++  try {
++    config.set('save-prefix', '~', 'project')
++    await config.save('project')
++  } finally {
++    process.chdir(before)
++  }
++  t.equal(fs.readFileSync(join(path, 'real', '.npmrc'), 'utf8').trim().split(/\r?\n/).sort().join('|'),
++    'save-exact=true|save-prefix=~', 'the real file keeps its lines and gets the new one')
++  t.same(fs.readdirSync(path).filter(f => f.startsWith('(same')), [], 'no file is named for an ignored layer')
++})
++
++t.test('a user file that project config chose is the repository\'s, and so is its route', async t => {
++  // the user file is chosen on the command line inside the checkout, through
++  // the link, and is also the project's own .npmrc
++  const file = `proxy=http://p:1\n${SAME_FILE}`
++  const loaded = await loadSameFile(t, {
++    file,
++    home: '',
++    argv: ['--userconfig=<path>/hl/.npmrc', '--globalconfig=<path>/prefix/etc/npmrc'],
++  })
++  if (!loaded) {
++    return t.skip('links cannot be made here')
++  }
++  const { config, warned } = loaded
++  t.equal(helperIn(config.flat, '//g.registry/'), HELPER, 'the global file outside the checkout is the user\'s')
++  t.notOk(helperIn(config.flat, '//h.registry/'), 'the file inside the checkout is not')
++  t.ok(warned.some(w => w.includes('Ignoring user config') && w.includes('lies inside')), 'the user layer reports it')
++  t.notOk(warned.some(w => w.includes('Ignoring project config')), 'the project layer does not repeat it')
++  t.same(config.tokenHelperProjectTransport.map(({ key }) => key), ['proxy', 'strict-ssl'],
++    'its route values are still the project\'s')
 +})
 +
 +t.test('tokenHelper is honored only from user and global config', async t => {
@@ -2970,6 +3091,63 @@ index 9f83d98..c6c2f3e 100644
 +      project: 'save=false\n',
 +    })
 +    t.equal(helperIn(config.flat, '//helper.registry/'), HELPER)
++  })
++})
++
++t.test('a global file that a refused user file names cannot configure a tokenHelper', async t => {
++  const keyed = `//helper.registry/:tokenHelper=${HELPER}\n`
++  // project config chose the user file, which names the global file inside the checkout
++  const chose = 'userconfig=<path>/home/.npmrc\n'
++  const refused = (t, { config, warned }, key) => {
++    t.notOk(helperIn(config.flat, '//helper.registry/'), 'no helper from the global file')
++    t.ok(warned.some(w => w.includes(`the user file is not the user's own and sets ${key}`)), 'reported')
++    t.ok(config.tokenHelperUntrusted.includes('global'), 'and passed on to child processes')
++  }
++  for (const [name, user, key] of [
++    ['globalconfig', 'globalconfig=./ci.npmrc\n', 'globalconfig'],
++    ['prefix', 'prefix=./sub\n', 'prefix'],
++    ['prefix spelled through an expansion', 'pre${EMPTY}fix=./sub\n', 'prefix'],
++  ]) {
++    t.test(name, async t => {
++      refused(t, await loadHelperConfig(t, {
++        project: chose, user, sub: keyed, files: false, env: { EMPTY: '' },
++      }), key)
++    })
++  }
++
++  t.test('a user file that the environment put inside the checkout', async t => {
++    refused(t, await loadHelperConfig(t, {
++      sub: `globalconfig=./sub/etc/npmrc\n${keyed}`,
++      files: false,
++      env: { NPM_CONFIG_USERCONFIG: '<path>/project/ci.npmrc' },
++    }), 'globalconfig')
++  })
++
++  t.test('a user file that is the user\'s own names its global file', async t => {
++    for (const user of ['globalconfig=./ci.npmrc\n', 'prefix=./sub\n']) {
++      const { config } = await loadHelperConfig(t, {
++        user, sub: keyed, files: false, argv: ['--userconfig=<path>/home/.npmrc'],
++      })
++      t.equal(helperIn(config.flat, '//helper.registry/'), HELPER, user.trim())
++      t.same(config.tokenHelperUntrusted, [])
++    }
++    const plain = await loadHelperConfig(t, {
++      project: chose, user: 'save=false\n', global: keyed, files: false, argv: ['--globalconfig=<path>/prefix/etc/npmrc'],
++    })
++    t.equal(helperIn(plain.config.flat, '//helper.registry/'), HELPER, 'a refused user file that names no global file changes nothing')
++  })
++
++  t.test('a child npm refuses it too', async t => {
++    const parent = await loadHelperConfig(t, { project: chose, user: 'globalconfig=./ci.npmrc\n', sub: keyed, files: false })
++    const inherited = Object.fromEntries(Object.entries(parent.config.env)
++      .filter(([key]) => /^npm_config_(userconfig|globalconfig|token_helper_untrusted)$/.test(key)))
++    t.same(Object.keys(inherited).sort(),
++      ['npm_config_globalconfig', 'npm_config_token_helper_untrusted', 'npm_config_userconfig'], 'what the parent passes on')
++    const child = await loadHelperConfig(t, {
++      project: null, sub: keyed, files: false, env: inherited,
++    })
++    t.notOk(helperIn(child.config.flat, '//helper.registry/'), 'no helper in the child')
++    t.same(child.config.tokenHelperUntrusted, ['global'], 'and it passes the marker on')
 +  })
 +})
 +
@@ -3224,7 +3402,10 @@ index 9f83d98..c6c2f3e 100644
 +          argv: ['--userconfig=<path>/project/ci.npmrc'],
 +          env: { VALUE: value, ...exported },
 +        })
-+        isRefused(t, untrusted, 'global', 'dev', '.git', 'a user file chosen inside the project exempts nothing')
++        t.notOk(helperIn(untrusted.config.flat, '//helper.registry/'), 'a user file chosen inside the project exempts nothing')
++        t.ok(untrusted.warned.some(w => w.includes(`the user file is not the user's own and sets ${key}`)),
++          'the global file it names is refused for that')
++        t.ok(untrusted.config.tokenHelperUntrusted.includes('global'), 'and passed on to child processes')
 +      })
 +    }
 +  })
@@ -3298,6 +3479,22 @@ index 9f83d98..c6c2f3e 100644
 +      files: false, tree: { 'package.json': '{}', beyond: { 'x.npmrc': keyed } }, home: 'project', argv: ['--userconfig=<path>/beyond/x.npmrc'],
 +    })
 +    t.notOk(helperIn(above.config.flat, '//helper.registry/'), 'a file that is not below home is walked to the root')
++  })
++
++  t.test('DESTDIR into the checkout moves the global file there', {
++    skip: process.platform === 'win32' && 'DESTDIR is only used on Unix',
++  }, async t => {
++    const execPath = '/usr/local/bin/node'
++    const usr = { local: { etc: { npmrc: keyed } } }
++    const tree = { destdir: { 'package.json': '{}', usr }, clean: { usr } }
++    const loaded = await loadHelperConfig(t, { files: false, tree, execPath, env: { DESTDIR: '<path>/destdir' } })
++    isRefused(t, loaded, 'global', 'destdir', 'package.json', 'a DESTDIR that is the checkout')
++    const clean = await loadHelperConfig(t, { files: false, tree, execPath, env: { DESTDIR: '<path>/clean' } })
++    t.equal(helperIn(clean.config.flat, '//helper.registry/'), HELPER, 'a DESTDIR that holds no project is not a choice of the repository')
++    t.same(clean.config.tokenHelperUntrusted, [])
++    const none = await loadHelperConfig(t, { files: false, tree, execPath })
++    t.same(none.config.tokenHelperUntrusted, [], 'no DESTDIR, no refusal')
++    t.notOk(none.warned.some(w => w.includes('lies inside')))
 +  })
 +
 +  t.test('a default path and a home that is the checkout', async t => {
@@ -3774,7 +3971,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From 6b5caba2f41fe663daf79d7774049f7be92eefcf Mon Sep 17 00:00:00 2001
+From 315664bccf05a3490a968a185abb5d89a88808b2 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when

@@ -15,7 +15,7 @@ index a0d513c..0ecf136 100644
  The weekly check for a newer npm, which any command may start, sends no credential from a helper.
  Remove the setting from the project's `.npmrc` or `publishConfig`, or set it on the command line, which overrides project config.
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 89e21f6..1121fc6 100644
+index cd4b822..aea110d 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -7,6 +7,7 @@ const { log, time } = require('proc-log')
@@ -26,10 +26,10 @@ index 89e21f6..1121fc6 100644
  const {
    readFile,
    writeFile,
-@@ -1080,12 +1081,11 @@ class Config {
-   // - the project .npmrc, or a user or global file that #trustTokenHelpers did
+@@ -1162,12 +1163,11 @@ class Config {
    //   not trust, which the repository chose or can have written: it is the
-   //   project's layer for this rule as for the tokenHelper key;
+   //   project's layer for this rule as for the tokenHelper key. A project
+   //   .npmrc that is the trusted user file under another spelling is not;
 -  // - the environment, for a key that a parent npm listed in
 -  //   npm_config_token_helper_project_transport: a parent exports its project
 -  //   config to a child as npm_config_* values, which the child reads as the
@@ -44,15 +44,15 @@ index 89e21f6..1121fc6 100644
    // - the publishConfig of the manifest, which publish and unpublish give to
    //   setPublishConfigRoute.
    // Only strict-ssl=false is a choice; a null is the default. Whether the
-@@ -1097,6 +1097,7 @@ class Config {
-     if (!inherited.length && !configured) {
-       return []
+@@ -1181,6 +1181,7 @@ class Config {
      }
+     // the project layer that is the user's own file, which is trusted, is the user's
+     const projectIsUser = this.#projectIsUserFile && this.#tokenHelperTrusted.has('user')
 +    const project = this.data.get('project')
      const found = []
      for (const key of ROUTE_KEYS) {
        const overridden = Object.hasOwn(this.#publishConfigRoute, key)
-@@ -1111,6 +1112,9 @@ class Config {
+@@ -1195,6 +1196,9 @@ class Config {
          found.push({ key, source: this.data.get(where).source })
        } else if (where === 'env' && inherited.includes(key)) {
          found.push({ key, source: 'the environment, where a parent npm put its project config' })
@@ -63,10 +63,10 @@ index 89e21f6..1121fc6 100644
      }
      return found
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index f678156..0f1f4d0 100644
+index ee5629c..07d90f1 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
-@@ -3021,32 +3021,26 @@ t.test('a child npm\'s environment holding its parent\'s project values', async
+@@ -3401,32 +3401,26 @@ t.test('a child npm\'s environment holding its parent\'s project values', async
    const project = 'https-proxy=http://project-proxy:3128\nca=project-ca\nstrict-ssl=false\ncafile=<path>/project/ca.pem\n'
    const parent = await loadHelperConfig(t, { user: keyed, project })
    const exported = Object.fromEntries(Object.entries(parent.config.env)
