@@ -1,4 +1,4 @@
-From 27305d0e524e27d6246dcf301ab892f1d4578f45 Mon Sep 17 00:00:00 2001
+From 52172bcfcabd7de739bc08132462ca46d34cf9e8 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -123,11 +123,11 @@ replaces.
  test/lib/utils/publish-config.js           |  26 +
  test/lib/utils/token-helper.js             | 746 +++++++++++++++++++++
  workspaces/config/lib/definitions/index.js |   8 +
- workspaces/config/lib/index.js             | 284 ++++++++
+ workspaces/config/lib/index.js             | 291 ++++++++
  workspaces/config/lib/set-envs.js          |  22 +
- workspaces/config/test/index.js            | 699 ++++++++++++++++++-
+ workspaces/config/test/index.js            | 718 +++++++++++++++++++-
  workspaces/config/test/set-envs.js         |  76 +++
- 31 files changed, 2866 insertions(+), 9 deletions(-)
+ 31 files changed, 2892 insertions(+), 9 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -2287,7 +2287,7 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..89e21f6 100644
+index 37dfecf..b3c4558 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
 @@ -5,6 +5,7 @@ const nopt = require('nopt')
@@ -2407,7 +2407,7 @@ index 37dfecf..89e21f6 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -858,13 +938,208 @@ class Config {
+@@ -858,13 +938,215 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2483,8 +2483,15 @@ index 37dfecf..89e21f6 100644
 +  // is refused with the remedy.
 +  #chosenInsideProject (where) {
 +    const keys = where === 'user' ? ['userconfig'] : ['globalconfig', 'prefix']
-+    // asked of the raw input: a value for globalconfig is stored beneath every layer
-+    const chosen = keys.some(key => ['cli', 'env'].some(layer => this.data.get(layer).raw[key] !== undefined)) ||
++    // asked of the raw input: a value for globalconfig is stored beneath every layer.
++    // A prefix in the environment that is the default one is the parent npm's own
++    // export (setEnvs passes it on), not a choice: nothing chose it.
++    const set = (key, layer) => {
++      const value = this.data.get(layer).raw[key]
++      return value !== undefined && !(key === 'prefix' && layer === 'env' &&
++        resolve(value) === resolve(this.globalPrefix))
++    }
++    const chosen = keys.some(key => ['cli', 'env'].some(layer => set(key, layer))) ||
 +      (where === 'global' && !!this.env.PREFIX)
 +    if (!chosen) {
 +      return null
@@ -2616,7 +2623,7 @@ index 37dfecf..89e21f6 100644
    async save (where) {
      if (!this.loaded) {
        throw new Error('call config.load() before saving')
-@@ -976,6 +1251,15 @@ class Config {
+@@ -976,6 +1258,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2666,7 +2673,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..097ef09 100644
+index 9f83d98..9f739bc 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -3,7 +3,7 @@ const t = require('tap')
@@ -2678,7 +2685,7 @@ index 9f83d98..097ef09 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2468,700 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2468,719 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -2692,7 +2699,7 @@ index 9f83d98..097ef09 100644
 +// fixture (the fixture itself by default: the walk up from a chosen file stops
 +// there, and so never reaches the repository that holds these tests), `cwd`
 +// overrides the current directory
-+const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false, tree = {}, home = '', cwd = null } = {}) => {
++const loadHelperConfig = async (t, { project = '', user = '', global = '', env = {}, argv = [], files = true, sub = '', link = false, outside = false, inWorkspace = false, tree = {}, home = '', cwd = null, execPath = process.execPath } = {}) => {
 +  const path = t.testdir({
 +    home: { '.npmrc': user },
 +    prefix: { etc: { npmrc: global } },
@@ -2727,6 +2734,7 @@ index 9f83d98..097ef09 100644
 +    // outside any project the walk up the tree would end in the repository
 +    // that holds these tests, unless it meets npm's own directory first
 +    npmPath: outside ? path : `${path}/npm`,
++    execPath: execPath.replaceAll('<path>', path),
 +    env: Object.fromEntries(Object.entries({ HOME: home ? `${path}/${home}` : path, ...env }).map(([k, v]) => [k, fill(v)])),
 +    argv: [process.execPath, __filename,
 +      ...(files ? [`--userconfig=${path}/home/.npmrc`, `--globalconfig=${path}/prefix/etc/npmrc`] : []),
@@ -2939,6 +2947,24 @@ index 9f83d98..097ef09 100644
 +    t.equal(helperIn(missing.config.flat, '//helper.registry/'), HELPER, 'a --prefix that is not there holds no file to refuse')
 +    const absent = await loadHelperConfig(t, { files: false, argv: ['--userconfig=<path>/project/absent.npmrc'] })
 +    t.same(absent.config.tokenHelperUntrusted, [], 'a file that is not there has no key to refuse')
++  })
++
++  t.test('the default global prefix a parent npm passed on is not a choice', async t => {
++    // nvm and Homebrew on Apple silicon keep node in a directory that is a git
++    // repository; every npm below the first gets the prefix as an environment value
++    const execPath = process.platform === 'win32' ? '<path>/n/node.exe' : '<path>/n/bin/node'
++    const tree = { n: { '.git': {}, bin: {}, etc: { npmrc: keyed } } }
++    const passed = await loadHelperConfig(t, {
++      files: false, tree, execPath, env: { npm_config_prefix: '<path>/n' },
++    })
++    t.equal(helperIn(passed.config.flat, '//helper.registry/'), HELPER, 'the child trusts what its parent trusted')
++    t.same(passed.config.tokenHelperUntrusted, [])
++    const own = await loadHelperConfig(t, { files: false, tree, execPath })
++    t.equal(helperIn(own.config.flat, '//helper.registry/'), HELPER, 'as the parent did, with no environment value')
++    const other = await loadHelperConfig(t, {
++      files: false, tree, execPath, env: { npm_config_prefix: '<path>/project/sub' }, sub: keyed,
++    })
++    t.notOk(helperIn(other.config.flat, '//helper.registry/'), 'a prefix that is not the default is still a choice')
 +  })
 +
 +  t.test('npm -g --prefix with node_modules only', async t => {
@@ -3467,7 +3493,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From afbe912952484a00729bd9b642cc7554fb2df077 Mon Sep 17 00:00:00 2001
+From f8ea803d362fa1b7a7883ca3d995e43e88d37297 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
