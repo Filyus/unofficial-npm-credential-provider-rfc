@@ -24,7 +24,7 @@ index 3074fe8..cc05b9d 100644
      // the route a token helper's credential may take is checked for each
      // request, against this and the other layers; each manifest sets it anew
 diff --git a/lib/commands/unpublish.js b/lib/commands/unpublish.js
-index 1dd7684..0ef1890 100644
+index ca69bdf..35a1b74 100644
 --- a/lib/commands/unpublish.js
 +++ b/lib/commands/unpublish.js
 @@ -1,6 +1,7 @@
@@ -35,7 +35,7 @@ index 1dd7684..0ef1890 100644
  const pacote = require('pacote')
  const { output, log } = require('proc-log')
  const pkgJson = require('@npmcli/package-json')
-@@ -136,6 +137,8 @@ class Unpublish extends BaseCommand {
+@@ -140,6 +141,8 @@ class Unpublish extends BaseCommand {
        // the route a token helper's credential may take is checked for each
        // request, against this and the other layers
        this.npm.config.setPublishConfigRoute(filteredPublishConfig)
@@ -166,10 +166,10 @@ index 812ac21..0410f7f 100644
 +  }
 +})
 diff --git a/test/lib/commands/unpublish.js b/test/lib/commands/unpublish.js
-index 6966b52..b5ac4f6 100644
+index c1d8cbc..8bd62ff 100644
 --- a/test/lib/commands/unpublish.js
 +++ b/test/lib/commands/unpublish.js
-@@ -681,26 +681,21 @@ t.test('publishConfig cannot supply a tokenHelper', async t => {
+@@ -683,28 +683,23 @@ t.test('publishConfig cannot supply a tokenHelper', async t => {
    ])
  })
  
@@ -203,6 +203,23 @@ index 6966b52..b5ac4f6 100644
 +    message: /was not run.*"publishConfig\.https-proxy".*remove it from publishConfig/,
 +  }, 'nothing is requested, and the helper is not run')
  })
+ 
+ t.test('the publishConfig route of one manifest does not stay for the next', async t => {
+@@ -723,10 +718,10 @@ t.test('the publishConfig route of one manifest does not stay for the next', asy
+       }, null, 2),
+     },
+   })
+-  await npm.exec('unpublish', [])
+-  await t.rejects(npm.flatOptions.getAuthorization({ regKey, uri }), {
+-    message: /"strict-ssl" comes from the publishConfig of package\.json/,
+-  }, 'the first manifest\'s route applies')
++  await t.rejects(npm.exec('unpublish', []), {
++    code: 'ETOKENHELPER',
++    message: /was not run.*"publishConfig\.strict-ssl"/,
++  }, 'the first manifest\'s route is refused before the request')
+   // the next workspace: a manifest with no publishConfig
+   fs.writeFileSync(join(npm.prefix, 'package.json'), JSON.stringify({ name: pkg, version: '1.0.0' }))
+   await npm.exec('unpublish', [])
 diff --git a/test/lib/utils/publish-config.js b/test/lib/utils/publish-config.js
 index 23452aa..eb1fef2 100644
 --- a/test/lib/utils/publish-config.js
