@@ -1,4 +1,4 @@
-From 80acb281b643fc559c99b1ac251bbb6bb101dac7 Mon Sep 17 00:00:00 2001
+From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
 Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
@@ -106,7 +106,7 @@ replaces.
  lib/utils/get-identity.js                  |    2 +-
  lib/utils/oidc.js                          |    3 +
  lib/utils/publish-config.js                |   24 +
- lib/utils/token-helper.js                  |  426 ++++++++
+ lib/utils/token-helper.js                  |  433 ++++++++
  package.json                               |    2 +-
  test/fixtures/mock-npm.js                  |    6 +
  test/fixtures/token-helper/helper          |    2 +
@@ -121,13 +121,13 @@ replaces.
  test/lib/npm.js                            |  104 ++
  test/lib/utils/oidc.js                     |   30 +
  test/lib/utils/publish-config.js           |   26 +
- test/lib/utils/token-helper.js             |  746 ++++++++++++++
+ test/lib/utils/token-helper.js             |  770 ++++++++++++++
  workspaces/config/lib/definitions/index.js |    8 +
- workspaces/config/lib/index.js             |  370 ++++++-
+ workspaces/config/lib/index.js             |  410 +++++++-
  workspaces/config/lib/set-envs.js          |   22 +
- workspaces/config/test/index.js            | 1059 +++++++++++++++++++-
+ workspaces/config/test/index.js            | 1102 +++++++++++++++++++-
  workspaces/config/test/set-envs.js         |   76 ++
- 31 files changed, 3348 insertions(+), 10 deletions(-)
+ 31 files changed, 3460 insertions(+), 12 deletions(-)
  create mode 100644 lib/utils/publish-config.js
  create mode 100644 lib/utils/token-helper.js
  create mode 100755 test/fixtures/token-helper/helper
@@ -531,12 +531,13 @@ index 0000000..ffafd42
 +module.exports = publishConfigOverrides
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
 new file mode 100644
-index 0000000..036c85b
+index 0000000..809ddf8
 --- /dev/null
 +++ b/lib/utils/token-helper.js
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,433 @@
 +const fs = require('node:fs')
 +const path = require('node:path')
++const { execFileSync } = require('node:child_process')
 +const promiseSpawn = require('@npmcli/promise-spawn')
 +const { log } = require('proc-log')
 +
@@ -776,19 +777,25 @@ index 0000000..036c85b
 +// first, so a helper that cleans up can, and SIGKILL if it ignores that.
 +// Windows has no signals, and the helper behind a .cmd wrapper is a grandchild
 +// of cmd.exe, which ending cmd.exe alone would leave running, so the whole tree
-+// goes there. Elsewhere only the helper process itself is signalled, as in
-+// pnpm: reaching its children would mean starting it in a session of its own,
-+// which would cost it the terminal a helper may prompt on and the Ctrl-C aimed
-+// at npm. A helper script should therefore `exec` the command that does the
-+// work.
++// goes there, and synchronously: npm exits as soon as the helper's promise
++// rejects, and a kill left running beside it loses that race and leaves the
++// helper's children behind. Elsewhere only the helper process itself is
++// signalled, as in pnpm: reaching its children would mean starting it in a
++// session of its own, which would cost it the terminal a helper may prompt on
++// and the Ctrl-C aimed at npm. A helper script should therefore `exec` the
++// command that does the work.
 +const stop = (child, platform, grace) => {
 +  if (child.exitCode !== null || child.signalCode !== null) {
 +    return
 +  }
 +  if (platform === 'win32') {
 +    const taskkill = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe')
-+    promiseSpawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-+      .catch(() => child.kill())
++    try {
++      execFileSync(taskkill, ['/pid', String(child.pid), '/T', '/F'],
++        { stdio: 'ignore', windowsHide: true, timeout: 5000 })
++    } catch {
++      child.kill()
++    }
 +    return
 +  }
 +  child.kill('SIGTERM')
@@ -1556,10 +1563,10 @@ index 0000000..23452aa
 +})
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
 new file mode 100644
-index 0000000..c2c59e0
+index 0000000..c9ab327
 --- /dev/null
 +++ b/test/lib/utils/token-helper.js
-@@ -0,0 +1,746 @@
+@@ -0,0 +1,770 @@
 +const t = require('tap')
 +const { EventEmitter } = require('node:events')
 +const { PassThrough } = require('node:stream')
@@ -1614,10 +1621,24 @@ index 0000000..c2c59e0
 +    })
 +    return promise
 +  }
-+  return { spawn, calls }
++  // what the Windows deadline kill runs synchronously; there is no child there
++  const execFileSync = (file, args, opts) => {
++    const call = { file, args, opts, sync: true }
++    calls.push(call)
++    const fail = (props) => {
++      const er = new Error('command failed')
++      Object.assign(er, props)
++      throw er
++    }
++    return script({ call, child: null, finish: (stdout = '') => stdout, fail })
++  }
++  return { spawn, calls, execFileSync }
 +}
 +
-+const load = (t, spawn) => t.mock('../../../lib/utils/token-helper.js', { '@npmcli/promise-spawn': spawn })
++const load = (t, spawn, execFileSync) => t.mock('../../../lib/utils/token-helper.js', {
++  '@npmcli/promise-spawn': spawn,
++  ...(execFileSync ? { 'node:child_process': { execFileSync } } : {}),
++})
 +
 +// `transport` is what config.tokenHelperProjectTransport reports, and `given`
 +// the keys of the registry that config.credentialKeysFromCliOrEnv reports; the
@@ -1638,8 +1659,8 @@ index 0000000..c2c59e0
 +  limits,
 +  config,
 +} = {}) => {
-+  const { spawn, calls } = fakeSpawn(script)
-+  const make = load(t, spawn)
++  const { spawn, calls, execFileSync } = fakeSpawn(script)
++  const make = load(t, spawn, execFileSync)
 +  const getAuthorization = make(
 +    configOf({ [REG]: helper }, stored, config), startEnv, platform, limits)
 +  return { getAuthorization, calls, make }
@@ -2264,33 +2285,43 @@ index 0000000..c2c59e0
 +  t.same(killed.calls[0].child.kills, [])
 +})
 +
-+t.test('on Windows the whole process tree is ended', async t => {
++t.test('on Windows the whole process tree is ended, synchronously', async t => {
 +  mockGlobals(t, { 'process.env.SystemRoot': 'D:\\Win' })
-+  const overflow = ({ call, child, fail }) => {
++  const { getAuthorization, calls } = setup(t, ({ call, child }) => {
 +    if (/taskkill/i.test(call.file)) {
-+      return fail({ code: call.file.includes('broken') ? 1 : 0 })
++      return 'ok'
 +    }
 +    child.stdout.write(Buffer.alloc(1024 * 1024 + 1))
-+  }
-+  const { getAuthorization, calls } = setup(t, overflow, { platform: 'win32', helper: 'C:\\tools\\token.cmd' })
++  }, { platform: 'win32', helper: 'C:\\tools\\token.cmd' })
 +  await t.rejects(getAuthorization({ regKey: REG }), { code: 'ETOKENHELPER' })
 +  const taskkill = calls.find(c => /taskkill/i.test(c.file))
 +  t.equal(taskkill.file, 'D:\\Win\\System32\\taskkill.exe')
 +  t.same(taskkill.args, ['/pid', '4242', '/T', '/F'])
-+  t.same(taskkill.opts, { stdio: 'ignore', windowsHide: true })
-+  await new Promise(resolve => setImmediate(resolve))
-+  t.same(calls[0].child.kills, [undefined], 'the process itself too when taskkill fails')
++  t.same(taskkill.opts, { stdio: 'ignore', windowsHide: true, timeout: 5000 })
++  t.equal(taskkill.sync, true, 'the kill does not race the exit of npm')
++  t.same(calls[0].child.kills, [], 'the process itself is left to taskkill')
 +
 +  mockGlobals(t, { 'process.env.SystemRoot': undefined })
-+  const bare = setup(t, ({ call, child, finish }) => {
++  const bare = setup(t, ({ call, child }) => {
 +    if (/taskkill/i.test(call.file)) {
-+      return finish('')
++      return ''
 +    }
 +    child.stdout.write(Buffer.alloc(1024 * 1024 + 1))
 +  }, { platform: 'win32', helper: 'C:\\tools\\token.cmd' })
 +  await t.rejects(bare.getAuthorization({ regKey: REG }), { code: 'ETOKENHELPER' })
 +  t.equal(bare.calls.find(c => /taskkill/i.test(c.file)).file, 'C:\\Windows\\System32\\taskkill.exe', 'without SystemRoot')
 +  t.same(bare.calls[0].child.kills, [], 'and the process itself is left to it')
++
++  // a taskkill that fails still ends the wrapper, so a hung helper is not
++  // left behind on a system where the tree walk came up empty
++  const broken = setup(t, ({ call, child, fail }) => {
++    if (/taskkill/i.test(call.file)) {
++      return fail({ code: 1 })
++    }
++    child.stdout.write(Buffer.alloc(1024 * 1024 + 1))
++  }, { platform: 'win32', helper: 'C:\\tools\\token.cmd' })
++  await t.rejects(broken.getAuthorization({ regKey: REG }), { code: 'ETOKENHELPER' })
++  t.same(broken.calls[0].child.kills, [undefined], 'the process itself too when taskkill fails')
 +})
 +
 +t.test('a real helper', async t => {
@@ -2333,13 +2364,15 @@ index b5b63bf..05176fc 100644
  ]
  
 diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
-index 37dfecf..cd4b822 100644
+index 37dfecf..65f7e4c 100644
 --- a/workspaces/config/lib/index.js
 +++ b/workspaces/config/lib/index.js
-@@ -5,6 +5,7 @@ const nopt = require('nopt')
+@@ -4,7 +4,8 @@ const ini = require('ini')
+ const nopt = require('nopt')
  const { log, time } = require('proc-log')
  
- const { resolve, dirname, join } = require('node:path')
+-const { resolve, dirname, join } = require('node:path')
++const { resolve, dirname, join, isAbsolute } = require('node:path')
 +const { realpathSync, statSync, existsSync } = require('node:fs')
  const { homedir } = require('node:os')
  const {
@@ -2383,7 +2416,7 @@ index 37dfecf..cd4b822 100644
  
    static get typeDefs () {
      return typeDefs
-@@ -645,6 +669,22 @@ class Config {
+@@ -645,6 +669,34 @@ class Config {
        conf.raw = obj
        outer: for (const [key, value] of Object.entries(obj)) {
          const k = envReplace(key, this.env)
@@ -2392,6 +2425,18 @@ index 37dfecf..cd4b822 100644
 +        // the repository, and env and cli values can be set by scripts.
 +        if (/(^|:)tokenHelper$/.test(k)) {
 +          this.#tokenHelperSeen.add(where)
++          if (typeof value === 'string' && /\$\{[^}]*npm_config_/i.test(value)) {
++            // The value of a tokenHelper must not name npm_config_* variables:
++            // the parent npm exports what the repository set, and a child npm
++            // of another project expands the value from an environment the
++            // repository controls. ${HOME} and the rest of the environment
++            // still expand.
++            this.#tokenHelperRefusals.set(where,
++              'a tokenHelper value must not reference npm_config_* variables: ' +
++              'a repository chooses what they hold in a child npm; give the ' +
++              'absolute path of the helper, or reference it through ${HOME}')
++            this.#tokenHelperTrusted.delete(where)
++          }
 +          if (!this.#tokenHelperTrusted.has(where)) {
 +            // the user file loaded again as the project's: its own layer
 +            // honours the key, or warns when it may not
@@ -2406,7 +2451,7 @@ index 37dfecf..cd4b822 100644
          const v = this.parseField(value, k)
          if (where !== 'default') {
            this.#checkDeprecated(k)
-@@ -678,6 +718,53 @@ class Config {
+@@ -678,6 +730,53 @@ class Config {
      if (internalEnv.includes(key)) {
        return
      }
@@ -2460,7 +2505,7 @@ index 37dfecf..cd4b822 100644
      const scoped = key.includes(':')
      let baseKey = null
      if (scoped) {
-@@ -780,7 +867,18 @@ class Config {
+@@ -780,7 +879,18 @@ class Config {
      // up loading the "project" config where the "userconfig" will be,
      // which causes some calamities.  So, we only load project config if
      // it doesn't match what the userconfig will be.
@@ -2480,7 +2525,7 @@ index 37dfecf..cd4b822 100644
        return this.#loadFile(projectFile, 'project')
      } else {
        this.data.get('project').source = '(same as "user" config, ignored)'
-@@ -858,13 +956,274 @@ class Config {
+@@ -858,11 +968,296 @@ class Config {
    }
  
    loadUserConfig () {
@@ -2489,10 +2534,35 @@ index 37dfecf..cd4b822 100644
    }
  
    loadGlobalConfig () {
+-    return this.#loadFile(this.#get('globalconfig'), 'global')
 +    this.#trustTokenHelpers('global')
-     return this.#loadFile(this.#get('globalconfig'), 'global')
-   }
- 
++    return this.#loadFile(this.#effectiveGlobalFile(), 'global')
++  }
++
++  // A relative `globalconfig=` or `prefix=` in the user's own file resolves
++  // against the current directory. The parent npm resolves it from its own,
++  // trusts the file, and exports what it resolved; a child npm of another
++  // project resolved the same relative value from the clone, found nothing,
++  // and lost the credential. The environment carries what the parent
++  // resolved, so when the trusted user file states a relative value, that is
++  // the file both mean. Only the file of the global layer is affected: where
++  // npm installs things is upstream's to decide.
++  #effectiveGlobalFile () {
++    if (!this.#tokenHelperTrusted.has('user')) {
++      return this.#get('globalconfig')
++    }
++    const user = this.data.get('user').raw
++    const byKey = key => {
++      const name = Object.keys(user).find(k => envReplace(k, this.env) === key)
++      return name !== undefined && typeof user[name] === 'string' && !isAbsolute(user[name])
++        ? this.env[`npm_config_${key}`]
++        : undefined
++    }
++    const fromEnv = byKey('globalconfig') ??
++      (byKey('prefix') !== undefined ? resolve(byKey('prefix'), 'etc/npmrc') : undefined)
++    return fromEnv ?? this.#get('globalconfig')
++  }
++
 +  // Project config loads before the user and global files and may set
 +  // `userconfig`, or `globalconfig` or `prefix` (the global file's default path
 +  // derives from it), which would let a repository choose the file npm then
@@ -2615,7 +2685,7 @@ index 37dfecf..cd4b822 100644
 +    if (!chosen) {
 +      return null
 +    }
-+    const configured = this.#get(where === 'user' ? 'userconfig' : 'globalconfig')
++    const configured = where === 'user' ? this.#get('userconfig') : this.#effectiveGlobalFile()
 +    let file
 +    try {
 +      file = realpathSync.native(configured)
@@ -2750,12 +2820,10 @@ index 37dfecf..cd4b822 100644
 +      }
 +    }
 +    return keys
-+  }
-+
+   }
+ 
    async save (where) {
-     if (!this.loaded) {
-       throw new Error('call config.load() before saving')
-@@ -976,6 +1335,15 @@ class Config {
+@@ -976,6 +1371,15 @@ class Config {
        // cert/key may be used in conjunction with other credentials, thus no `return`
      }
  
@@ -2805,7 +2873,7 @@ index 12719b5..04dfd59 100644
      env.EDITOR = cliConf.editor
    }
 diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
-index 9f83d98..70d49ff 100644
+index 9f83d98..d2208db 100644
 --- a/workspaces/config/test/index.js
 +++ b/workspaces/config/test/index.js
 @@ -2,8 +2,9 @@ const t = require('tap')
@@ -2819,7 +2887,7 @@ index 9f83d98..70d49ff 100644
  
  // when running with `npm test` it adds environment variables that
  // mess with the things we expect here, so delete all of those.
-@@ -2468,3 +2469,1059 @@ t.test('global-ignore-file follows an explicit override', async t => {
+@@ -2468,3 +2469,1102 @@ t.test('global-ignore-file follows an explicit override', async t => {
      'cli override wins over computed default'
    )
  })
@@ -3044,6 +3112,49 @@ index 9f83d98..70d49ff 100644
 +  }
 +  t.same(config.getUnknownConfigs('user'), [], 'tokenHelper is a known nerf-dart key')
 +  t.same(config.tokenHelperUntrusted, [], 'and nothing is passed on to child processes')
++})
++
++t.test('a tokenHelper value does not reference npm_config_* variables', async t => {
++  // pass 9, R30: the parent exports what the repository set, and the child
++  // expands the user file's value from an environment the repository controls
++  const { config, warned } = await loadHelperConfig(t, {
++    project: 'helper-dir=<path>/gone\n',
++    user: '//h.registry/:tokenHelper=${npm_config_helper_dir}\\evil.cmd\n',
++  })
++  t.equal(helperIn(config.flat, '//h.registry/'), undefined, 'the helper is not run')
++  t.ok(warned.some(w => w.includes('must not reference npm_config_')),
++    'the refusal names the reason and not the value')
++
++  // the parent runs first and exports nothing the file names: it refuses too
++  const alone = await loadHelperConfig(t, {
++    user: '//h.registry/:tokenHelper=${npm_config_local_prefix}\\evil.cmd\n',
++  })
++  t.equal(helperIn(alone.config.flat, '//h.registry/'), undefined, 'the parent refuses it as well')
++
++  // ${HOME} and the other variables still expand: the documented form works
++  const home = await loadHelperConfig(t, {
++    user: '//h.registry/:tokenHelper=${HOME}/helpers/h.cmd\n',
++  })
++  const value = helperIn(home.config.flat, '//h.registry/')
++  t.ok(value && value.startsWith(home.path) && value.endsWith('h.cmd'),
++    'the documented ${HOME} form keeps expanding')
++})
++
++t.test('a relative globalconfig= in a trusted user file: a child npm uses the exported file', async t => {
++  // pass 9, U23: the parent resolves the relative value from its own
++  // directory, trusts the file, and exports what it resolved; the child of a
++  // clone resolved the same relative value from the clone, found nothing, and
++  // lost the credential. The export is what both mean.
++  const child = await loadHelperConfig(t, {
++    user: 'globalconfig=rel.npmrc\n',
++    tree: { home: { 'rel.npmrc': `//h.registry/:tokenHelper=${HELPER}\n` } },
++    cwd: 'project',
++    files: false,
++    env: { npm_config_globalconfig: '<path>/home/rel.npmrc' },
++  })
++  t.equal(helperIn(child.config.flat, '//h.registry/'), HELPER, 'the child runs the same helper through the exported path')
++  t.equal(child.config.flat.globalconfig, join(child.path, 'home', 'rel.npmrc'),
++    'and the global file is the one the parent resolved')
 +})
 +
 +t.test('a user or global file that project config chose cannot configure a tokenHelper', async t => {
@@ -3967,7 +4078,7 @@ index 9426265..0798f0d 100644
 2.52.0.windows.1
 
 
-From 6c340b859970310f32a1bf71b1bb3749d4439978 Mon Sep 17 00:00:00 2001
+From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
@@ -4105,10 +4216,10 @@ index 41e35bd..645684d 100644
          // npm ERR! code E401
          // npm ERR! Unable to authenticate, need: Basic
 diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
-index 036c85b..9642ecb 100644
+index 809ddf8..d0ec1b1 100644
 --- a/lib/utils/token-helper.js
 +++ b/lib/utils/token-helper.js
-@@ -76,6 +76,11 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
+@@ -77,6 +77,11 @@ const ARGUMENTS = 'must be an absolute path with no arguments: put the command i
    '(a shell script, or a .cmd file on Windows) and give the path of the script'
  const BARE_NAME = 'must be an absolute path: give the full path of the program ' +
    '(a bare name would be looked up on a PATH that a project can extend)'
@@ -4120,7 +4231,7 @@ index 036c85b..9642ecb 100644
  // `aws codeartifact get-authorization-token` is not a path, and neither is
  // `/usr/bin/aws codeartifact ...`; a real path with a space in it is. A path
  // with whitespace in it that does not exist is told apart by what comes before
-@@ -85,9 +90,14 @@ const BARE_NAME = 'must be an absolute path: give the full path of the program '
+@@ -86,9 +91,14 @@ const BARE_NAME = 'must be an absolute path: give the full path of the program '
  const refusal = (helper, platform) => {
    const paths = platform === 'win32' ? path.win32 : path.posix
    if (typeof helper !== 'string' || !paths.isAbsolute(helper)) {
@@ -4136,7 +4247,7 @@ index 036c85b..9642ecb 100644
      if (path.win32.dirname(helper).length > MAX_WIN_CWD) {
        return `is in a directory whose path is longer than ${MAX_WIN_CWD} characters, ` +
          'where Windows cannot start a program: move it to a shorter path'
-@@ -134,6 +144,31 @@ const toHeader = (label, stdout) => {
+@@ -135,6 +145,31 @@ const toHeader = (label, stdout) => {
    return /^[A-Za-z]+ /.test(token) ? token : `Bearer ${token}`
  }
  
@@ -4168,7 +4279,7 @@ index 036c85b..9642ecb 100644
  // Why the helper failed, in words for the user. For a failure to start the
  // message of the error is "spawn <path> ENOENT" and never contains output.
  const failure = (helper, label, err) => {
-@@ -142,12 +177,18 @@ const failure = (helper, label, err) => {
+@@ -143,12 +178,18 @@ const failure = (helper, label, err) => {
    let reason
    if (signal) {
      reason = `was killed by ${signal}`
@@ -4256,10 +4367,10 @@ index 44a57ec..1e270e1 100644
    const { errorMessage } = await loadMockNpm(t)
  
 diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
-index c2c59e0..2332087 100644
+index c9ab327..d7e23df 100644
 --- a/test/lib/utils/token-helper.js
 +++ b/test/lib/utils/token-helper.js
-@@ -147,10 +147,17 @@ t.test('a failure names the helper, carries signal and never the output', async
+@@ -161,10 +161,17 @@ t.test('a failure names the helper, carries signal and never the output', async
    t.equal(await getAuthorization({ regKey: REG }).catch(e => e), er, 'the failure is cached')
  })
  
@@ -4278,7 +4389,7 @@ index c2c59e0..2332087 100644
    const noStart = setup(t, ({ fail }) => fail({ code: 'EACCES', message: 'spawn x EACCES' }))
    await t.rejects(noStart.getAuthorization({ regKey: REG }), { message: /could not be run \(EACCES\): spawn x EACCES/ })
  
-@@ -165,6 +172,30 @@ t.test('a signal and a spawn error each say what happened', async t => {
+@@ -179,6 +186,30 @@ t.test('a signal and a spawn error each say what happened', async t => {
    await t.rejects(unnamed.getAuthorization({ regKey: REG }), { message: /could not be run: no code on this one$/ })
  })
  
@@ -4309,7 +4420,7 @@ index c2c59e0..2332087 100644
  t.test('values that are not an absolute path with no arguments say what to do', async t => {
    const dir = t.testdir({
      script: '#!/bin/sh\n',
-@@ -181,9 +212,16 @@ t.test('values that are not an absolute path with no arguments say what to do',
+@@ -195,9 +226,16 @@ t.test('values that are not an absolute path with no arguments say what to do',
    await refused('aws', /must be an absolute path: give the full path of the program/, 'linux')
    await refused('./relative/token', /must be an absolute path: give the full path/, 'linux')
    await refused(true, /must be an absolute path: give the full path.*PATH that a project can extend/, 'linux')
@@ -4326,7 +4437,7 @@ index c2c59e0..2332087 100644
    await refused(`C:\\${'d'.repeat(260)}\\token.cmd`, /longer than 258 characters.*move it to a shorter path/, 'win32')
  
    t.test('a long path is fine where Windows is not involved', async t => {
-@@ -362,6 +400,22 @@ t.test('one run per registry, and a failure counts', async t => {
+@@ -376,6 +414,22 @@ t.test('one run per registry, and a failure counts', async t => {
    t.equal(failing.calls.length, 1, 'a failure is not retried')
  })
  
@@ -4349,7 +4460,7 @@ index c2c59e0..2332087 100644
  t.test('nothing runs for a registry without a helper, a masked one, or in a helper\'s own npm', async t => {
    const logs = logsOf(t)
    const { spawn, calls } = fakeSpawn(printing('tok'))
-@@ -672,6 +726,39 @@ t.test('an overflow of either stream ends the helper at once', async t => {
+@@ -686,6 +740,39 @@ t.test('an overflow of either stream ends the helper at once', async t => {
    t.match(await exactly.getAuthorization({ regKey: REG }), /^Bearer a+$/, 'a megabyte is allowed')
  })
  

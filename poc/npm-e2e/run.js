@@ -235,8 +235,13 @@ const main = async () => {
     // more files the repository carries, relative to it; the user's, relative to home
     for (const [where, list] of [[dir, files], [home, homeFiles], [outside, outsideFiles]]) {
       for (const [file, content] of Object.entries(list)) {
-        fs.mkdirSync(path.dirname(path.join(where, file)), { recursive: true })
-        fs.writeFileSync(path.join(where, file), fill(content))
+        const target = path.join(where, file)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, fill(content))
+        // a POSIX helper a scenario writes into home needs its exec bit
+        if (where === home && content.startsWith('#!')) {
+          fs.chmodSync(target, 0o755)
+        }
       }
     }
     seen.length = 0
@@ -1157,6 +1162,60 @@ const main = async () => {
       expect(r, 'a non-executable helper file is refused', helperRefused(r))
     }
 
+    // --- a tokenHelper value must not reference npm_config_* variables
+    // (R30): the parent exports what the repository set, and a child npm of
+    // another project expands the value from an environment the repository
+    // controls ---
+    const varChild = await run('var-in-helper-child', {
+      project: 'helper-dir=<path>/gone\n',
+      user: `${nerf}:tokenHelper=\${npm_config_helper_dir}\\evil.cmd\n`,
+    })
+    expect(varChild, 'a value that references npm_config_* is refused and no credential is sent',
+      !varChild.failed && varChild.requests.length && auths(varChild).join() === '-' &&
+      varChild.output.includes('must not reference npm_config_'))
+    expect(varChild, 'and the value is not shown', !varChild.output.includes('evil.cmd'))
+
+    const varParent = await run('var-in-helper-parent', {
+      user: `${nerf}:tokenHelper=\${npm_config_local_prefix}\\evil.cmd\n`,
+    })
+    expect(varParent, 'the parent refuses it too: nothing the file names is in its environment',
+      !varParent.failed && varParent.requests.length && auths(varParent).join() === '-' &&
+      varParent.output.includes('must not reference npm_config_'))
+
+    // ${HOME} still expands: the documented form of the value works
+    const homeHelperFile = process.platform === 'win32' ? 'helpers\\h.cmd' : 'helpers/h'
+    const homeHelperBody = process.platform === 'win32'
+      ? '@echo helper-token\r\n'
+      : '#!/bin/sh\necho helper-token\n'
+    const varHome = await run('var-in-helper-home-control', {
+      user: `${nerf}:tokenHelper=\${HOME}/${homeHelperFile.replaceAll('\\', '/')}\n`,
+      homeFiles: { [homeHelperFile]: homeHelperBody },
+    })
+    expect(varHome, 'control: the documented ${HOME} form runs the helper and sends its token',
+      !varHome.failed && auths(varHome).join() === 'Bearer helper-token')
+
+    // --- a relative globalconfig= in the user file: the parent resolves it
+    // from its own directory and exports it; the child in another directory
+    // uses the export, where it used to lose the credential (U23) ---
+    const relRuns = []
+    for (const name of ['rel-globalconfig-parent', 'rel-globalconfig-child']) {
+      // The global file is relative to the parent's cwd, not the child's.
+      fs.mkdirSync(path.join(root, name), { recursive: true })
+      fs.writeFileSync(path.join(root, name, 'rel.npmrc'), `${nerf}:tokenHelper=${helper}\n`)
+      const child = name.endsWith('-child')
+      const r = await run(name, {
+        user: 'globalconfig=../rel.npmrc\n',
+        globalconfigFlag: false,
+        ...(child ? {
+          args: ['run', 'child'],
+          pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
+        } : {}),
+      })
+      relRuns.push(r)
+      expect(r, `${name}: the helper of the relative global file runs and its token is sent`,
+        !r.failed && r.requests.length > 0 && auths(r).join() === 'Bearer helper-token')
+    }
+
     // A hung helper with a child: npm waits for its deadline, kills the tree,
     // and exits (U17; pass 1 left tree killing "never checked" — task 542
     // covers it in e2e)
@@ -1190,8 +1249,8 @@ const main = async () => {
     expect(hang, 'a hung helper ends the run by the deadline', hang.failed && hang.output.includes('ETOKENHELPER') && hang.output.includes('did not finish'))
     const pidAlive = pid => {
       if (process.platform === 'win32') {
-        const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf8' })
-        return !out.includes('INFO: No tasks')
+        const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
+        return out.split(/\r?\n/).some(line => /^"[^"]+","(\d+)"(?:,|$)/.exec(line)?.[1] === pid)
       }
       try {
         process.kill(Number(pid), 0)
@@ -1200,12 +1259,13 @@ const main = async () => {
         return false
       }
     }
-    // what npm itself spawned is dead: the .cmd wrapper on Windows (the
-    // helper's node is its child), the exec'd helper on POSIX. The helper's
-    // own children may outlive the run — the tree kill is fire-and-forget and
-    // loses the race with npm's exit (a recorded limit, not asserted here)
+    // what npm itself spawned is dead — the .cmd wrapper on Windows, the
+    // exec'd helper on POSIX — and the helper's own children with it: the
+    // kill waits for taskkill, so it does not race the exit of npm
     if (process.platform === 'win32') {
       expect(hang, 'the wrapper npm spawned for the helper is gone', !pidAlive(fs.readFileSync(ppidFile, 'utf8').trim()))
+      expect(hang, 'the helper process itself is gone with the tree', !pidAlive(fs.readFileSync(pidFile, 'utf8').trim()))
+      expect(hang, 'the helper\'s child is gone too', !pidAlive(fs.readFileSync(childPidFile, 'utf8').trim()))
     } else {
       expect(hang, 'the helper process itself is gone', !pidAlive(fs.readFileSync(pidFile, 'utf8').trim()))
     }
@@ -1236,7 +1296,7 @@ const main = async () => {
       { name: 'update-check' },
       `the weekly check for a newer npm sends no credential from a helper (seen in ${checked.length} of ${allResults.length} runs${process.env.CI ? ', CI set: npm does not check' : ''})`,
       allResults.every(r => r.name.endsWith('-token') || r.updateCheck.every(a => a !== 'Bearer helper-token')) && (process.env.CI || checked.length > 0))
-    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout, ...tlsRuns, ...kindRuns, hang]
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout, ...tlsRuns, ...kindRuns, varChild, varParent, varHome, ...relRuns, hang]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)
