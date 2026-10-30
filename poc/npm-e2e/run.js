@@ -14,6 +14,7 @@
 const { execFile, execFileSync } = require('child_process')
 const fs = require('fs')
 const http = require('http')
+const https = require('https')
 const os = require('os')
 const path = require('path')
 
@@ -214,6 +215,9 @@ const main = async () => {
     args = ['view', 'demo', 'version'], registryUrl = registry, user = '', project = '', pkg = {}, userconfigFlag = true, globalconfigFlag = true, env = {}, files = {}, homeFiles = {}, outsideFiles = {},
     // false: a repository root that holds no package.json; cwd: where npm starts, inside the repository
     packageJson = true, cwd = '',
+    // the hung-helper case waits out npm's own 60-second helper deadline, so
+    // the runner's own limit has to sit comfortably above it
+    timeout = 60000,
   }) => {
     // the repository, and beside it the user's own files
     const dir = path.join(root, name, 'repo')
@@ -250,7 +254,7 @@ const main = async () => {
       '--prefer-online',
       // a helper that works shows its stderr at this level
       '--loglevel=verbose',
-    ], { cwd: path.join(dir, cwd), timeout: 60000, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
+    ], { cwd: path.join(dir, cwd), timeout, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
     // E2E_SHOW=<scenario name> prints everything npm said in that scenario
     if (process.env.E2E_SHOW === name) {
@@ -286,6 +290,7 @@ const main = async () => {
   // handlers first, so an interrupt during the overlay itself is covered; on
   // Windows only Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) reach a handler
   let restore = null
+  const cleanUps = []
   const cleanUp = () => {
     if (restore) {
       restore()
@@ -295,7 +300,14 @@ const main = async () => {
     lan?.close()
     proxy.close()
     elsewhere.close()
-    fs.rmSync(root, { recursive: true, force: true })
+    for (const close of cleanUps) {
+      try {
+        close()
+      } catch {}
+    }
+    // Windows keeps handles open for a while after killing the helper tree:
+    // retry instead of failing at the final cleanup step
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 })
   }
   const onSignal = sig => {
     // process.exit() skips the finally below
@@ -1051,6 +1063,168 @@ const main = async () => {
     expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
     expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
 
+    // --- the credential route through a TLS listener with a trusted
+    // certificate (540): the matrix had no cell that rode real TLS ---
+    const helperRefused = r => r.failed && r.output.includes('ETOKENHELPER')
+    const tlsDir = path.join(root, 'tls')
+    fs.mkdirSync(tlsDir, { recursive: true })
+    let tlsPort = null
+    const tlsRuns = []
+    try {
+      const crt = path.join(tlsDir, 'crt.pem')
+      const key = path.join(tlsDir, 'key.pem')
+      execFileSync('openssl', [
+        'req', '-x509', '-newkey', 'rsa:2048', '-days', '2', '-nodes',
+        '-keyout', key, '-out', crt, '-subj', '/CN=127.0.0.1',
+        '-addext', 'subjectAltName=IP:127.0.0.1',
+      ], { stdio: 'ignore' })
+      const tlsServer = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(crt) }, handle)
+      await new Promise(resolve => tlsServer.listen(0, '127.0.0.1', resolve))
+      tlsPort = tlsServer.address().port
+      cleanUps.push(() => tlsServer.close())
+      const registryTls = `https://127.0.0.1:${tlsPort}/`
+      const nerfTls = `//127.0.0.1:${tlsPort}/`
+      const tlsHelperLine = `${nerfTls}:tokenHelper=${helper}\ncafile=${crt}\n`
+
+      const tlsHelperRun = await run('tls-user-config-helper', { registryUrl: registryTls, user: tlsHelperLine })
+      expect(tlsHelperRun, 'TLS: view succeeds through the trusted listener', !tlsHelperRun.failed && tlsHelperRun.stdout === '1.0.0')
+      expect(tlsHelperRun, 'TLS: every request carries the helper token', tlsHelperRun.requests.length && auths(tlsHelperRun).join() === 'Bearer helper-token')
+
+      const tlsStored = await run('tls-stored-token', { registryUrl: registryTls, user: `${nerfTls}:_authToken=helper-token\ncafile=${crt}\n` })
+      expect(tlsStored, 'TLS control: a stored token rides the same route', !tlsStored.failed && auths(tlsStored).join() === 'Bearer helper-token')
+      expect(tlsStored, 'TLS: the helper and a stored token send identical headers', auths(tlsHelperRun).join() === auths(tlsStored).join())
+
+      const tlsPublish = await run('tls-publish-with-helper', { args: ['publish'], registryUrl: registryTls, user: tlsHelperLine })
+      expect(tlsPublish, 'TLS: publish succeeds and the PUT carries the helper token',
+        !tlsPublish.failed && tlsPublish.requests.some(x => x.startsWith('PUT') && x.includes('Bearer helper-token')))
+      tlsRuns.push(tlsHelperRun, tlsStored, tlsPublish)
+    } catch (er) {
+      notes.push(`openssl is unavailable or the listener did not start — skipping TLS checks: ${er.message}`)
+    }
+
+    // --- a real helper of every kind, and the tree being killed with it (542) ---
+    const kindsDir = path.join(root, 'helper kinds')
+    fs.mkdirSync(kindsDir, { recursive: true })
+    const kindJs = path.join(kindsDir, 'kind.js')
+    fs.writeFileSync(kindJs, HELPER_JS)
+    const kindCases = []
+    if (process.platform === 'win32') {
+      for (const ext of ['cmd', 'bat']) {
+        const p = path.join(kindsDir, `kind.${ext}`)
+        fs.writeFileSync(p, `@"${process.execPath}" "${kindJs}"\r\n`)
+        kindCases.push([ext, p])
+      }
+      // A real .exe with no arguments: tokenHelper does not accept arguments
+      // (the ARGUMENTS diagnostic), so compile a small executable with the
+      // .NET Framework csc, available on Windows runners and regular Windows
+      const csc = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe'
+      if (fs.existsSync(csc)) {
+        const cs = path.join(kindsDir, 'kind.cs')
+        fs.writeFileSync(cs, 'class K { static void Main() { System.Console.Error.WriteLine("helper says hello"); System.Console.Out.WriteLine("helper-token"); } }')
+        execFileSync(csc, ['/nologo', `/out:${path.join(kindsDir, 'kind.exe')}`, cs], { stdio: 'ignore' })
+        kindCases.push(['exe', path.join(kindsDir, 'kind.exe')])
+      } else {
+        notes.push('csc was not found — skipping the .exe helper check')
+      }
+      // Run ps1 through a cmd wrapper; bare .ps1 and .js files are refused
+      const ps1 = path.join(kindsDir, 'kind.ps1')
+      fs.writeFileSync(ps1, "Write-Output 'helper-token'\n")
+      const ps1cmd = path.join(kindsDir, 'kind-ps1.cmd')
+      fs.writeFileSync(ps1cmd, `@powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}"\r\n`)
+      kindCases.push(['ps1 through cmd', ps1cmd])
+    } else {
+      // POSIX: an env node shebang is a common script helper form
+      const envNode = path.join(kindsDir, 'kind-env-node')
+      fs.writeFileSync(envNode, `#!/usr/bin/env node\n${HELPER_JS}\n`)
+      fs.chmodSync(envNode, 0o755)
+      kindCases.push(['env-node shebang', envNode])
+    }
+    const kindRuns = []
+    for (const [kind, helperPath] of kindCases) {
+      const r = await run(`helper-kind-${kind}`.replaceAll(' ', '-'), { user: `${nerf}:tokenHelper=${helperPath}\n` })
+      kindRuns.push(r)
+      expect(r, `a ${kind} helper is run and its token is sent`, !r.failed && r.stdout === '1.0.0' && auths(r).join() === 'Bearer helper-token')
+    }
+    if (process.platform === 'win32') {
+      const barePs1 = await run('helper-kind-ps1-bare', { user: `${nerf}:tokenHelper=${kindJs.replace(/\.js$/, '.ps1')}\n` })
+      expect(barePs1, 'a bare .ps1 is refused', helperRefused(barePs1) && barePs1.output.includes('.ps1'))
+      const bareJs = await run('helper-kind-js-bare', { user: `${nerf}:tokenHelper=${kindJs}\n` })
+      expect(bareJs, 'a bare .js on Windows is refused', helperRefused(bareJs))
+    } else {
+      const noexec = path.join(kindsDir, 'kind-noexec')
+      fs.writeFileSync(noexec, `#!/bin/sh\nexec ${process.execPath} ${kindJs}\n`)
+      const r = await run('helper-kind-not-executable', { user: `${nerf}:tokenHelper=${noexec}\n` })
+      expect(r, 'a non-executable helper file is refused', helperRefused(r))
+    }
+
+    // A hung helper with a child: npm waits for its deadline, kills the tree,
+    // and exits (U17; pass 1 left tree killing "never checked" — task 542
+    // covers it in e2e)
+    const hangDir = path.join(root, 'hang helper')
+    fs.mkdirSync(hangDir, { recursive: true })
+    const hangJs = path.join(hangDir, 'hang.js')
+    const pidFile = path.join(hangDir, 'pid')
+    const ppidFile = path.join(hangDir, 'ppid')
+    const childPidFile = path.join(hangDir, 'child-pid')
+    fs.writeFileSync(hangJs, [
+      `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))`,
+      `require('fs').writeFileSync(${JSON.stringify(ppidFile)}, String(process.ppid))`,
+      `const { spawn } = require('child_process')`,
+      `const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })`,
+      `require('fs').writeFileSync(${JSON.stringify(childPidFile)}, String(child.pid))`,
+      'setInterval(() => {}, 1000)',
+    ].join('\n'))
+    const sqHang = s => `'${s.replaceAll("'", "'\\''")}'`
+    const hangHelper = process.platform === 'win32'
+      ? path.join(hangDir, 'hang.cmd')
+      : path.join(hangDir, 'hang')
+    if (process.platform === 'win32') {
+      fs.writeFileSync(hangHelper, `@"${process.execPath}" "${hangJs}"\r\n`)
+    } else {
+      // exec: the shell becomes node, so the process npm signalled is the
+      // helper itself, as the design asks a helper script to be
+      fs.writeFileSync(hangHelper, `#!/bin/sh\nexec ${sqHang(process.execPath)} ${sqHang(hangJs)}\n`)
+      fs.chmodSync(hangHelper, 0o755)
+    }
+    const hang = await run('helper-hang-tree-kill', { user: `${nerf}:tokenHelper=${hangHelper}\n`, timeout: 120000 })
+    expect(hang, 'a hung helper ends the run by the deadline', hang.failed && hang.output.includes('ETOKENHELPER') && hang.output.includes('did not finish'))
+    const pidAlive = pid => {
+      if (process.platform === 'win32') {
+        const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf8' })
+        return !out.includes('INFO: No tasks')
+      }
+      try {
+        process.kill(Number(pid), 0)
+        return true
+      } catch (er) {
+        return false
+      }
+    }
+    // what npm itself spawned is dead: the .cmd wrapper on Windows (the
+    // helper's node is its child), the exec'd helper on POSIX. The helper's
+    // own children may outlive the run — the tree kill is fire-and-forget and
+    // loses the race with npm's exit (a recorded limit, not asserted here)
+    if (process.platform === 'win32') {
+      expect(hang, 'the wrapper npm spawned for the helper is gone', !pidAlive(fs.readFileSync(ppidFile, 'utf8').trim()))
+    } else {
+      expect(hang, 'the helper process itself is gone', !pidAlive(fs.readFileSync(pidFile, 'utf8').trim()))
+    }
+    // Descendants that survive the deadline keep the temp directory open:
+    // kill them best-effort before rm, or cleanup fails with EPERM
+    cleanUps.push(() => {
+      for (const f of [pidFile, childPidFile]) {
+        try {
+          const pid = Number(fs.readFileSync(f, 'utf8').trim())
+          if (process.platform === 'win32') {
+            execFileSync('taskkill', ['/F', '/PID', String(pid)], { stdio: 'ignore' })
+          } else {
+            process.kill(pid, 'SIGKILL')
+          }
+        } catch {}
+      }
+    })
+
+
     // U22: the update check that any command may start asks no helper. Each
     // scenario runs on a fresh cache, so the check is due in all of them where
     // npm does not see a CI (it does not check in one, and then none is seen);
@@ -1062,7 +1236,7 @@ const main = async () => {
       { name: 'update-check' },
       `the weekly check for a newer npm sends no credential from a helper (seen in ${checked.length} of ${allResults.length} runs${process.env.CI ? ', CI set: npm does not check' : ''})`,
       allResults.every(r => r.name.endsWith('-token') || r.updateCheck.every(a => a !== 'Bearer helper-token')) && (process.env.CI || checked.length > 0))
-    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout]
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout, ...tlsRuns, ...kindRuns, hang]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)
