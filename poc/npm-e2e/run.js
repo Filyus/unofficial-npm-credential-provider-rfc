@@ -196,14 +196,14 @@ const main = async () => {
   // A helper that leaves a file behind when it starts, for the checks whose
   // point is that a helper did not run: an absent file proves nothing unless
   // the same helper is seen to leave it where it does run. One per scenario.
-  const markedHelper = (name, regKey = nerf) => {
+  const markedHelper = (name, regKey = nerf, helperRoot = root) => {
     const marker = path.join(root, 'ran', name)
     fs.mkdirSync(path.dirname(marker), { recursive: true })
-    const script = writeHelper(root, `marked-${name}`, [
+    const script = writeHelper(helperRoot, `marked-${name}`, [
       `require('fs').writeFileSync(${JSON.stringify(marker)}, '')`,
       "process.stdout.write('helper-token\\n')",
     ].join('\n'))
-    return { line: `${regKey}:tokenHelper=${script}\n`, ran: () => fs.existsSync(marker) }
+    return { line: `${regKey}:tokenHelper=${script}\n`, path: script, ran: () => fs.existsSync(marker) }
   }
 
   const allResults = []
@@ -870,10 +870,12 @@ const main = async () => {
     // it did not trust that hold a helper (npm_config_token_helper_untrusted).
     // `options` are the scenario's own (files, home files, no package.json);
     // `spec` installs the dependency by name where the tree has no package.json.
-    const gitDependency = async (name, projectLines, options = {}, spec = false, helperAt = 'user') => {
-      const marked = markedHelper(name)
+    const gitDependency = async (name, projectLines, options = {}, spec = false, helperAt = 'user', helperInParentRepo = false) => {
       const dep = path.join(root, name, 'dep')
       fs.mkdirSync(dep, { recursive: true })
+      const parentRepo = path.join(root, name, 'repo')
+      fs.mkdirSync(parentRepo, { recursive: true })
+      const marked = markedHelper(name, nerf, helperInParentRepo ? parentRepo : root)
       fs.writeFileSync(path.join(dep, 'package.json'), JSON.stringify({
         name: 'gitdep', version: '1.0.0', devDependencies: { demo: '1.0.0' }, scripts: { prepare: 'echo prepared' },
       }))
@@ -882,9 +884,12 @@ const main = async () => {
       git('add', '-A')
       git('commit', '-q', '-m', 'i')
       const url = `git+file://${process.platform === 'win32' ? '/' : ''}${dep.replaceAll('\\', '/')}`
+      const helperLine = helperInParentRepo
+        ? `${nerf}:tokenHelper=\${INIT_CWD}/${path.relative(parentRepo, marked.path).replaceAll('\\', '/')}\n`
+        : marked.line
       const result = await run(name, {
         args: ['install', ...(spec ? [url] : []), '--allow-git=all', '--no-audit', '--no-fund', '--fetch-retries=0'],
-        ...(helperAt === 'user' ? { user: marked.line } : {}),
+        ...(helperAt === 'user' ? { user: helperLine } : {}),
         project: projectLines,
         pkg: spec ? {} : { dependencies: { gitdep: url } },
         ...(typeof options === 'function' ? options(marked) : options),
@@ -894,6 +899,40 @@ const main = async () => {
     const gitControl = await gitDependency('git-dependency-control', '')
     expect(gitControl.result, 'control: with no route in the project the install that prepares a git dependency runs the helper in the clone and sends its token',
       gitControl.marked.ran() && auths(gitControl.result).includes('Bearer helper-token'))
+
+    // R30 pass 10: the nested npm inherits INIT_CWD from its parent, which
+    // points into the repository. A helper planted there must not run through
+    // a trusted user-file value interpolated by the nested npm.
+    const initCwdHelper = await gitDependency('git-dependency-init-cwd-helper', '', {}, false, 'user', true)
+    expect(initCwdHelper.result, 'a trusted tokenHelper value using INIT_CWD cannot select a helper from the parent repository, and sends no credential',
+      !initCwdHelper.marked.ran() &&
+      initCwdHelper.result.requests.length > 0 &&
+      auths(initCwdHelper.result).join() === '-' &&
+      initCwdHelper.result.output.includes('may reference only ${HOME} or ${USERPROFILE}'))
+
+    // cmd.exe expands percent expressions in a .cmd path even when quoted.
+    // A repository-controlled INIT_CWD could otherwise turn this user value
+    // into the helper planted in the checkout.
+    if (process.platform === 'win32') {
+      const percentMarked = markedHelper('cmd-percent-path')
+      const repoDir = path.join(root, 'cmd-percent-helper-path', 'repo')
+      const driveRoot = path.parse(repoDir).root
+      const initCwd = path.join(repoDir, 'evil')
+      const percentPath = `${driveRoot}%INIT_CWD:~3%.cmd`
+      const percentRun = await run('cmd-percent-helper-path', {
+        user: `${nerf}:tokenHelper=${percentPath}\n`,
+        cwd: 'evil',
+        env: { INIT_CWD: initCwd },
+        files: {
+          'evil/.keep': '',
+          'evil.cmd': fs.readFileSync(percentMarked.path, 'utf8'),
+        },
+      })
+      expect(percentRun, 'a .cmd helper path that cmd.exe could expand is refused before the helper runs',
+        percentRun.failed && percentRun.output.includes('ETOKENHELPER') &&
+        !percentMarked.ran() && !auths(percentRun).includes('Bearer helper-token'))
+    }
+
     for (const [scenario, key, line, onWire] of [
       ['git-dependency-proxy', 'proxy', `proxy=${proxyUrl}\n`, r => r.proxy.some(l => l.includes('helper-token'))],
       ['git-dependency-ca', 'ca', 'ca=project-ca\n', () => false],
@@ -1162,17 +1201,16 @@ const main = async () => {
       expect(r, 'a non-executable helper file is refused', helperRefused(r))
     }
 
-    // --- a tokenHelper value must not reference npm_config_* variables
-    // (R30): the parent exports what the repository set, and a child npm of
-    // another project expands the value from an environment the repository
-    // controls ---
+    // --- a tokenHelper value may reference only stable user-home variables
+    // (R30): the parent exports repository-controlled environment values, and
+    // a child npm in another project can expand them differently ---
     const varChild = await run('var-in-helper-child', {
       project: 'helper-dir=<path>/gone\n',
       user: `${nerf}:tokenHelper=\${npm_config_helper_dir}\\evil.cmd\n`,
     })
     expect(varChild, 'a value that references npm_config_* is refused and no credential is sent',
       !varChild.failed && varChild.requests.length && auths(varChild).join() === '-' &&
-      varChild.output.includes('must not reference npm_config_'))
+      varChild.output.includes('may reference only ${HOME} or ${USERPROFILE}'))
     expect(varChild, 'and the value is not shown', !varChild.output.includes('evil.cmd'))
 
     const varParent = await run('var-in-helper-parent', {
@@ -1180,7 +1218,7 @@ const main = async () => {
     })
     expect(varParent, 'the parent refuses it too: nothing the file names is in its environment',
       !varParent.failed && varParent.requests.length && auths(varParent).join() === '-' &&
-      varParent.output.includes('must not reference npm_config_'))
+      varParent.output.includes('may reference only ${HOME} or ${USERPROFILE}'))
 
     // ${HOME} still expands: the documented form of the value works
     const homeHelperFile = process.platform === 'win32' ? 'helpers\\h.cmd' : 'helpers/h'
@@ -1194,26 +1232,41 @@ const main = async () => {
     expect(varHome, 'control: the documented ${HOME} form runs the helper and sends its token',
       !varHome.failed && auths(varHome).join() === 'Bearer helper-token')
 
-    // --- a relative globalconfig= in the user file: the parent resolves it
-    // from its own directory and exports it; the child in another directory
-    // uses the export, where it used to lose the credential (U23) ---
+    const varUserprofile = await run('var-in-helper-userprofile-control', {
+      user: `${nerf}:tokenHelper=\${USERPROFILE}/${homeHelperFile.replaceAll('\\', '/')}\n`,
+      env: { USERPROFILE: '<home>' },
+      homeFiles: { [homeHelperFile]: homeHelperBody },
+    })
+    expect(varUserprofile, 'control: the documented ${USERPROFILE} form runs the helper and sends its token',
+      !varUserprofile.failed && auths(varUserprofile).join() === 'Bearer helper-token')
+
+    // --- relative globalconfig= and prefix= in the user file: the parent
+    // resolves the effective global path and the child in another directory
+    // uses that export, where it used to lose the credential (U23) ---
     const relRuns = []
-    for (const name of ['rel-globalconfig-parent', 'rel-globalconfig-child']) {
-      // The global file is relative to the parent's cwd, not the child's.
-      fs.mkdirSync(path.join(root, name), { recursive: true })
-      fs.writeFileSync(path.join(root, name, 'rel.npmrc'), `${nerf}:tokenHelper=${helper}\n`)
-      const child = name.endsWith('-child')
-      const r = await run(name, {
-        user: 'globalconfig=../rel.npmrc\n',
-        globalconfigFlag: false,
-        ...(child ? {
-          args: ['run', 'child'],
-          pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
-        } : {}),
-      })
-      relRuns.push(r)
-      expect(r, `${name}: the helper of the relative global file runs and its token is sent`,
-        !r.failed && r.requests.length > 0 && auths(r).join() === 'Bearer helper-token')
+    for (const [kind, userLine, globalFile] of [
+      ['globalconfig', 'globalconfig=../rel.npmrc', 'rel.npmrc'],
+      ['prefix', 'prefix=../relprefix', 'relprefix/etc/npmrc'],
+    ]) {
+      for (const role of ['parent', 'child']) {
+        const name = `rel-${kind}-${role}`
+        // The relative value resolves from the parent's cwd, not the child's.
+        const target = path.join(root, name, globalFile)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, `${nerf}:tokenHelper=${helper}\n`)
+        const child = role === 'child'
+        const r = await run(name, {
+          user: `${userLine}\n`,
+          globalconfigFlag: false,
+          ...(child ? {
+            args: ['run', 'child'],
+            pkg: { scripts: { child: `cd "${elsewhereDir}" && "${process.execPath}" "${npmCli}" view demo version --registry=${registry}` } },
+          } : {}),
+        })
+        relRuns.push(r)
+        expect(r, `${name}: the helper of the relative global file runs and its token is sent`,
+          !r.failed && r.requests.length > 0 && auths(r).join() === 'Bearer helper-token')
+      }
     }
 
     // A hung helper with a child: npm waits for its deadline, kills the tree,

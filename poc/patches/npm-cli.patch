@@ -1,7 +1,7 @@
 From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
-Subject: [PATCH 1/2] feat: add tokenHelper, a program that prints a registry
+Subject: [PATCH 1/3] feat: add tokenHelper, a program that prints a registry
  token
 
 `//<registry>/:tokenHelper=<absolute path>` names a program that prints the
@@ -4081,7 +4081,7 @@ index 9426265..0798f0d 100644
 From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
-Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
+Subject: [PATCH 2/3] feat: explain a tokenHelper in profile, on a 401 and when
  a helper fails to start
 
 `profile enable-2fa` says why it cannot work through a helper. The message names
@@ -4500,6 +4500,183 @@ index c9ab327..d7e23df 100644
  t.test('a late result after the helper was stopped is ignored', async t => {
    const logs = logsOf(t)
    let late
+-- 
+2.52.0.windows.1
+
+
+From 627068e062b722296710b6bab48fc7b8113beff4 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Mon, 2 Nov 2026 16:14:57 +0500
+Subject: [PATCH 3/3] config: restrict token helper path interpolation
+
+---
+ lib/utils/token-helper.js       |  3 ++
+ test/lib/utils/token-helper.js  | 10 +++++
+ workspaces/config/lib/index.js  | 20 +++++-----
+ workspaces/config/test/index.js | 68 +++++++++++++++++++++++++--------
+ 4 files changed, 76 insertions(+), 25 deletions(-)
+
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index d0ec1b1..eb73f3c 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -96,6 +96,9 @@ const refusal = (helper, platform) => {
+       : BARE_NAME
+   }
+   if (platform === 'win32') {
++    if (/\.(cmd|bat)$/i.test(helper) && helper.includes('%')) {
++      return 'contains a percent sign, which cmd.exe expands; move it to a path without %'
++    }
+     if (/\.(ps1|js)$/i.test(helper)) {
+       return WINDOWS_SCRIPT
+     }
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index d7e23df..f12951e 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -334,6 +334,16 @@ t.test('a Windows .cmd or .bat helper runs through cmd.exe with a quoted path',
+   t.equal(exe.calls[0].opts.shell, false)
+ })
+ 
++t.test('a Windows .cmd path with percent signs is refused before cmd.exe expands it', async t => {
++  const helper = 'C:\\repo\\%INIT_CWD:~3%\\token.cmd'
++  const { getAuthorization, calls } = setup(t, printing('should not run'), { helper, platform: 'win32' })
++  await t.rejects(getAuthorization({ regKey: REG }), {
++    code: 'ETOKENHELPER',
++    message: /cmd\.exe expands/,
++  })
++  t.equal(calls.length, 0, 'cmd.exe is never started with a path containing percent syntax')
++})
++
+ t.test('a Windows .cmd helper without ComSpec runs through cmd.exe', async t => {
+   mockGlobals(t, { 'process.env.ComSpec': undefined })
+   const { getAuthorization, calls } = setup(t, printing('tok'), { helper: 'C:\\x\\t.cmd', platform: 'win32' })
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 65f7e4c..01bcc32 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -27,6 +27,11 @@ const internalEnv = [
+ 
+ // the settings that choose where a request goes and whom it trusts
+ const ROUTE_KEYS = ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']
++const TOKEN_HELPER_ALLOWED_ENV = new Set(['HOME', 'USERPROFILE'])
++const TOKEN_HELPER_ENV = /(?<!\\)(\\*)\$\{([^${}?]+)(\?)?\}/g
++const tokenHelperHasUnsafeEnv = value => [...value.matchAll(TOKEN_HELPER_ENV)]
++  .some(([, escapes, name]) => escapes.length % 2 === 0 &&
++    !TOKEN_HELPER_ALLOWED_ENV.has(process.platform === 'win32' ? name.toUpperCase() : name))
+ 
+ const isFile = (name) => {
+   try {
+@@ -674,16 +679,13 @@ class Config {
+         // the repository, and env and cli values can be set by scripts.
+         if (/(^|:)tokenHelper$/.test(k)) {
+           this.#tokenHelperSeen.add(where)
+-          if (typeof value === 'string' && /\$\{[^}]*npm_config_/i.test(value)) {
+-            // The value of a tokenHelper must not name npm_config_* variables:
+-            // the parent npm exports what the repository set, and a child npm
+-            // of another project expands the value from an environment the
+-            // repository controls. ${HOME} and the rest of the environment
+-            // still expand.
++          if (typeof value === 'string' && tokenHelperHasUnsafeEnv(value)) {
++            // A tokenHelper path may depend only on the user's home. Other
++            // variables may come from the repository or the working directory:
++            // a child npm can otherwise run a program from its git checkout.
+             this.#tokenHelperRefusals.set(where,
+-              'a tokenHelper value must not reference npm_config_* variables: ' +
+-              'a repository chooses what they hold in a child npm; give the ' +
+-              'absolute path of the helper, or reference it through ${HOME}')
++              'a tokenHelper value may reference only ${HOME} or ${USERPROFILE}; ' +
++              'use an absolute path for any other helper location')
+             this.#tokenHelperTrusted.delete(where)
+           }
+           if (!this.#tokenHelperTrusted.has(where)) {
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index d2208db..3be51ca 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -2692,30 +2692,66 @@ t.test('tokenHelper is honored only from user and global config', async t => {
+   t.same(config.tokenHelperUntrusted, [], 'and nothing is passed on to child processes')
+ })
+ 
+-t.test('a tokenHelper value does not reference npm_config_* variables', async t => {
+-  // pass 9, R30: the parent exports what the repository set, and the child
+-  // expands the user file's value from an environment the repository controls
+-  const { config, warned } = await loadHelperConfig(t, {
+-    project: 'helper-dir=<path>/gone\n',
+-    user: '//h.registry/:tokenHelper=${npm_config_helper_dir}\\evil.cmd\n',
++t.test('a tokenHelper value may reference only user home variables', async t => {
++  for (const name of ['npm_config_helper_dir', 'npm_config_local_prefix', 'INIT_CWD', 'PWD', 'MY_NPM_CONFIG_HELPER']) {
++    t.test(name, async t => {
++      const { config, warned } = await loadHelperConfig(t, {
++        project: 'helper-dir=<path>/gone\n',
++        user: `//h.registry/:tokenHelper=\${${name}}/evil.cmd\n`,
++        env: { [name]: '<path>/project' },
++      })
++      t.equal(helperIn(config.flat, '//h.registry/'), undefined, 'the helper is not run')
++      t.ok(warned.some(w => w.includes('may reference only ${HOME} or ${USERPROFILE}') && !w.includes('evil.cmd')),
++        'the refusal names the allowed variables without showing the value')
++    })
++  }
++
++  const escaped = await loadHelperConfig(t, {
++    user: '//h.registry/:tokenHelper=\\${INIT_CWD}/evil.cmd\n',
+   })
+-  t.equal(helperIn(config.flat, '//h.registry/'), undefined, 'the helper is not run')
+-  t.ok(warned.some(w => w.includes('must not reference npm_config_')),
+-    'the refusal names the reason and not the value')
++  t.equal(helperIn(escaped.config.flat, '//h.registry/'), '${INIT_CWD}/evil.cmd',
++    'an escaped variable stays literal')
+ 
+-  // the parent runs first and exports nothing the file names: it refuses too
+-  const alone = await loadHelperConfig(t, {
+-    user: '//h.registry/:tokenHelper=${npm_config_local_prefix}\\evil.cmd\n',
++  const doubleEscaped = await loadHelperConfig(t, {
++    user: '//h.registry/:tokenHelper=\\\\\\\\${INIT_CWD}/evil.cmd\n',
++    env: { INIT_CWD: '<path>/project' },
+   })
+-  t.equal(helperIn(alone.config.flat, '//h.registry/'), undefined, 'the parent refuses it as well')
++  t.equal(helperIn(doubleEscaped.config.flat, '//h.registry/'), undefined,
++    'an even number of escapes leaves the environment reference active and refused')
++  t.ok(doubleEscaped.warned.some(w => w.includes('may reference only ${HOME} or ${USERPROFILE}') && !w.includes('evil.cmd')),
++    'the refusal does not reveal the helper path')
++
++  if (process.platform === 'win32') {
++    const lowerProfile = await loadHelperConfig(t, {
++      user: '//h.registry/:tokenHelper=${userprofile}/helpers/h.cmd\n',
++      env: { userprofile: '<path>/home' },
++    })
++    const lowerValue = helperIn(lowerProfile.config.flat, '//h.registry/')
++    t.ok(lowerValue && lowerValue.replaceAll('\\', '/').startsWith(`${lowerProfile.path.replaceAll('\\', '/')}/home/`),
++      'Windows environment names are case-insensitive')
++  } else {
++    const lowerHome = await loadHelperConfig(t, {
++      user: '//h.registry/:tokenHelper=${home}/evil.cmd\n',
++      env: { home: '<path>/project' },
++    })
++    t.equal(helperIn(lowerHome.config.flat, '//h.registry/'), undefined,
++      'a lowercase home variable is not allowed on case-sensitive platforms')
++  }
+ 
+-  // ${HOME} and the other variables still expand: the documented form works
+   const home = await loadHelperConfig(t, {
+     user: '//h.registry/:tokenHelper=${HOME}/helpers/h.cmd\n',
+   })
+-  const value = helperIn(home.config.flat, '//h.registry/')
+-  t.ok(value && value.startsWith(home.path) && value.endsWith('h.cmd'),
++  const homeValue = helperIn(home.config.flat, '//h.registry/')
++  t.ok(homeValue && homeValue.startsWith(home.path) && homeValue.endsWith('h.cmd'),
+     'the documented ${HOME} form keeps expanding')
++
++  const profile = await loadHelperConfig(t, {
++    user: '//h.registry/:tokenHelper=${USERPROFILE}/helpers/h.cmd\n',
++    env: { USERPROFILE: '<path>/home' },
++  })
++  const profileValue = helperIn(profile.config.flat, '//h.registry/')
++  t.ok(profileValue && profileValue.replaceAll('\\', '/').startsWith(`${profile.path.replaceAll('\\', '/')}/home/`) && profileValue.endsWith('h.cmd'),
++    'the Windows user-profile form expands')
+ })
+ 
+ t.test('a relative globalconfig= in a trusted user file: a child npm uses the exported file', async t => {
 -- 
 2.52.0.windows.1
 

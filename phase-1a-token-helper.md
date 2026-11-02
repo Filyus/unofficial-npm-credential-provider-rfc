@@ -1,7 +1,7 @@
 # RFC draft: `tokenHelper` for npm (Phase 1a)
 
 > Status: Draft
-> Revision: 34 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 34 follows the fourth round of review, two security councils on the rebuilt prototype)
+> Revision: 36 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 36 records the tenth review's environment and Windows command-path restrictions)
 > Date: 2026-10-23
 
 > Phase 1a of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. [Phase 1b](phase-1b-credential-hardening.md) hardens how every credential travels, and [Phase 2](phase-2-credential-provider.md), a credential provider protocol, is a separate document.
@@ -97,6 +97,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 - `tokenHelper` and `credentialProvider` are accepted only from the user config file and the global config file.
 - In a project or workspace `.npmrc`, in `publishConfig`, in `npm_config_*` environment variables and on the command line they are ignored with a warning.
 - A user or global file does not count when the repository chose it, or when the command line or the environment put it inside the project; [Where it may be set](#where-it-may-be-set) says what that means.
+- In an accepted user or global value, only `${HOME}` and `${USERPROFILE}` may be expanded (environment names are case-insensitive on Windows). An escaped reference such as `\${INIT_CWD}` stays literal, following npm's config syntax. All other environment references are refused: a nested npm can run from a git dependency where `${INIT_CWD}` points into the repository, and repository-controlled values such as `${PWD}`, `${npm_config_*}` or a custom variable could choose a program there. Use an absolute path for any other helper location.
 
 ### The setting
 
@@ -111,6 +112,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 |---|---|
 | **Where** | User or global config, per registry ([Trust](#trust)) |
 | **Value** | An absolute path, no arguments |
+| **Environment references** | Only `${HOME}` and `${USERPROFILE}` (case-insensitive on Windows); other expanded `${NAME}` references are refused. Use an absolute path for any other helper location. |
 | **When** | Lazily, once per registry and helper per npm process |
 | **Output** | One line: a raw token is sent as `Bearer <token>`, `Scheme value` as is |
 | **Failure** | `ETOKENHELPER`; no fallback to another credential |
@@ -119,7 +121,7 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 
 ### Where it may be set
 
-Only in a user or global file that the repository did not choose. npm loads project config before the user and global files, and a project `.npmrc` can name those files; the command line and the environment can name them too, and a job that sets them is not always the user (`npm ci --prefix sub` makes `sub/etc/npmrc` the global file, a CI job writes `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, and a repository can carry either file, with a helper whose value may use `${VAR}`). So the rule is:
+Only in a user or global file that the repository did not choose. npm loads project config before the user and global files, and a project `.npmrc` can name those files; the command line and the environment can name them too, and a job that sets them is not always the user (`npm ci --prefix sub` makes `sub/etc/npmrc` the global file, a CI job writes `NPM_CONFIG_USERCONFIG=$CI_PROJECT_DIR/.npmrc`, and a repository can carry either file, with a helper whose value may use `${HOME}` or `${USERPROFILE}`). So the rule is:
 
 - **Honoured** only from the user config file and the global config file, and only when a project `.npmrc` did not choose that file: the user file is not honoured when the project sets `userconfig`, and the global file is not honoured when it sets `globalconfig` or `prefix` (the global file's default path derives from `prefix`; the user file's does not). A project `prefix=` leaves the user file, and the settings in it, alone. Keys are compared as npm applies them, after `${VAR}` expansion: `user${UNSET?}config=` is `userconfig`.
 - **Not honoured** when the file's path was chosen on the command line or in the environment (`--userconfig`, `--globalconfig`, `--prefix`, `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG`, `NPM_CONFIG_PREFIX`, `PREFIX`) and the file lies in a project. Where the project is comes from the file alone: npm takes the file's real path (`fs.realpathSync.native`, so a link or a spelling does not hide it) and looks at the directory the file is in and each one above it. A directory that holds a `package.json` or a `.git` (a directory, or the file a worktree or a submodule has) is a project. `node_modules` is not a mark: a global prefix on Windows holds one.
@@ -147,9 +149,9 @@ npm does not rewrite the file itself: `npm config fix` repairs only what makes e
 
 The runner lives in npm/cli, on `@npmcli/promise-spawn`; npm-registry-fetch holds no process code ([Implementation](#implementation)).
 
-- **Value.** An absolute path with no arguments, which may contain spaces (`C:\Program Files\…`). Anything else fails with `ETOKENHELPER` and a message that says what to do ([Output and failures](#output-and-failures)). `${VAR}` in the value expands, and an unescaped `#` or `;` ends it (write `\#`, as in a path under `C#`), as in any npm config value.
+- **Value.** An absolute path with no arguments, which may contain spaces (`C:\Program Files\…`). Anything else fails with `ETOKENHELPER` and a message that says what to do ([Output and failures](#output-and-failures)). Only `${HOME}` and `${USERPROFILE}` expand; other active environment references are refused, while an escaped reference stays literal. An unescaped `#` or `;` ends the value (write `\#`, as in a path under `C#`), as in any npm config value.
 - **Key.** A key whose registry part does not end in `/` (`//host:tokenHelper`, as pnpm's docs show it) never matches a request, so it is ignored with a warning naming `//host/:tokenHelper`.
-- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does, and `@npmcli/promise-spawn` does the quoting for `cmd.exe`; a helper in a directory whose path is longer than 258 characters is refused there, since `cmd.exe` cannot start a program in it. The path is the user's own, so a `"`, `%` or `!` in it, which `cmd.exe` would reinterpret, is not looked at ([retired](poc/retired/README.md)). Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
+- **Windows.** A `.cmd` or `.bat` helper runs through `cmd.exe`, as pnpm does, and `@npmcli/promise-spawn` does the quoting for it. A path with `%` is refused because `cmd.exe` expands percent expressions even inside quotes; a helper in a directory longer than 258 characters is refused because Windows cannot start it there. Anything else is executed directly, never through a shell. A `.ps1` or `.js` file is not started by Windows directly and needs a `.cmd` wrapper.
 - **Working directory.** The helper's own directory, never npm's, which is usually the repository: on Windows a command started by bare name (the `node` in a cmd-shim) is looked up in the current directory first.
 - **Input.** None: stdin is closed at once, so a helper that reads it gets end of input.
 - **Limits.** 1 MiB on each of stdout and stderr, and 60 seconds: `@npmcli/promise-spawn` has no timeout, so the runner owns the deadline and ends a helper that reaches it. After the helper exits, npm reads its output for at most 250 ms more and then stops waiting, so a background process it left holding stdout does not keep npm waiting until the deadline.
@@ -277,7 +279,7 @@ pnpm 12 is a Rust CLI; the TypeScript CLI is pnpm 11, which pnpm still maintains
 | `//<registry>/:@scope:tokenHelper` | Parsed by both: the helper serves that scope's packages (the docs show the form for `_authToken` only) | Ignored with a warning naming the per-registry key |
 | Key in project `.npmrc` | Error in both, unless the user's file has the same value; the environment form is dropped | Ignored with a warning |
 | Output | Install: `trimEnd()`, then a leading scheme (`Bearer …`, `Basic …`) is kept and anything else gets `Bearer`. Publish: pnpm 11 trims both ends, strips `Bearer` and always sends `Bearer`, so `Basic …` goes out as `Bearer Basic …`; pnpm 12 maps as for install | Trimmed at both ends, BOM removed, refused if not a valid header value; the same mapping on every request |
-| Windows `.cmd` | Through `cmd.exe` in all three paths: pnpm 11 install (Node's `shell` option), pnpm 11 publish (execa), pnpm 12 (`cmd /C`) | Through `cmd.exe`; a directory path over 258 characters is refused. pnpm's parser refuses `"` and `%` in every value; npm does not look at them, since the path is the user's own |
+| Windows `.cmd` | Through `cmd.exe` in all three paths: pnpm 11 install (Node's `shell` option), pnpm 11 publish (execa), pnpm 12 (`cmd /C`) | Through `cmd.exe`; a directory path over 258 characters and a path containing `%` are refused. pnpm's parser refuses `%` in every value; npm refuses it in `.cmd`/`.bat` paths because `cmd.exe` expands it |
 | Directory, environment, stdin | The directory pnpm runs in (the project's) and its whole environment; stdin closed | The helper's own directory; the environment without `npm_config_*` and the script `PATH` entries; stdin closed |
 | Time limit | 60 s, then the helper is killed, in pnpm 12 and in pnpm 11 install; pnpm 11 publish has none | 60 s, then SIGTERM and SIGKILL 2 s later; the whole process tree on Windows |
 | Output size and stderr | No limit set by pnpm (pnpm 12 reads to the end); stderr is dropped, except in pnpm 11 publish, which shows it as warnings | 1 MiB per stream, then `ETOKENHELPER`; stderr shown as warnings with the exact token masked when the helper fails, at `verbose` when it succeeds |
