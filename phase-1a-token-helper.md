@@ -1,7 +1,7 @@
 # RFC draft: `tokenHelper` for npm (Phase 1a)
 
 > Status: Draft
-> Revision: 36 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 36 records the tenth review's environment and Windows command-path restrictions)
+> Revision: 37 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 37 fixes registry keys, isolates rejected helper entries and limits inherited global paths to helper configurations)
 > Date: 2026-10-23
 
 > Phase 1a of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. [Phase 1b](phase-1b-credential-hardening.md) hardens how every credential travels, and [Phase 2](phase-2-credential-provider.md), a credential provider protocol, is a separate document.
@@ -98,6 +98,8 @@ A helper or provider is a program npm runs, so only the user and the machine's o
 - In a project or workspace `.npmrc`, in `publishConfig`, in `npm_config_*` environment variables and on the command line they are ignored with a warning.
 - A user or global file does not count when the repository chose it, or when the command line or the environment put it inside the project; [Where it may be set](#where-it-may-be-set) says what that means.
 - In an accepted user or global value, only `${HOME}` and `${USERPROFILE}` may be expanded (environment names are case-insensitive on Windows). An escaped reference such as `\${INIT_CWD}` stays literal, following npm's config syntax. All other environment references are refused: a nested npm can run from a git dependency where `${INIT_CWD}` points into the repository, and repository-controlled values such as `${PWD}`, `${npm_config_*}` or a custom variable could choose a program there. Use an absolute path for any other helper location.
+- A helper's registry key must be fixed: active environment references anywhere in the key are refused, including its host, path and `tokenHelper` suffix. A repository value exported to a child npm must not choose where a trusted helper's credential goes. Escaped references remain literal.
+- An invalid helper entry is ignored with a warning. It does not disable another registry's valid helper or change which file is trusted or which project route settings are refused.
 
 ### The setting
 
@@ -130,6 +132,7 @@ Only in a user or global file that the repository did not choose. npm loads proj
 - **A default path** is never refused by this: a home directory that is the checkout (a PaaS with `HOME=/app`) makes the default user file the repository's own `.npmrc`, which is not a chosen path. A path in the environment that equals the default one is the same: a parent npm exports the prefix, the global file and the user file it computed to every npm it starts, and a default prefix can lie inside a git checkout (nvm, Homebrew on Apple silicon) or `~/.npmrc` be a link into a dotfiles repository.
 - **Otherwise not honoured:** the key is ignored with a warning that names the directory that made the file a project and the mark in it, and the remedy (use the default path, `~/.npmrc`, for the file, or move the `tokenHelper` line into the default user file). That includes every key in a file that a project's setting selected, wherever that file lies.
 - **A child npm** inherits the chosen paths as environment values and applies the rule itself. A child that stays in the project reads the same project `.npmrc`, and a file chosen inside the repository is refused from the file alone. A child that leaves the project (the install of a git dependency runs in the clone) sees a path that no `.npmrc` names and no mark surrounds. So the parent lists the user and global files it refused that hold a `tokenHelper` key in `npm_config_token_helper_untrusted`, and a child distrusts them whatever path its environment gives, and passes the list on. Nothing is set without a helper key. The route keys have a marker of their own, below.
+- **A trusted global helper** also exports the actual global file in `npm_config_token_helper_globalconfig`. When the trusted user file names a relative `globalconfig` or `prefix`, a child uses the matching exported path for that helper, and exports the selected file consistently to its own children. Explicit command-line choices still win. With no global helper this marker is removed, and ordinary relative config selection keeps npm's behavior.
 
 The rule needs no inode comparison and no current directory. What remains are limits, with their reasons in [the implementation notes](phase-1a-implementation.md#limits):
 

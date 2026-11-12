@@ -1,7 +1,7 @@
 From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
-Subject: [PATCH 1/4] feat: add tokenHelper, a program that prints a registry
+Subject: [PATCH 1/6] feat: add tokenHelper, a program that prints a registry
  token
 
 `//<registry>/:tokenHelper=<absolute path>` names a program that prints the
@@ -4078,7 +4078,7 @@ index 9426265..0798f0d 100644
 From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
-Subject: [PATCH 2/4] feat: explain a tokenHelper in profile, on a 401 and when
+Subject: [PATCH 2/6] feat: explain a tokenHelper in profile, on a 401 and when
  a helper fails to start
 
 `profile enable-2fa` says why it cannot work through a helper. The message names
@@ -4501,7 +4501,7 @@ index c9ab327..d7e23df 100644
 From 627068e062b722296710b6bab48fc7b8113beff4 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Mon, 2 Nov 2026 16:14:57 +0500
-Subject: [PATCH 3/4] config: restrict token helper path interpolation
+Subject: [PATCH 3/6] config: restrict token helper path interpolation
 
 ---
  lib/utils/token-helper.js       |  3 ++
@@ -4675,7 +4675,7 @@ index d2208db..3be51ca 100644
 From 82ddde9dd2ff6bfc47b1fb3672de66b2c7e72878 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 06:03:50 +0500
-Subject: [PATCH 4/4] config: reject helpers from unsafe user files
+Subject: [PATCH 4/6] config: reject helpers from unsafe user files
 
 ---
  workspaces/config/lib/index.js  | 22 +++++++++++++---------
@@ -4745,3 +4745,488 @@ index 3be51ca..9a9ca31 100644
    const escaped = await loadHelperConfig(t, {
      user: '//h.registry/:tokenHelper=\\${INIT_CWD}/evil.cmd\n',
    })
+
+From 2aa3eae40b2ab21a8df909c2d6e968e750b65f93 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 12 Nov 2026 06:25:44 +0500
+Subject: [PATCH 5/6] config: isolate helper entries and inherited global paths
+
+---
+ workspaces/config/lib/index.js     |  55 +++++++++-----
+ workspaces/config/lib/set-envs.js  |   7 ++
+ workspaces/config/test/index.js    | 115 ++++++++++++++++++++++++-----
+ workspaces/config/test/set-envs.js |  25 +++++++
+ 4 files changed, 165 insertions(+), 37 deletions(-)
+
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 78e2dfa..3c0afea 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -23,12 +23,15 @@ const internalEnv = [
+   'local-prefix',
+   'token-helper-project-transport',
+   'token-helper-untrusted',
++  'token-helper-globalconfig',
+ ]
+ 
+ // the settings that choose where a request goes and whom it trusts
+ const ROUTE_KEYS = ['proxy', 'https-proxy', 'ca', 'cafile', 'strict-ssl']
+ const TOKEN_HELPER_ALLOWED_ENV = new Set(['HOME', 'USERPROFILE'])
+ const TOKEN_HELPER_ENV = /(?<!\\)(\\*)\$\{([^${}?]+)(\?)?\}/g
++const tokenHelperHasEnv = key => [...key.matchAll(TOKEN_HELPER_ENV)]
++  .some(([, escapes]) => escapes.length % 2 === 0)
+ const tokenHelperHasUnsafeEnv = value => [...value.matchAll(TOKEN_HELPER_ENV)]
+   .some(([, escapes, name]) => escapes.length % 2 === 0 &&
+     !TOKEN_HELPER_ALLOWED_ENV.has(process.platform === 'win32' ? name.toUpperCase() : name))
+@@ -672,19 +675,6 @@ class Config {
+       }
+     } else {
+       conf.raw = obj
+-      // Decide whether this file may configure any helpers before reading its
+-      // entries. A later unsafe helper value must not revoke trust after an
+-      // earlier helper from the same file has already entered conf.data.
+-      for (const [key, value] of Object.entries(obj)) {
+-        const k = envReplace(key, this.env)
+-        if (/(^|:)tokenHelper$/.test(k) && typeof value === 'string' && tokenHelperHasUnsafeEnv(value)) {
+-          this.#tokenHelperSeen.add(where)
+-          this.#tokenHelperRefusals.set(where,
+-            'a tokenHelper value may reference only ${HOME} or ${USERPROFILE}; ' +
+-            'use an absolute path for any other helper location')
+-          this.#tokenHelperTrusted.delete(where)
+-        }
+-      }
+       outer: for (const [key, value] of Object.entries(obj)) {
+         const k = envReplace(key, this.env)
+         // A token helper names a program npm executes, so only the user and
+@@ -702,6 +692,22 @@ class Config {
+             }
+             continue
+           }
++          // The registry key selects where the helper's credential may go.
++          // A parent npm can export project values into the child's env.
++          if (tokenHelperHasEnv(key)) {
++            this.queueWarning(`token-helper:${where}:${key}`,
++              `Ignoring ${where} config tokenHelper: its registry key must not contain environment references; ` +
++              'use a fixed //<registry>/:tokenHelper key.')
++            continue
++          }
++          if (typeof value === 'string' && tokenHelperHasUnsafeEnv(value)) {
++            // Reject this entry, without changing trust in the file or in
++            // another registry's helper and its route protection.
++            this.queueWarning(`token-helper:${where}:${k}`,
++              `Ignoring ${where} config "${k}": a tokenHelper value may reference only \${HOME} or \${USERPROFILE}; ` +
++              'use an absolute path for any other helper location.')
++            continue
++          }
+         }
+         const v = this.parseField(value, k)
+         if (where !== 'default') {
+@@ -987,12 +993,14 @@ class Config {
+   // against the current directory. The parent npm resolves it from its own,
+   // trusts the file, and exports what it resolved; a child npm of another
+   // project resolved the same relative value from the clone, found nothing,
+-  // and lost the credential. The environment carries what the parent
+-  // resolved, so when the trusted user file states a relative value, that is
+-  // the file both mean. Only the file of the global layer is affected: where
+-  // npm installs things is upstream's to decide.
++  // and lost the credential. Only a parent with a trusted global helper
++  // exports its selected file in the helper marker. Without that opt-in,
++  // ordinary configurations retain upstream's relative-path behavior.
+   #effectiveGlobalFile () {
+-    if (!this.#tokenHelperTrusted.has('user')) {
++    const inherited = this.env.npm_config_token_helper_globalconfig
++    const cli = this.data.get('cli').raw
++    if (!this.#tokenHelperTrusted.has('user') || typeof inherited !== 'string' ||
++        !inherited || Object.keys(cli).some(k => ['globalconfig', 'prefix'].includes(envReplace(k, this.env)))) {
+       return this.#get('globalconfig')
+     }
+     const user = this.data.get('user').raw
+@@ -1004,7 +1012,16 @@ class Config {
+     }
+     const fromEnv = byKey('globalconfig') ??
+       (byKey('prefix') !== undefined ? resolve(byKey('prefix'), 'etc/npmrc') : undefined)
+-    return fromEnv ?? this.#get('globalconfig')
++    return fromEnv && resolve(fromEnv) === resolve(inherited) ? fromEnv : this.#get('globalconfig')
++  }
++
++  // Only an accepted global helper opts a child into preserving this file.
++  // A project setting cannot forge the marker: setEnvs overwrites or deletes it.
++  get tokenHelperGlobalConfig () {
++    const global = this.data.get('global')
++    return this.#tokenHelperTrusted.has('global') &&
++      Object.entries(global.data).some(([key, value]) => /^\/\/.*\/:tokenHelper$/.test(key) && value)
++      ? global.source : undefined
+   }
+ 
+   // Project config loads before the user and global files and may set
+diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
+index 04dfd59..17e6ca6 100644
+--- a/workspaces/config/lib/set-envs.js
++++ b/workspaces/config/lib/set-envs.js
+@@ -93,6 +93,13 @@ const setEnvs = (config) => {
+   // TODO this may not be the best away to persist these
+   env.npm_config_global_prefix = config.globalPrefix
+   env.npm_config_local_prefix = config.localPrefix
++  const helperGlobal = config.tokenHelperGlobalConfig
++  if (helperGlobal) {
++    env.npm_config_globalconfig = helperGlobal
++    env.npm_config_token_helper_globalconfig = helperGlobal
++  } else {
++    delete env.npm_config_token_helper_globalconfig
++  }
+   // a child npm inherits a project-chosen userconfig or globalconfig as an
+   // environment value, so it is told which files the parent did not trust for
+   // a token helper; nothing is set unless one of them has a helper
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index 9a9ca31..3830634 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -4,7 +4,7 @@ const fs = require('node:fs')
+ const { readFileSync } = fs
+ const { spawnSync } = require('node:child_process')
+ const { homedir } = require('node:os')
+-const { resolve, join, dirname, parse } = require('node:path')
++const { resolve, join, dirname, parse, relative } = require('node:path')
+ 
+ // when running with `npm test` it adds environment variables that
+ // mess with the things we expect here, so delete all of those.
+@@ -2508,9 +2508,10 @@ const loadHelperConfig = async (t, { project = '', user = '', global = '', env =
+   }
+   // contents that name files of the fixture by path
+   const fillIn = s => s.replaceAll('<path>', path.replaceAll('\\', '/'))
++    .replaceAll('<relative>', relative(process.cwd(), path).replaceAll('\\', '/'))
+   for (const [file, text] of [['home/.npmrc', user], ['prefix/etc/npmrc', global], ['project/ci.npmrc', sub],
+     ['project/sub/etc/npmrc', sub], ['outside/x.npmrc', sub]]) {
+-    if (text.includes('<path>')) {
++    if (text.includes('<path>') || text.includes('<relative>')) {
+       fs.writeFileSync(join(path, file), fillIn(text))
+     }
+   }
+@@ -2523,7 +2524,7 @@ const loadHelperConfig = async (t, { project = '', user = '', global = '', env =
+       linked = false
+     }
+   }
+-  const fill = s => s.replaceAll('<path>', path.replaceAll('\\', '/'))
++  const fill = fillIn
+   if (project !== null) {
+     fs.writeFileSync(join(path, 'project', '.npmrc'), fill(project))
+   }
+@@ -2706,16 +2707,30 @@ t.test('a tokenHelper value may reference only user home variables', async t =>
+     })
+   }
+ 
+-  t.test('a later unsafe helper rejects earlier helpers from the same file', async t => {
+-    const { config, warned } = await loadHelperConfig(t, {
+-      project: 'strict-ssl=false\n',
+-      user: `//h.registry/:tokenHelper=${HELPER}\n//other.registry/:tokenHelper=\${INIT_CWD}/evil.cmd\n`,
+-      env: { INIT_CWD: '<path>/project' },
+-    })
+-    t.equal(helperIn(config.flat, '//h.registry/'), undefined,
+-      'the earlier helper is not left active after the user file is refused')
+-    t.ok(warned.some(w => w.includes('may reference only ${HOME} or ${USERPROFILE}') && !w.includes('evil.cmd')),
+-      'the refusal is reported without exposing the rejected path')
++  t.test('an unsafe helper entry preserves other registries and their route protection', async t => {
++    const valid = `//h.registry/:tokenHelper=${HELPER}\n//h.registry/:_authToken=stored-token\n`
++    const invalid = '//other.registry/:tokenHelper=${INIT_CWD}/evil.cmd\n'
++    for (const where of ['user', 'global']) {
++      for (const first of [true, false]) {
++        for (const route of [true, false]) {
++          const { config, warned } = await loadHelperConfig(t, {
++            project: route ? 'strict-ssl=false\n' : '',
++            [where]: first ? valid + invalid : invalid + valid,
++            env: { INIT_CWD: '<path>/project' },
++          })
++          t.equal(helperIn(config.flat, '//h.registry/'), HELPER, 'the valid helper stays configured')
++          t.equal(helperIn(config.flat, '//other.registry/'), undefined, 'only the unsafe entry is refused')
++          const creds = config.getCredentialsByURI('https://h.registry/')
++          t.equal(creds.tokenHelper, HELPER, 'the helper still takes precedence')
++          t.equal(creds.token, undefined, 'the stored token is not a fallback')
++          t.same(config.tokenHelperProjectTransport.map(({ key }) => key), route ? ['strict-ssl'] : [],
++            'project route protection is independent of entry order')
++          t.same(config.tokenHelperUntrusted, [], 'the file itself stays trusted')
++          t.ok(warned.some(w => w.includes('may reference only ${HOME} or ${USERPROFILE}') && !w.includes('evil.cmd')),
++            'the refusal does not expose the rejected path')
++        }
++      }
++    }
+   })
+ 
+   const escaped = await loadHelperConfig(t, {
+@@ -2766,21 +2781,85 @@ t.test('a tokenHelper value may reference only user home variables', async t =>
+     'the Windows user-profile form expands')
+ })
+ 
++t.test('tokenHelper registry keys cannot expand environment variables', async t => {
++  for (const key of [
++    '//${npm_config_helper_host}/:tokenHelper',
++    '//h.registry/${npm_config_helper_path}/:tokenHelper',
++    '//h.registry/:${npm_config_helper_kind}',
++    '//${npm_config_helper_host?}/:tokenHelper',
++    '//${HOME}/:tokenHelper',
++  ]) {
++    const { config, warned } = await loadHelperConfig(t, {
++      user: `${key}=${HELPER}\n//fixed.registry/:tokenHelper=${HELPER}\n`,
++      env: {
++        npm_config_helper_host: 'selected.registry',
++        npm_config_helper_path: 'selected',
++        npm_config_helper_kind: 'tokenHelper',
++      },
++    })
++    t.same(Object.keys(config.flat.tokenHelpers), ['//fixed.registry/'], 'only the fixed key is accepted')
++    t.ok(warned.some(w => w.includes('registry key must not contain environment references')),
++      'the warning explains how to configure a fixed key')
++    t.notOk(warned.some(w => w.includes('selected.registry')), 'the expanded key is not printed')
++  }
++
++  const escaped = await loadHelperConfig(t, {
++    user: `//\\\${npm_config_helper_host}/:tokenHelper=${HELPER}\n`,
++    env: { npm_config_helper_host: 'selected.registry' },
++  })
++  t.equal(helperIn(escaped.config.flat, '//${npm_config_helper_host}/'), HELPER,
++    'an escaped reference stays literal and never selects the expanded registry')
++  t.equal(helperIn(escaped.config.flat, '//selected.registry/'), undefined)
++})
++
+ t.test('a relative globalconfig= in a trusted user file: a child npm uses the exported file', async t => {
+   // pass 9, U23: the parent resolves the relative value from its own
+   // directory, trusts the file, and exports what it resolved; the child of a
+   // clone resolved the same relative value from the clone, found nothing, and
+   // lost the credential. The export is what both mean.
+-  const child = await loadHelperConfig(t, {
++  const layout = {
+     user: 'globalconfig=rel.npmrc\n',
++    home: 'home',
++    files: false,
+     tree: { home: { 'rel.npmrc': `//h.registry/:tokenHelper=${HELPER}\n` } },
+-    cwd: 'project',
++    env: {
++      npm_config_globalconfig: '<path>/home/rel.npmrc',
++      npm_config_token_helper_globalconfig: '<path>/home/rel.npmrc',
++    },
++  }
++  const child = await loadHelperConfig(t, layout)
++  t.equal(helperIn(child.config.flat, '//h.registry/'), HELPER, 'the child runs the same helper through the exported path')
++  t.equal(child.config.data.get('global').source, join(child.path, 'home', 'rel.npmrc'),
++    'the loaded file is the one the parent resolved')
++  t.equal(child.config.env.npm_config_globalconfig, join(child.path, 'home', 'rel.npmrc'),
++    'the child exports the file it actually loaded')
++  t.equal(child.config.env.npm_config_token_helper_globalconfig,
++    child.config.env.npm_config_globalconfig,
++    'the marker and exported path stay consistent for another generation')
++  const grandchild = await loadHelperConfig(t, {
++    ...layout,
++    env: Object.fromEntries(Object.entries(child.config.env).filter(([key]) =>
++      ['npm_config_globalconfig', 'npm_config_token_helper_globalconfig'].includes(key))
++      .map(([key, value]) => [key, value.replaceAll(child.path, '<path>')])),
++  })
++  t.equal(helperIn(grandchild.config.flat, '//h.registry/'), HELPER, 'the grandchild retains the helper')
++})
++
++t.test('a relative globalconfig without a global helper retains upstream file selection', async t => {
++  const { config, path } = await loadHelperConfig(t, {
++    user: 'globalconfig=<relative>/clone/rel.npmrc\n',
++    home: 'home',
+     files: false,
++    tree: {
++      home: { 'rel.npmrc': '//h.registry/:_authToken=parent-token\n' },
++      clone: { 'package.json': '{}', 'rel.npmrc': '//h.registry/:_authToken=child-token\n' },
++    },
++    cwd: 'clone',
+     env: { npm_config_globalconfig: '<path>/home/rel.npmrc' },
+   })
+-  t.equal(helperIn(child.config.flat, '//h.registry/'), HELPER, 'the child runs the same helper through the exported path')
+-  t.equal(child.config.flat.globalconfig, join(child.path, 'home', 'rel.npmrc'),
+-    'and the global file is the one the parent resolved')
++  t.equal(config.data.get('global').source, join(path, 'clone', 'rel.npmrc'), 'the relative file loads from the child directory')
++  t.equal(config.getCredentialsByURI('https://h.registry/').token, 'child-token', 'the stored credential is unchanged')
++  t.notOk(config.env.npm_config_token_helper_globalconfig, 'no helper marker is exported')
+ })
+ 
+ t.test('a user or global file that project config chose cannot configure a tokenHelper', async t => {
+diff --git a/workspaces/config/test/set-envs.js b/workspaces/config/test/set-envs.js
+index 0798f0d..cfac363 100644
+--- a/workspaces/config/test/set-envs.js
++++ b/workspaces/config/test/set-envs.js
+@@ -330,6 +330,31 @@ t.test('a child npm is told which config files the parent did not trust for a to
+   t.end()
+ })
+ 
++t.test('only a trusted global helper exports its selected config file', t => {
++  const { definitions, defaults } = mockDefinitions(t)
++  const envConf = Object.create(defaults)
++  const cliConf = Object.create(envConf)
++  cliConf['token-helper-globalconfig'] = 'project-forged'
++  const env = { npm_config_token_helper_globalconfig: 'stale', npm_config_globalconfig: 'other' }
++  const config = {
++    env,
++    defaults,
++    definitions,
++    list: [cliConf, envConf],
++    globalPrefix,
++    localPrefix,
++    npmBin,
++    execPath,
++    tokenHelperGlobalConfig: '/trusted/global.npmrc',
++  }
++  setEnvs(config)
++  t.equal(env.npm_config_token_helper_globalconfig, '/trusted/global.npmrc', 'the actual global helper file wins')
++  t.equal(env.npm_config_globalconfig, '/trusted/global.npmrc', 'the exported path matches the selected file')
++  setEnvs({ ...config, tokenHelperGlobalConfig: undefined })
++  t.notOk('npm_config_token_helper_globalconfig' in env, 'neither a stale nor a project marker survives without a global helper')
++  t.end()
++})
++
+ t.test('a nerf-darted credential in config is not exported, so it cannot reach a child as an environment value', t => {
+   const { definitions, defaults } = mockDefinitions(t)
+   const envConf = Object.create(defaults)
+
+From 8f18f8e49828514f5c308a5266ac73360319afec Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 12 Nov 2026 11:16:41 +0500
+Subject: [PATCH 6/6] config: retain trust for inherited helper config files
+
+---
+ docs/lib/content/configuring-npm/npmrc.md |  6 +++
+ workspaces/config/lib/index.js            | 14 +++++-
+ workspaces/config/test/index.js           | 53 ++++++++++++++++++++---
+ 3 files changed, 65 insertions(+), 8 deletions(-)
+
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index a0d513c..bacca14 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -115,6 +115,12 @@ It is pnpm's setting of the same name, so one helper serves both package manager
+ //npm.corp.example.com/:tokenHelper=/usr/local/bin/corp-registry-token
+ ```
+ 
++The registry key must be fixed: active environment references in its host, path or `tokenHelper` suffix are ignored with a warning.
++A repository value exported to a child npm must not choose where a helper's credential goes.
++In the helper value, only `${HOME}` and `${USERPROFILE}` may expand; other environment references are ignored with a warning.
++Escaped references stay literal under npm's config syntax.
++An invalid helper entry does not disable a valid helper for another registry or change its precedence and route checks.
++
+ The value is one absolute path with no arguments.
+ It may contain spaces; unlike pnpm, npm does not split it into a command and arguments, and a bare name is refused so that a program in a project cannot be chosen through `PATH`.
+ A command that needs arguments goes in a two-line script, and the setting names the script.
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 3c0afea..d2be311 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -997,11 +997,15 @@ class Config {
+   // exports its selected file in the helper marker. Without that opt-in,
+   // ordinary configurations retain upstream's relative-path behavior.
+   #effectiveGlobalFile () {
++    return this.#inheritedGlobalFile() ?? this.#get('globalconfig')
++  }
++
++  #inheritedGlobalFile () {
+     const inherited = this.env.npm_config_token_helper_globalconfig
+     const cli = this.data.get('cli').raw
+     if (!this.#tokenHelperTrusted.has('user') || typeof inherited !== 'string' ||
+         !inherited || Object.keys(cli).some(k => ['globalconfig', 'prefix'].includes(envReplace(k, this.env)))) {
+-      return this.#get('globalconfig')
++      return undefined
+     }
+     const user = this.data.get('user').raw
+     const byKey = key => {
+@@ -1012,7 +1016,7 @@ class Config {
+     }
+     const fromEnv = byKey('globalconfig') ??
+       (byKey('prefix') !== undefined ? resolve(byKey('prefix'), 'etc/npmrc') : undefined)
+-    return fromEnv && resolve(fromEnv) === resolve(inherited) ? fromEnv : this.#get('globalconfig')
++    return fromEnv && resolve(fromEnv) === resolve(inherited) ? resolve(fromEnv) : undefined
+   }
+ 
+   // Only an accepted global helper opts a child into preserving this file.
+@@ -1125,6 +1129,12 @@ class Config {
+     const userOwn = key => {
+       const name = where === 'global' && this.#tokenHelperTrusted.has('user') &&
+         Object.keys(userRaw).find(k => envReplace(k, this.env) === key)
++      if (name && typeof userRaw[name] === 'string' && !isAbsolute(userRaw[name]) &&
++          this.#inheritedGlobalFile() && typeof this.env[`npm_config_${key}`] === 'string') {
++        // The same marker that selects the parent's helper file also proves
++        // that this is its user-owned path, not a new choice by the child.
++        return resolve(this.env[`npm_config_${key}`])
++      }
+       const value = name ? this.parseField(userRaw[name], key) : undefined
+       return typeof value === 'string' ? resolve(value) : undefined
+     }
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index 3830634..89431be 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -2818,20 +2818,23 @@ t.test('a relative globalconfig= in a trusted user file: a child npm uses the ex
+   // clone resolved the same relative value from the clone, found nothing, and
+   // lost the credential. The export is what both mean.
+   const layout = {
+-    user: 'globalconfig=rel.npmrc\n',
++    user: 'globalconfig=<relative>/clone/rel.npmrc\n',
+     home: 'home',
+     files: false,
+-    tree: { home: { 'rel.npmrc': `//h.registry/:tokenHelper=${HELPER}\n` } },
++    tree: {
++      tools: { '.git': 'gitdir: elsewhere', 'rel.npmrc': `//h.registry/:tokenHelper=${HELPER}\n` },
++      clone: { 'package.json': '{}' },
++    },
+     env: {
+-      npm_config_globalconfig: '<path>/home/rel.npmrc',
+-      npm_config_token_helper_globalconfig: '<path>/home/rel.npmrc',
++      npm_config_globalconfig: '<path>/tools/rel.npmrc',
++      npm_config_token_helper_globalconfig: '<path>/tools/rel.npmrc',
+     },
+   }
+   const child = await loadHelperConfig(t, layout)
+   t.equal(helperIn(child.config.flat, '//h.registry/'), HELPER, 'the child runs the same helper through the exported path')
+-  t.equal(child.config.data.get('global').source, join(child.path, 'home', 'rel.npmrc'),
++  t.equal(child.config.data.get('global').source, join(child.path, 'tools', 'rel.npmrc'),
+     'the loaded file is the one the parent resolved')
+-  t.equal(child.config.env.npm_config_globalconfig, join(child.path, 'home', 'rel.npmrc'),
++  t.equal(child.config.env.npm_config_globalconfig, join(child.path, 'tools', 'rel.npmrc'),
+     'the child exports the file it actually loaded')
+   t.equal(child.config.env.npm_config_token_helper_globalconfig,
+     child.config.env.npm_config_globalconfig,
+@@ -2843,6 +2846,44 @@ t.test('a relative globalconfig= in a trusted user file: a child npm uses the ex
+       .map(([key, value]) => [key, value.replaceAll(child.path, '<path>')])),
+   })
+   t.equal(helperIn(grandchild.config.flat, '//h.registry/'), HELPER, 'the grandchild retains the helper')
++
++  for (const env of [
++    { npm_config_globalconfig: '<path>/tools/rel.npmrc' },
++    { ...layout.env, npm_config_token_helper_globalconfig: '<path>/tools/other.npmrc' },
++    { ...layout.env, npm_config_token_helper_untrusted: 'global' },
++  ]) {
++    const refused = await loadHelperConfig(t, { ...layout, env })
++    t.equal(helperIn(refused.config.flat, '//h.registry/'), undefined,
++      'an absent, mismatched, or explicitly untrusted marker grants no trust')
++  }
++  const cli = await loadHelperConfig(t, {
++    ...layout, argv: ['--globalconfig=<path>/tools/rel.npmrc'],
++  })
++  t.equal(helperIn(cli.config.flat, '//h.registry/'), undefined,
++    'an explicit command-line file inside a repository is still refused')
++})
++
++t.test('a relative trusted-user prefix retains version-managed global helper trust', async t => {
++  const layout = {
++    user: 'prefix=<relative>/clone/prefix\n',
++    home: 'home',
++    files: false,
++    tree: { tools: { '.git': 'gitdir: elsewhere', etc: { npmrc: `//h.registry/:tokenHelper=${HELPER}\n` } } },
++    env: {
++      npm_config_prefix: '<path>/tools',
++      npm_config_globalconfig: '<path>/tools/etc/npmrc',
++      npm_config_token_helper_globalconfig: '<path>/tools/etc/npmrc',
++    },
++  }
++  const child = await loadHelperConfig(t, layout)
++  t.equal(helperIn(child.config.flat, '//h.registry/'), HELPER, 'the marked parent prefix stays trusted')
++  t.same(child.config.tokenHelperUntrusted, [], 'the child does not manufacture a new choice')
++  const unmarked = await loadHelperConfig(t, {
++    ...layout, env: { ...layout.env, npm_config_token_helper_globalconfig: '' },
++  })
++  t.equal(helperIn(unmarked.config.flat, '//h.registry/'), undefined, 'an unmarked environment file stays subject to the location rule')
++  const cli = await loadHelperConfig(t, { ...layout, argv: ['--prefix=<path>/tools'] })
++  t.equal(helperIn(cli.config.flat, '//h.registry/'), undefined, 'an explicit CLI prefix stays subject to the location rule')
+ })
+ 
+ t.test('a relative globalconfig without a global helper retains upstream file selection', async t => {
