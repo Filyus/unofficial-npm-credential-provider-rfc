@@ -1,8 +1,8 @@
 From 2e27571902aa04ab055d64c5fe7f2725b4a32834 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 22 Oct 2026 14:46:14 +0500
-Subject: [PATCH] feat: add opts.getAuthorization, a callback that supplies the
- Authorization header
+Subject: [PATCH 1/2] feat: add opts.getAuthorization, a callback that supplies
+ the Authorization header
 
 A caller can pass an async function that is given `{ regKey, uri }` (an object,
 so that fields can be added later) and returns the value of the Authorization
@@ -426,6 +426,221 @@ index ac65822..ee3c816 100644
 +    t.equal(res, 'ok')
 +  })
 +})
--- 
-2.52.0.windows.1
 
+From 0a3ab7f4212bee4ed2b36f3ac01f5e6d60b21638 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 12 Nov 2026 12:21:00 +0500
+Subject: [PATCH 2/2] auth: honor abort while awaiting authorization
+
+---
+ README.md    |  4 +++
+ lib/auth.js  |  4 +++
+ lib/index.js | 22 ++++++++++--
+ test/auth.js | 98 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 125 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index 0534136..56aaba3 100644
+--- a/README.md
++++ b/README.md
+@@ -282,6 +282,10 @@ certificate and key does not stop it. The request is otherwise sent exactly as
+ it is for a stored `_authToken`. An error thrown by the function rejects the
+ request as it is. It is not called for an `opts.offline` request, nor when
+ [`opts.forceAuth`](#opts-forceAuth) is set. This library runs nothing itself.
++An aborted `opts.signal` rejects the request with `AbortError` even while the
++function is pending. A signal already aborted prevents the function from being
++called. Aborting does not cancel work already started by the function.
++No further registry keys are queried after abort.
+ 
+ A caller that must not run without the option being honoured (a version older
+ than the one that added it ignores it) can check `getAuth.supportsGetAuthorization`,
+diff --git a/lib/auth.js b/lib/auth.js
+index 876efe5..016ee9a 100644
+--- a/lib/auth.js
++++ b/lib/auth.js
+@@ -1,6 +1,7 @@
+ 'use strict'
+ const fs = require('fs')
+ const npa = require('npm-package-arg')
++const { AbortError } = require('minipass-fetch')
+ const { URL } = require('url')
+ 
+ // Find the longest registry key that is used for some kind of auth
+@@ -216,6 +217,9 @@ const authorize = async (uri, opts) => {
+     }
+   }
+   for (const regKey of keys) {
++    if (opts.signal?.aborted) {
++      throw new AbortError('The operation was aborted.')
++    }
+     const value = await getAuthorization({ regKey, uri })
+     if (value) {
+       return value
+diff --git a/lib/index.js b/lib/index.js
+index 4dafec3..fad1ef5 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -5,6 +5,7 @@ const checkResponse = require('./check-response.js')
+ const getAuth = require('./auth.js')
+ const { authorize } = getAuth
+ const fetch = require('make-fetch-happen')
++const { AbortError } = require('minipass-fetch')
+ const JSONStream = require('./json-stream')
+ const npa = require('npm-package-arg')
+ const qs = require('querystring')
+@@ -176,7 +177,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+   if (typeof opts.getAuthorization !== 'function' || opts.offline) {
+     return send()
+   }
+-  return getAuthorization(authorize(uri, opts), body, bodyIsStream).then(authorization => {
++  const pending = getAuthorization(() => authorize(uri, opts), body, bodyIsStream, opts.signal)
++  return pending.then(authorization => {
+     if (authorization) {
+       headers.authorization = authorization
+     }
+@@ -190,15 +192,29 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+ // that rejects is an unhandled rejection, and a stream that errors with no
+ // listener throws (which is why the gzip pipeline is built after the wait).
+ // An error from the function itself rejects the request as it is.
+-function getAuthorization (pending, body, bodyIsStream) {
++function getAuthorization (start, body, bodyIsStream, signal) {
++  let onAbort
+   const failed = new Promise((resolve, reject) => {
+     if (bodyIsStream) {
+       body.on('error', reject)
+     } else if (body && typeof body.then === 'function') {
+       Promise.resolve(body).catch(reject)
+     }
++    if (signal) {
++      onAbort = () => reject(new AbortError('The operation was aborted.'))
++      if (signal.aborted) {
++        onAbort()
++      } else {
++        signal.addEventListener('abort', onAbort, { once: true })
++      }
++    }
++  })
++  // Watch body failures even when abort prevents authorization from starting.
++  return Promise.race([signal?.aborted ? failed : start(), failed]).finally(() => {
++    if (onAbort) {
++      signal.removeEventListener('abort', onAbort)
++    }
+   })
+-  return Promise.race([pending, failed])
+ }
+ 
+ module.exports.getAuth = getAuth
+diff --git a/test/auth.js b/test/auth.js
+index ee3c816..e223771 100644
+--- a/test/auth.js
++++ b/test/auth.js
+@@ -2,6 +2,8 @@
+ 
+ const t = require('tap')
+ const { Minipass } = require('minipass')
++const { getEventListeners } = require('node:events')
++const nock = require('nock')
+ const tnock = require('./util/tnock.js')
+ 
+ const fetch = require('..')
+@@ -777,4 +779,100 @@ t.test('opts.getAuthorization', async t => {
+     })
+     t.equal(res, 'ok')
+   })
++
++  await t.test('abort signals also cover the authorization wait', async t => {
++    nock.disableNetConnect()
++    t.teardown(() => nock.enableNetConnect())
++    const aborted = { name: 'AbortError', code: 'FETCH_ABORTED', type: 'aborted' }
++    const bounded = pending => {
++      let timer
++      const timeout = new Promise((resolve, reject) => {
++        timer = setTimeout(() => reject(new Error('authorization wait did not settle')), 500)
++      })
++      return Promise.race([pending, timeout]).finally(() => clearTimeout(timer))
++    }
++
++    await t.test('a pre-aborted signal skips the callback and watches the body', async t => {
++      const controller = new AbortController()
++      controller.abort()
++      let called = false
++      await t.rejects(bounded(fetch('/hello', {
++        ...base,
++        signal: controller.signal,
++        body: Promise.reject(new Error('late body failure')),
++        getAuthorization: () => {
++          called = true
++          return new Promise(() => {})
++        },
++      })), aborted)
++      t.notOk(called, 'the callback is never started')
++      t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'no abort listener remains')
++    })
++
++    for (const authorization of ['Bearer late', undefined]) {
++      await t.test(`abort stops the key walk after a late ${authorization ? 'value' : 'empty result'}`, async t => {
++        const controller = new AbortController()
++        let release
++        let sent = false
++        let called = 0
++        const interceptor = nock('https://mock.reg')
++          .get('/prefix/abort-wait')
++          .optionally()
++        const server = interceptor
++          .reply(200, '"unexpected"')
++          .on('request', () => {
++            sent = true
++          })
++        t.teardown(() => {
++          server.done()
++          nock.removeInterceptor(interceptor)
++        })
++        const pending = fetch('/abort-wait', {
++          ...base,
++          signal: controller.signal,
++          getAuthorization: () => {
++            called++
++            return called === 1 ? new Promise(resolve => {
++              release = resolve
++            }) : undefined
++          },
++        })
++        t.equal(getEventListeners(controller.signal, 'abort').length, 1, 'the wait observes abort')
++        controller.abort()
++        await t.rejects(bounded(pending), aborted)
++        t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'the abort listener is removed')
++        release(authorization)
++        await new Promise(resolve => setImmediate(resolve))
++        t.notOk(sent, 'late authorization cannot send the request')
++        t.equal(called, 1, 'no shorter registry key starts another callback after abort')
++        t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'no listener is added again')
++      })
++    }
++
++    for (const failure of ['authorization', 'body']) {
++      await t.test(`${failure} rejection removes the abort listener`, async t => {
++        const controller = new AbortController()
++        const er = new Error(`${failure} failed`)
++        await t.rejects(bounded(fetch('/hello', {
++          ...base,
++          signal: controller.signal,
++          body: failure === 'body' ? Promise.reject(er) : undefined,
++          getAuthorization: () => failure === 'authorization'
++            ? Promise.reject(er) : new Promise(() => {}),
++        })), er)
++        t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'the listener is removed')
++      })
++    }
++
++    await t.test('successful authorization removes the abort listener', async t => {
++      const controller = new AbortController()
++      reply(t, 'Bearer fromfn')
++      t.equal(await bounded(fetch.json('/hello', {
++        ...base,
++        signal: controller.signal,
++        getAuthorization: async () => 'Bearer fromfn',
++      })), 'ok')
++      t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'the listener is removed')
++    })
++  })
+ })
