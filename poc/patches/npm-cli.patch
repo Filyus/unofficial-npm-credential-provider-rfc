@@ -1,7 +1,7 @@
 From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
-Subject: [PATCH 1/8] feat: add tokenHelper, a program that prints a registry
+Subject: [PATCH 1/9] feat: add tokenHelper, a program that prints a registry
  token
 
 `//<registry>/:tokenHelper=<absolute path>` names a program that prints the
@@ -4078,7 +4078,7 @@ index 9426265..0798f0d 100644
 From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
-Subject: [PATCH 2/8] feat: explain a tokenHelper in profile, on a 401 and when
+Subject: [PATCH 2/9] feat: explain a tokenHelper in profile, on a 401 and when
  a helper fails to start
 
 `profile enable-2fa` says why it cannot work through a helper. The message names
@@ -4501,7 +4501,7 @@ index c9ab327..d7e23df 100644
 From 627068e062b722296710b6bab48fc7b8113beff4 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Mon, 2 Nov 2026 16:14:57 +0500
-Subject: [PATCH 3/8] config: restrict token helper path interpolation
+Subject: [PATCH 3/9] config: restrict token helper path interpolation
 
 ---
  lib/utils/token-helper.js       |  3 ++
@@ -4675,7 +4675,7 @@ index d2208db..3be51ca 100644
 From 82ddde9dd2ff6bfc47b1fb3672de66b2c7e72878 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 06:03:50 +0500
-Subject: [PATCH 4/8] config: reject helpers from unsafe user files
+Subject: [PATCH 4/9] config: reject helpers from unsafe user files
 
 ---
  workspaces/config/lib/index.js  | 22 +++++++++++++---------
@@ -4749,7 +4749,7 @@ index 3be51ca..9a9ca31 100644
 From 2aa3eae40b2ab21a8df909c2d6e968e750b65f93 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 06:25:44 +0500
-Subject: [PATCH 5/8] config: isolate helper entries and inherited global paths
+Subject: [PATCH 5/9] config: isolate helper entries and inherited global paths
 
 ---
  workspaces/config/lib/index.js     |  55 +++++++++-----
@@ -5083,7 +5083,7 @@ index 0798f0d..cfac363 100644
 From 8f18f8e49828514f5c308a5266ac73360319afec Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 11:16:41 +0500
-Subject: [PATCH 6/8] config: retain trust for inherited helper config files
+Subject: [PATCH 6/9] config: retain trust for inherited helper config files
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  6 +++
@@ -5234,7 +5234,7 @@ index 3830634..89431be 100644
 From 21be661653115e7ed7c42504df6f2094b31d1a60 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 12:19:29 +0500
-Subject: [PATCH 7/8] config: preserve expanded selector provenance
+Subject: [PATCH 7/9] config: preserve expanded selector provenance
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  5 ++
@@ -5438,7 +5438,7 @@ index 89431be..3a58cff 100644
 From 1676abfb2d26faa0e16d4019619ee91670a4022d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 16:14:32 +0500
-Subject: [PATCH 8/8] config: validate environment-derived selector paths
+Subject: [PATCH 8/9] config: validate environment-derived selector paths
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  3 +-
@@ -5587,3 +5587,707 @@ index 3a58cff..9257838 100644
          const untrusted = await loadHelperConfig(t, {
            files: false,
            tree,
+
+From 5aff0b2817b3afb0e53a611cc29db80b4564888a Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 12 Nov 2026 22:08:12 +0500
+Subject: [PATCH 9/9] config: preserve effective helper and route authority
+
+---
+ docs/lib/content/configuring-npm/npmrc.md     |   2 +
+ lib/commands/login.js                         |   6 +-
+ lib/commands/logout.js                        |   5 +-
+ lib/commands/profile.js                       |   3 +
+ test/lib/commands/login.js                    |  13 ++
+ test/lib/commands/logout.js                   |  17 ++
+ test/lib/commands/profile.js                  |  22 ++-
+ test/lib/commands/publish.js                  |  12 ++
+ test/lib/commands/whoami.js                   |  12 ++
+ workspaces/config/lib/index.js                |  97 ++++++++--
+ workspaces/config/lib/set-envs.js             |  26 ++-
+ workspaces/config/test/helper-route-export.js | 172 ++++++++++++++++++
+ workspaces/config/test/index.js               |  51 +++++-
+ 13 files changed, 412 insertions(+), 26 deletions(-)
+ create mode 100644 workspaces/config/test/helper-route-export.js
+
+diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
+index f2ca26c..ff28522 100644
+--- a/docs/lib/content/configuring-npm/npmrc.md
++++ b/docs/lib/content/configuring-npm/npmrc.md
+@@ -142,6 +142,8 @@ The program prints the credential on one line.
+ A raw token is sent as `Authorization: Bearer <token>`, and output that starts with an auth scheme and a space, such as `Basic …`, is used as the header value as it is.
+ Spaces around the output and a byte order mark are removed.
+ A registry that has both a `tokenHelper` and a stored `_authToken` in a file uses the helper, and npm warns once, naming the credential it ignores.
++A helper on a parent registry key also serves registries below that path, unless a more specific stored credential takes precedence.
++Identity and login/logout/profile checks use that same effective helper, and diagnostics identify the actual helper key to remove.
+ A credential given for the run itself, `--//host/:_authToken=…` or `npm_config_//host/:_authToken`, or the same for `_auth` or `username` and `_password`, is used instead: the helper is not run, and npm warns once for the registry, naming the key.
+ It does not fall back to the stored token: a token left over from before the helper was set up has usually expired, and would answer 401 where the helper's would not.
+ A token stored under a longer registry key than the helper's is the more specific credential and is used.
+diff --git a/lib/commands/login.js b/lib/commands/login.js
+index a8b07d3..9ca3ff1 100644
+--- a/lib/commands/login.js
++++ b/lib/commands/login.js
+@@ -32,9 +32,13 @@ class Login extends BaseCommand {
+     // the credential, and the login requests themselves would carry the
+     // helper's credential
+     if (creds.tokenHelper) {
++      const regKey = creds.tokenHelperRegKey
++      const source = this.npm.config.find(`${regKey}:tokenHelper`)
+       throw Object.assign(new Error(
+         `credentials for ${replaceInfo(registry)} come from the tokenHelper ` +
+-        `${display(creds.tokenHelper, `${nerfDart(registry)}:tokenHelper`)}; ` +
++        `${display(creds.tokenHelper, `${regKey}:tokenHelper`)}` +
++        (regKey !== nerfDart(registry)
++          ? ` ("${regKey}:tokenHelper" in your ${source} config)` : '') + '; ' +
+         'log in through the tool behind the helper, or remove the helper setting first'
+       ), { code: 'ETOKENHELPER' })
+     }
+diff --git a/lib/commands/logout.js b/lib/commands/logout.js
+index 3046c08..13fbd25 100644
+--- a/lib/commands/logout.js
++++ b/lib/commands/logout.js
+@@ -1,7 +1,6 @@
+ const npmFetch = require('npm-registry-fetch')
+ const { getAuth } = npmFetch
+ const { log } = require('proc-log')
+-const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
+ const BaseCommand = require('../base-cmd.js')
+ const { display } = require('../utils/token-helper.js')
+ 
+@@ -24,9 +23,9 @@ class Logout extends BaseCommand {
+     // helper is, and is named rather than revoked: revoking it would send the
+     // helper's credential, and deleting it unasked could lose a token the
+     // user still relies on elsewhere.
+-    const { tokenHelper } = this.npm.config.getCredentialsByURI(reg)
++    const { tokenHelper, tokenHelperRegKey } = this.npm.config.getCredentialsByURI(reg)
+     if (tokenHelper) {
+-      const regKey = nerfDart(reg)
++      const regKey = tokenHelperRegKey
+       const helperLevel = this.npm.config.find(`${regKey}:tokenHelper`)
+       const tokenKey = `${regKey}:_authToken`
+       const tokenLevel = this.npm.config.get(tokenKey) && this.npm.config.find(tokenKey)
+diff --git a/lib/commands/profile.js b/lib/commands/profile.js
+index b69bd18..218e1fc 100644
+--- a/lib/commands/profile.js
++++ b/lib/commands/profile.js
+@@ -247,8 +247,11 @@ class Profile extends BaseCommand {
+     // a helper-supplied credential cannot take part in; this is checked before
+     // the first request, which would run the helper
+     if (creds.tokenHelper) {
++      const regKey = creds.tokenHelperRegKey
++      const source = this.npm.config.find(`${regKey}:tokenHelper`)
+       throw new Error(
+         `Credentials for ${this.npm.config.get('registry')} come from a tokenHelper; ` +
++        `remove "${regKey}:tokenHelper" from your ${source} config, or ` +
+         'enable 2fa through the registry website or the tool behind the helper'
+       )
+     }
+diff --git a/test/lib/commands/login.js b/test/lib/commands/login.js
+index 66f51f5..eb4a275 100644
+--- a/test/lib/commands/login.js
++++ b/test/lib/commands/login.js
+@@ -41,6 +41,19 @@ t.test('usage', async t => {
+   t.match(login.usage, 'login', 'usage has command name in it')
+ })
+ 
++t.test('ancestor tokenHelper refuses login and names its key and source', async t => {
++  const helper = '/inert/never-created/helper'
++  const { login, rc } = await mockLogin(t, {
++    config: { registry: 'https://registry.npmjs.org/prefix/', 'auth-type': 'web' },
++    homeDir: { '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n` },
++  })
++  await t.rejects(login.exec([]), {
++    code: 'ETOKENHELPER',
++    message: /"\/\/registry\.npmjs\.org\/:tokenHelper" in your user config/,
++  })
++  t.same(rc(), { '//registry.npmjs.org/:tokenHelper': helper }, 'no token is saved')
++})
++
+ t.test('tokenHelper refuses instead of saving a token it would shadow', async t => {
+   const helper = require('../../fixtures/token-helper')
+   const { login, rc } = await mockLogin(t, {
+diff --git a/test/lib/commands/logout.js b/test/lib/commands/logout.js
+index a08489a..a7c3d7c 100644
+--- a/test/lib/commands/logout.js
++++ b/test/lib/commands/logout.js
+@@ -196,3 +196,20 @@ t.test('tokenHelper logout names a token stored beside the helper', async t => {
+   const userRc = await fs.readFile(join(home, '.npmrc'), 'utf-8')
+   t.match(userRc, /:_authToken=stale/, 'nothing is deleted')
+ })
++
++t.test('ancestor tokenHelper logout does not revoke a token and names its source', async t => {
++  const helper = '/inert/never-created/helper'
++  const { npm, home } = await loadMockNpm(t, {
++    config: { registry: 'https://registry.npmjs.org/prefix/' },
++    homeDir: {
++      '.npmrc': `//registry.npmjs.org/:tokenHelper=${helper}\n//registry.npmjs.org/:_authToken=stale\n`,
++    },
++  })
++  await t.rejects(npm.exec('logout', []), {
++    code: 'ETOKENHELPER',
++    message: /remove "\/\/registry\.npmjs\.org\/:tokenHelper" from your user config.*not revoked/,
++  })
++  const userRc = await fs.readFile(join(home, '.npmrc'), 'utf8')
++  t.match(userRc, /:_authToken=stale/, 'the token is left alone')
++  t.match(userRc, /:tokenHelper=/, 'the helper is left alone')
++})
+diff --git a/test/lib/commands/profile.js b/test/lib/commands/profile.js
+index 7788613..6d0b927 100644
+--- a/test/lib/commands/profile.js
++++ b/test/lib/commands/profile.js
+@@ -595,11 +595,13 @@ t.test('enable-2fa', async t => {
+       },
+     })
+ 
+-    npm.config.getCredentialsByURI = () => ({ tokenHelper: '/usr/local/bin/token' })
++    npm.config.getCredentialsByURI = () => ({
++      tokenHelper: '/usr/local/bin/token', tokenHelperRegKey: '//registry.npmjs.org/',
++    })
+ 
+     await t.rejects(
+       profile.exec(['enable-2fa', 'auth-only']),
+-      /Credentials for https:\/\/registry\.npmjs\.org\/ come from a tokenHelper; enable 2fa/
++      /Credentials for https:\/\/registry\.npmjs\.org\/ come from a tokenHelper; .*enable 2fa/
+     )
+     t.equal(requests, 0, 'refused before a request, which would run the helper')
+   })
+@@ -1132,6 +1134,22 @@ t.test('unknown subcommand', async t => {
+   )
+ })
+ 
++t.test('ancestor tokenHelper refuses 2fa before a request and names its source', async t => {
++  let requests = 0
++  const { profile } = await mockProfile(t, {
++    config: { registry: 'https://registry.npmjs.org/prefix/' },
++    homeDir: { '.npmrc': '//registry.npmjs.org/:tokenHelper=/inert/never-created/helper\n' },
++    npmProfile: {
++      get: async () => {
++        requests++
++      },
++    },
++  })
++  await t.rejects(profile.exec(['enable-2fa', 'auth-only']),
++    /remove "\/\/registry\.npmjs\.org\/:tokenHelper" from your user config/)
++  t.equal(requests, 0)
++})
++
+ t.test('completion', async t => {
+   const testComp = async (t, { argv, expect, title } = {}) => {
+     const { profile } = await mockProfile(t)
+diff --git a/test/lib/commands/publish.js b/test/lib/commands/publish.js
+index 812ac21..43483dd 100644
+--- a/test/lib/commands/publish.js
++++ b/test/lib/commands/publish.js
+@@ -2118,6 +2118,18 @@ t.test('a tokenHelper in user config satisfies the login check', async t => {
+   await npm.exec('publish', [])
+ })
+ 
++t.test('an ancestor tokenHelper satisfies the publish login check', async t => {
++  const { npm, registry } = await loadNpmWithRegistry(t, {
++    registry: 'https://registry.npmjs.org/prefix/',
++    config: { 'ignore-scripts': true },
++    homeDir: { '.npmrc': '//registry.npmjs.org/:tokenHelper=/inert/never-created/helper\n' },
++    prefixDir: { 'package.json': JSON.stringify(pkgJson) },
++    mocks: { '{LIB}/utils/token-helper.js': () => async () => 'Bearer synthetic' },
++  })
++  registry.publish(pkg)
++  await npm.exec('publish', [])
++})
++
+ t.test('publishConfig cannot supply a tokenHelper', async t => {
+   const packageJson = {
+     ...pkgJson,
+diff --git a/test/lib/commands/whoami.js b/test/lib/commands/whoami.js
+index 85b4e2d..a8e474f 100644
+--- a/test/lib/commands/whoami.js
++++ b/test/lib/commands/whoami.js
+@@ -103,3 +103,15 @@ t.test('a tokenHelper counts as being logged in', async t => {
+   await npm.exec('whoami', [])
+   t.equal(joinedOutput(), username, 'asks the registry instead of refusing')
+ })
++
++t.test('an ancestor tokenHelper counts as being logged in', async t => {
++  const { npm, joinedOutput } = await loadMockNpm(t, {
++    config: { registry: 'https://registry.npmjs.org/prefix/' },
++    homeDir: { '.npmrc': '//registry.npmjs.org/:tokenHelper=/inert/never-created/helper\n' },
++    mocks: { '{LIB}/utils/token-helper.js': () => async () => 'Bearer synthetic' },
++  })
++  const registry = new MockRegistry({ tap: t, registry: npm.config.get('registry') })
++  registry.whoami({ username })
++  await npm.exec('whoami', [])
++  t.equal(joinedOutput(), username)
++})
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 7765435..8d96bcb 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -22,6 +22,7 @@ const internalEnv = [
+   'global-prefix',
+   'local-prefix',
+   'token-helper-project-transport',
++  'token-helper-project-env',
+   'token-helper-untrusted',
+   'token-helper-globalconfig',
+ ]
+@@ -96,6 +97,11 @@ class Config {
+   #tokenHelperRefusals = new Map()
+   #publishConfigRoute = {}
+   #tokenHelperSeen = new Set()
++  // Exact environment names retain provenance while an escaped or unknown
++  // config key is still waiting to become a route key in a later npm.
++  #tokenHelperProjectEnvNames = new Set()
++  #tokenHelperProjectEnvConfigs = new Set()
++  #tokenHelperProjectEnvMarker = false
+   // The project .npmrc is the user file under another spelling (see
+   // loadProjectConfig): the project layer is the user's own file.
+   #projectIsUserFile = false
+@@ -401,6 +407,18 @@ class Config {
+ 
+   loadEnv () {
+     const conf = Object.create(null)
++    let inherited
++    try {
++      const names = JSON.parse(this.env.npm_config_token_helper_project_env)
++      if (Array.isArray(names) && names.every(name => typeof name === 'string' && /^npm_config_/i.test(name))) {
++        inherited = new Set(names)
++      }
++    } catch {
++      // Older npm versions export only the canonical route marker.
++    }
++    this.#tokenHelperProjectEnvMarker = inherited !== undefined
++    const legacy = inherited ? [] : this.#inheritedProjectTransport()
++    const origins = new Map()
+     for (const [envKey, envVal] of Object.entries(this.env)) {
+       if (!/^npm_config_/i.test(envKey) || envVal === '') {
+         continue
+@@ -411,6 +429,20 @@ class Config {
+           .toLowerCase()
+       }
+       conf[key] = envVal
++      const project = inherited ? inherited.has(envKey) : legacy.includes(envReplace(key, this.env))
++      origins.set(key, project)
++      if (project) {
++        this.#tokenHelperProjectEnvNames.add(envKey)
++      }
++    }
++    // Match both normalizations and the last effective alias that #loadObject
++    // will install, rather than comparing values or guessing the winning key.
++    const effective = new Map([...origins].map(([key, project]) =>
++      [envReplace(key, this.env), project]))
++    for (const [key, project] of effective) {
++      if (project) {
++        this.#tokenHelperProjectEnvConfigs.add(key)
++      }
+     }
+     this.#loadObject(conf, 'env', 'environment')
+   }
+@@ -1238,6 +1270,29 @@ class Config {
+     return (this.env.npm_config_token_helper_project_transport || '').split(',').filter(Boolean)
+   }
+ 
++  // Undefined keeps the no-helper environment unchanged. An explicit empty
++  // set tells a newer child that the exact export winners supersede the older
++  // canonical marker, whose current project setting may have lost a collision.
++  get tokenHelperProjectEnv () {
++    const configured = ['user', 'global'].some(where =>
++      this.#tokenHelperTrusted.has(where) && this.#tokenHelperSeen.has(where))
++    const inherited = this.#tokenHelperProjectEnvMarker || this.#inheritedProjectTransport().length
++    return configured || inherited
++      ? new Set(this.#tokenHelperProjectEnvNames) : undefined
++  }
++
++  tokenHelperProjectConfigSource (key) {
++    const where = this.find(key)
++    const projectIsUser = this.#projectIsUserFile && this.#tokenHelperTrusted.has('user')
++    if ((where === 'project' && !projectIsUser) || this.#tokenHelperRefusals.has(where)) {
++      return this.data.get(where).source
++    }
++    if (where === 'env' && this.#tokenHelperProjectEnvConfigs.has(key)) {
++      return 'the environment, where a parent npm put its project config'
++    }
++    return undefined
++  }
++
+   // The settings that choose where a request goes and whom it trusts, when a
+   // project chose them: `[{ key, source }]`. A token helper's credential must
+   // not be sent over a route a repository chose. A parent npm lists the keys
+@@ -1261,14 +1316,9 @@ class Config {
+   // Only strict-ssl=false is a choice; a null is the default. Whether the
+   // route matters for a request, a proxy for an https one, is for the caller.
+   get tokenHelperProjectTransport () {
+-    const inherited = this.#inheritedProjectTransport()
+-    const configured = ['user', 'global'].some(where =>
+-      this.#tokenHelperTrusted.has(where) && this.#tokenHelperSeen.has(where))
+-    if (!inherited.length && !configured) {
++    if (!this.tokenHelperProjectEnv) {
+       return []
+     }
+-    // the project layer that is the user's own file, which is trusted, is the user's
+-    const projectIsUser = this.#projectIsUserFile && this.#tokenHelperTrusted.has('user')
+     const found = []
+     for (const key of ROUTE_KEYS) {
+       const overridden = Object.hasOwn(this.#publishConfigRoute, key)
+@@ -1276,13 +1326,13 @@ class Config {
+       if (key === 'strict-ssl' ? value !== false : value === null || value === undefined) {
+         continue
+       }
+-      const where = overridden ? 'publishConfig' : this.find(key)
+-      if (where === 'publishConfig') {
++      if (overridden) {
+         found.push({ key, source: 'the publishConfig of package.json' })
+-      } else if ((where === 'project' && !projectIsUser) || this.#tokenHelperRefusals.has(where)) {
+-        found.push({ key, source: this.data.get(where).source })
+-      } else if (where === 'env' && inherited.includes(key)) {
+-        found.push({ key, source: 'the environment, where a parent npm put its project config' })
++      } else {
++        const source = this.tokenHelperProjectConfigSource(key)
++        if (source) {
++          found.push({ key, source })
++        }
+       }
+     }
+     return found
+@@ -1426,10 +1476,25 @@ class Config {
+     // a helper supplies the credential at request time and, as in
+     // npm-registry-fetch, takes precedence over a token stored beside it in a
+     // file, but not over one given on the command line or in the environment
+-    const helperReg = this.get(`${nerfed}:tokenHelper`)
+-    if (helperReg && !this.credentialKeysFromCliOrEnv(nerfed).length) {
+-      creds.tokenHelper = helperReg
+-      return creds
++    // Registry requests append an endpoint to this directory, including when
++    // the configured registry omits its trailing slash. Match helpers under
++    // the same keys as that request, stopping at a stored Authorization
++    // credential before a shorter helper, but not at an mTLS pair alone.
++    const parsed = new URL(uri)
++    let regKey = `//${parsed.host}${parsed.pathname.replace(/\/?$/, '/')}`
++    while (regKey.length > '//'.length) {
++      // Slashless helper keys are ignored, unlike stored credential keys.
++      const helper = regKey.endsWith('/') && this.get(`${regKey}:tokenHelper`)
++      if (helper && !this.credentialKeysFromCliOrEnv(regKey).length) {
++        creds.tokenHelper = helper
++        creds.tokenHelperRegKey = regKey
++        return creds
++      }
++      if (this.get(`${regKey}:_authToken`) || this.get(`${regKey}:_auth`) ||
++          this.get(`${regKey}:username`) && this.get(`${regKey}:_password`)) {
++        break
++      }
++      regKey = regKey.replace(/([^/]+|\/)$/, '')
+     }
+ 
+     const tokenReg = this.get(`${nerfed}:_authToken`)
+diff --git a/workspaces/config/lib/set-envs.js b/workspaces/config/lib/set-envs.js
+index 17e6ca6..15592c2 100644
+--- a/workspaces/config/lib/set-envs.js
++++ b/workspaces/config/lib/set-envs.js
+@@ -42,6 +42,9 @@ const setEnv = (env, rawKey, rawVal) => {
+   const key = envKey(rawKey, val)
+   if (key && val !== null) {
+     env[key] = val
++    // process.env on Windows can retain the casing of an existing name.
++    return Object.keys(env).includes(key) ? key
++      : Object.keys(env).find(name => name.toLowerCase() === key)
+   }
+ }
+ 
+@@ -67,6 +70,17 @@ const setEnvs = (config) => {
+   //   otherwise, set the env
+   const cliSet = new Set(Object.keys(cliConf))
+   const envSet = new Set(Object.keys(envConf))
++  const projectEnv = config.tokenHelperProjectEnv
++  const exportEnv = (key, value) => {
++    const name = setEnv(env, key, value)
++    if (projectEnv && name) {
++      if (config.tokenHelperProjectConfigSource(key)) {
++        projectEnv.add(name)
++      } else {
++        projectEnv.delete(name)
++      }
++    }
++  }
+   for (const key in cliConf) {
+     const { deprecated, envExport = true } = definitions[key] || {}
+     if (deprecated || envExport === false) {
+@@ -77,13 +91,13 @@ const setEnvs = (config) => {
+       // config is the default, if the env thought different, then we
+       // have to set it BACK to the default in the environment.
+       if (!sameConfigValue(envConf[key], cliConf[key])) {
+-        setEnv(env, key, cliConf[key])
++        exportEnv(key, cliConf[key])
+       }
+     } else {
+       // config is not the default.  if the env wasn't the one to set
+       // it that way, then we have to put it in the env
+       if (!(envSet.has(key) && !cliSet.has(key))) {
+-        setEnv(env, key, cliConf[key])
++        exportEnv(key, cliConf[key])
+       }
+     }
+   }
+@@ -122,6 +136,14 @@ const setEnvs = (config) => {
+   } else {
+     delete env.npm_config_token_helper_project_transport
+   }
++  // Track the actual names written, including aliases which are inactive in
++  // this npm. A later npm normalizes and expands those names again. The final
++  // export winner determines provenance even when its value equals another's.
++  if (projectEnv) {
++    env.npm_config_token_helper_project_env = JSON.stringify([...projectEnv])
++  } else {
++    delete env.npm_config_token_helper_project_env
++  }
+   if (cliConf.editor) {
+     env.EDITOR = cliConf.editor
+   }
+diff --git a/workspaces/config/test/helper-route-export.js b/workspaces/config/test/helper-route-export.js
+new file mode 100644
+index 0000000..f4a9660
+--- /dev/null
++++ b/workspaces/config/test/helper-route-export.js
+@@ -0,0 +1,172 @@
++const t = require('tap')
++const { resolve } = require('node:path')
++const { readFile } = require('node:fs/promises')
++const Config = require('../lib/index.js')
++const definitions = require('../lib/definitions/index.js')
++
++const fixture = (t, { project = '', user = '', helper = true } = {}) => {
++  const inert = resolve('inert-never-created-helper').replace(/\\/g, '/')
++  const base = t.testdir({
++    home: { '.npmrc': `${helper ? `//route.invalid/:tokenHelper=${inert}\n` : ''}${user}` },
++    project: { 'package.json': '{}', '.npmrc': project },
++    clone: { 'package.json': '{}' },
++    npm: {},
++    node: {},
++  })
++  const load = async (cwd = 'project', env = {}, argv = []) => {
++    const config = new Config({
++      ...definitions,
++      npmPath: resolve(base, 'npm'),
++      execPath: resolve(base, 'node/node'),
++      cwd: resolve(base, cwd),
++      excludeNpmCwd: true,
++      env: { HOME: resolve(base, 'home'), USERPROFILE: resolve(base, 'home'), ...env },
++      argv: [process.execPath, __filename, ...argv],
++    })
++    await config.load()
++    t.ok(config.validate(), 'configuration remains valid')
++    return config
++  }
++  return { load, base, inert }
++}
++
++const routeKeys = config => config.tokenHelperProjectTransport.map(({ key }) => key)
++const exportedNames = config => JSON.parse(config.env.npm_config_token_helper_project_env)
++
++t.test('inactive project aliases retain route provenance through child environments', async t => {
++  for (const [name, project, key] of [
++    ['uppercase CA', 'CA=project-ca\n', 'ca'],
++    ['underscore proxy', 'https_proxy=http://project.invalid:3128\n', 'https-proxy'],
++    ['escaped proxy', 'pro\\${unset?}xy=http://project.invalid:3128\n', 'proxy'],
++    ['escaped name containing comma', 'pro\\${un,set?}xy=http://project.invalid:3128\n', 'proxy'],
++    ['uppercase SSL', 'STRICT_SSL=${UNSET?}false\n', 'strict-ssl'],
++    ['canonical SSL changes type', 'strict-ssl=${UNSET?}false\n', 'strict-ssl'],
++    ['escaped SSL', 'strict-ss\\${unset?}l=${UNSET?}false\n', 'strict-ssl'],
++  ]) {
++    await t.test(name, async t => {
++      const { load, inert } = fixture(t, { project })
++      let config = await load()
++      t.same(routeKeys(config), name === 'canonical SSL changes type' ? ['strict-ssl'] : [],
++        'only an active, validated route refuses the parent')
++      t.ok(exportedNames(config).length, 'actual project export is marked')
++      for (const generation of ['child', 'grandchild', 'great-grandchild']) {
++        config = await load('clone', { ...config.env })
++        t.equal(config.flat.tokenHelpers['//route.invalid/'], inert, 'trusted helper stays configured')
++        t.same(routeKeys(config), [key], `${generation} recognizes the project route`)
++      }
++    })
++  }
++})
++
++t.test('actual trusted export winner supersedes the legacy current-route marker', async t => {
++  const { load } = fixture(t, { project: 'ca=project-ca\n', user: 'CA=user-ca\n' })
++  const parent = await load()
++  t.same(routeKeys(parent), ['ca'], 'current parent route is still project-owned')
++  t.equal(parent.env.npm_config_ca, 'user-ca', 'the actual exported collision winner is trusted')
++  t.notOk(exportedNames(parent).includes('npm_config_ca'), 'trusted winner clears exact provenance')
++  t.equal(parent.env.npm_config_token_helper_project_transport, 'ca', 'legacy marker remains available')
++  let config = parent
++  for (const generation of ['child', 'grandchild']) {
++    config = await load('clone', { ...config.env })
++    t.same(config.flat.ca, ['user-ca'], `${generation} uses the actual trusted export`)
++    t.same(routeKeys(config), [], `${generation} does not inherit the losing project origin`)
++  }
++})
++
++t.test('actual later project export remains marked despite a stronger current setting', async t => {
++  for (const [name, env, argv] of [
++    ['CLI', {}, ['--strict-ssl=true']],
++    ['environment', { npm_config_strict_ssl: 'true' }, []],
++  ]) {
++    await t.test(name, async t => {
++      const { load } = fixture(t, { project: 'STRICT_SSL=${UNSET?}false\n' })
++      const parent = await load('project', env, argv)
++      t.equal(parent.flat.strictSSL, true, 'parent uses the stronger setting')
++      t.equal(parent.env.npm_config_strict_ssl, 'false', 'later project alias actually won the export')
++      const child = await load('clone', { ...parent.env })
++      t.equal(child.flat.strictSSL, false, 'ordinary child config import is unchanged')
++      t.same(routeKeys(child), ['strict-ssl'], 'the actual project winner is refused for helper use')
++    })
++  }
++})
++
++t.test('user and CLI choices that actually win remain trusted', async t => {
++  for (const [name, env, argv] of [
++    ['CLI', {}, ['--ca=user-ca']],
++    ['environment', { NPM_CONFIG_CA: 'user-ca' }, []],
++  ]) {
++    await t.test(name, async t => {
++      const { load } = fixture(t, { project: 'ca=project-ca\n' })
++      const parent = await load('project', env, argv)
++      t.same(routeKeys(parent), [], 'higher layer wins in parent')
++      const child = await load('clone', { ...parent.env })
++      t.same(child.flat.ca, ['user-ca'], 'trusted export is used')
++      t.same(routeKeys(child), [], 'trusted export is not marked as project-owned')
++    })
++  }
++})
++
++t.test('pending raw environment names survive intermediate loads without a helper', async t => {
++  const { load, inert } = fixture(t)
++  const pending = 'npm_config_pro\\${unset?}xy'
++  const env = {
++    [pending]: 'http://project.invalid:3128',
++    npm_config_token_helper_project_env: JSON.stringify([pending]),
++  }
++  let config = await load('clone', env)
++  t.same(routeKeys(config), [], 'still-escaped alias does not affect the current route')
++  t.ok(exportedNames(config).includes(pending), 'pending raw name remains marked')
++  // An intermediate npm can use a file without helpers; inherited metadata
++  // still has to reach a later npm which reads the normal user file again.
++  config = await load('clone', { ...config.env, npm_config_userconfig: resolve('nonexistent-config') })
++  t.notOk(config.flat.tokenHelpers, 'intermediate load has no helper')
++  t.ok(exportedNames(config).includes(pending), 'pending origin survives the intermediate npm')
++  const finalEnv = { ...config.env }
++  delete finalEnv.npm_config_userconfig
++  config = await load('clone', finalEnv)
++  t.equal(config.flat.tokenHelpers['//route.invalid/'], inert, 'helper can be configured again')
++  t.ok(exportedNames(config).includes(pending), 'the retained raw origin is still available')
++})
++
++t.test('save and reload preserve raw aliases and their export provenance', async t => {
++  const project = 'STRICT_SSL=${UNSET?}false\n'
++  const { load, base } = fixture(t, { project })
++  const original = await load()
++  await original.save('project')
++  t.equal(await readFile(resolve(base, 'project/.npmrc'), 'utf8'), project, 'raw alias is preserved')
++  const reloaded = await load()
++  t.same(routeKeys(reloaded), [], 'reloaded parent alias remains inactive')
++  const child = await load('clone', { ...reloaded.env })
++  t.same(routeKeys(child), ['strict-ssl'], 'reloaded export carries its project origin')
++})
++
++t.test('no-helper exports are unchanged and project metadata cannot forge inheritance', async t => {
++  const { load } = fixture(t, {
++    helper: false,
++    project: [
++      'CA=project-ca',
++      'token-helper-project-env=["npm_config_ca"]',
++      'token-helper-project-transport=ca',
++    ].join('\n'),
++  })
++  const parent = await load()
++  t.equal(parent.env.npm_config_ca, 'project-ca', 'ordinary alias export is preserved')
++  t.notOk('npm_config_token_helper_project_env' in parent.env, 'no new marker without helper context')
++  t.notOk('npm_config_token_helper_project_transport' in parent.env, 'project cannot forge legacy marker')
++  t.same(routeKeys(parent), [], 'no helper route restriction is introduced')
++  const child = await load('clone', { ...parent.env })
++  t.same(child.flat.ca, ['project-ca'], 'ordinary child normalization is preserved')
++  t.notOk('npm_config_token_helper_project_env' in child.env, 'child still exports no helper metadata')
++})
++
++t.test('old canonical markers still work and malformed new metadata does not erase them', async t => {
++  const { load } = fixture(t)
++  for (const marker of [undefined, 'invalid-json', '{}', '[12]']) {
++    const config = await load('clone', {
++      npm_config_ca: 'project-ca',
++      npm_config_token_helper_project_transport: 'ca',
++      ...(marker === undefined ? {} : { npm_config_token_helper_project_env: marker }),
++    })
++    t.same(routeKeys(config), ['ca'], 'legacy provenance remains effective')
++  }
++})
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index 9257838..1b2b60e 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -3560,7 +3560,9 @@ t.test('getCredentialsByURI reports a tokenHelper ahead of a stored token', asyn
+       '//plain.registry/:_authToken=plain',
+     ].join('\n'),
+   })
+-  t.same(config.getCredentialsByURI('https://helper.registry/'), { tokenHelper: HELPER })
++  t.same(config.getCredentialsByURI('https://helper.registry/'), {
++    tokenHelper: HELPER, tokenHelperRegKey: '//helper.registry/',
++  })
+   t.same(config.getCredentialsByURI('https://plain.registry/'), { token: 'plain' })
+ })
+ 
+@@ -3575,7 +3577,9 @@ t.test('getCredentialsByURI leaves out the tokenHelper for a credential given fo
+   t.match(viaCli.config.getCredentialsByURI('https://helper.registry/'), { username: 'foo', password: 'bar' })
+   t.notOk(viaCli.config.getCredentialsByURI('https://helper.registry/').tokenHelper)
+   const fileOnly = await loadHelperConfig(t, { user })
+-  t.same(fileOnly.config.getCredentialsByURI('https://helper.registry/'), { tokenHelper: HELPER })
++  t.same(fileOnly.config.getCredentialsByURI('https://helper.registry/'), {
++    tokenHelper: HELPER, tokenHelperRegKey: '//helper.registry/',
++  })
+ })
+ 
+ t.test('a credential on the command line or in the environment is reported, one in a file is not', async t => {
+@@ -3861,3 +3865,46 @@ t.test('pnpm-only tokenHelper forms get a pointer to the registry form and are n
+     'Ignoring publishConfig config "tokenHelper"') && l.join(' ').includes('"//<registry>/:tokenHelper=<path>"')),
+   'a publishConfig key, which has no file behind it, names a placeholder')
+ })
++
++t.test('getCredentialsByURI finds the effective helper under ancestor keys', async t => {
++  const root = '//helper.registry/'
++  const scoped = '//helper.registry/npm/'
++  const helper = `${root}:tokenHelper=${HELPER}\n`
++  const cases = [
++    { name: 'parent helper', user: helper, key: root },
++    { name: 'registry without trailing slash', user: helper, uri: 'https://helper.registry/npm', key: root },
++    { name: 'specific helper without registry trailing slash', user: `${scoped}:tokenHelper=${HELPER}`, uri: 'https://helper.registry/npm', key: scoped },
++    { name: 'same-key stored token', user: `${helper}${root}:_authToken=stale`, key: root },
++    { name: 'longer stored token', user: `${helper}${scoped}:_authToken=specific`, creds: { token: 'specific' } },
++    { name: 'slashless longer stored token', user: `${helper}//helper.registry/npm:_authToken=specific`, creds: {} },
++    { name: 'longer stored auth', user: `${helper}${scoped}:_auth=dTpw`, creds: { username: 'u', password: 'p', auth: 'dTpw' } },
++    { name: 'longer stored pair', user: `${helper}${scoped}:username=u\n${scoped}:_password=cA==`, creds: { username: 'u', password: 'p', auth: 'dTpw' } },
++    { name: 'incomplete pair', user: `${helper}${scoped}:username=u`, key: root },
++    { name: 'mTLS only', user: `${helper}${scoped}:certfile=cert\n${scoped}:keyfile=key`, key: root, creds: { certfile: 'cert', keyfile: 'key' } },
++    { name: 'CLI token masks parent helper', user: helper, argv: [`--${root}:_authToken=given`], creds: {} },
++    { name: 'env auth masks parent helper', user: helper, env: { [`npm_config_${root}:_auth`]: 'dTpw' }, creds: {} },
++    { name: 'specific helper wins parent CLI token', user: `${scoped}:tokenHelper=${HELPER}`, argv: [`--${root}:_authToken=given`], key: scoped },
++    { name: 'same-key CLI token', user: `${scoped}:tokenHelper=${HELPER}`, argv: [`--${scoped}:_authToken=given`], creds: { token: 'given' } },
++    { name: 'other port', user: helper, uri: 'https://helper.registry:8443/npm/', creds: {} },
++    { name: 'sibling path', user: `${scoped}:tokenHelper=${HELPER}`, uri: 'https://helper.registry/npm-other/', creds: {} },
++    { name: 'stored-only parent lookup unchanged', user: `${root}:_authToken=stored`, creds: {} },
++  ]
++  for (const { name, user, uri = 'https://helper.registry/npm/', key, creds = {}, ...options } of cases) {
++    await t.test(name, async t => {
++      const { config } = await loadHelperConfig(t, { user, ...options })
++      t.same(config.getCredentialsByURI(uri), {
++        ...creds,
++        ...(key ? { tokenHelper: HELPER, tokenHelperRegKey: key } : {}),
++      })
++      if (key) {
++        t.equal(config.find(`${key}:tokenHelper`), 'user', 'metadata names the source entry')
++      }
++    })
++  }
++  await t.test('global helper source', async t => {
++    const { config } = await loadHelperConfig(t, { global: helper })
++    const creds = config.getCredentialsByURI('https://helper.registry/npm/')
++    t.same(creds, { tokenHelper: HELPER, tokenHelperRegKey: root })
++    t.equal(config.find(`${creds.tokenHelperRegKey}:tokenHelper`), 'global')
++  })
++})
