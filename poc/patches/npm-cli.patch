@@ -1,7 +1,7 @@
 From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
-Subject: [PATCH 1/3] feat: add tokenHelper, a program that prints a registry
+Subject: [PATCH 1/4] feat: add tokenHelper, a program that prints a registry
  token
 
 `//<registry>/:tokenHelper=<absolute path>` names a program that prints the
@@ -4074,14 +4074,11 @@ index 9426265..0798f0d 100644
 +  t.same(Object.keys(env).filter(key => /registry|token|auth|username/i.test(key)), [])
 +  t.end()
 +})
--- 
-2.52.0.windows.1
-
 
 From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
-Subject: [PATCH 2/3] feat: explain a tokenHelper in profile, on a 401 and when
+Subject: [PATCH 2/4] feat: explain a tokenHelper in profile, on a 401 and when
  a helper fails to start
 
 `profile enable-2fa` says why it cannot work through a helper. The message names
@@ -4500,14 +4497,11 @@ index c9ab327..d7e23df 100644
  t.test('a late result after the helper was stopped is ignored', async t => {
    const logs = logsOf(t)
    let late
--- 
-2.52.0.windows.1
-
 
 From 627068e062b722296710b6bab48fc7b8113beff4 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Mon, 2 Nov 2026 16:14:57 +0500
-Subject: [PATCH 3/3] config: restrict token helper path interpolation
+Subject: [PATCH 3/4] config: restrict token helper path interpolation
 
 ---
  lib/utils/token-helper.js       |  3 ++
@@ -4677,6 +4671,77 @@ index d2208db..3be51ca 100644
  })
  
  t.test('a relative globalconfig= in a trusted user file: a child npm uses the exported file', async t => {
--- 
-2.52.0.windows.1
 
+From 82ddde9dd2ff6bfc47b1fb3672de66b2c7e72878 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Thu, 12 Nov 2026 06:03:50 +0500
+Subject: [PATCH 4/4] config: reject helpers from unsafe user files
+
+---
+ workspaces/config/lib/index.js  | 22 +++++++++++++---------
+ workspaces/config/test/index.js | 12 ++++++++++++
+ 2 files changed, 25 insertions(+), 9 deletions(-)
+
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 01bcc32..78e2dfa 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -672,6 +672,19 @@ class Config {
+       }
+     } else {
+       conf.raw = obj
++      // Decide whether this file may configure any helpers before reading its
++      // entries. A later unsafe helper value must not revoke trust after an
++      // earlier helper from the same file has already entered conf.data.
++      for (const [key, value] of Object.entries(obj)) {
++        const k = envReplace(key, this.env)
++        if (/(^|:)tokenHelper$/.test(k) && typeof value === 'string' && tokenHelperHasUnsafeEnv(value)) {
++          this.#tokenHelperSeen.add(where)
++          this.#tokenHelperRefusals.set(where,
++            'a tokenHelper value may reference only ${HOME} or ${USERPROFILE}; ' +
++            'use an absolute path for any other helper location')
++          this.#tokenHelperTrusted.delete(where)
++        }
++      }
+       outer: for (const [key, value] of Object.entries(obj)) {
+         const k = envReplace(key, this.env)
+         // A token helper names a program npm executes, so only the user and
+@@ -679,15 +692,6 @@ class Config {
+         // the repository, and env and cli values can be set by scripts.
+         if (/(^|:)tokenHelper$/.test(k)) {
+           this.#tokenHelperSeen.add(where)
+-          if (typeof value === 'string' && tokenHelperHasUnsafeEnv(value)) {
+-            // A tokenHelper path may depend only on the user's home. Other
+-            // variables may come from the repository or the working directory:
+-            // a child npm can otherwise run a program from its git checkout.
+-            this.#tokenHelperRefusals.set(where,
+-              'a tokenHelper value may reference only ${HOME} or ${USERPROFILE}; ' +
+-              'use an absolute path for any other helper location')
+-            this.#tokenHelperTrusted.delete(where)
+-          }
+           if (!this.#tokenHelperTrusted.has(where)) {
+             // the user file loaded again as the project's: its own layer
+             // honours the key, or warns when it may not
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index 3be51ca..9a9ca31 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -2706,6 +2706,18 @@ t.test('a tokenHelper value may reference only user home variables', async t =>
+     })
+   }
+ 
++  t.test('a later unsafe helper rejects earlier helpers from the same file', async t => {
++    const { config, warned } = await loadHelperConfig(t, {
++      project: 'strict-ssl=false\n',
++      user: `//h.registry/:tokenHelper=${HELPER}\n//other.registry/:tokenHelper=\${INIT_CWD}/evil.cmd\n`,
++      env: { INIT_CWD: '<path>/project' },
++    })
++    t.equal(helperIn(config.flat, '//h.registry/'), undefined,
++      'the earlier helper is not left active after the user file is refused')
++    t.ok(warned.some(w => w.includes('may reference only ${HOME} or ${USERPROFILE}') && !w.includes('evil.cmd')),
++      'the refusal is reported without exposing the rejected path')
++  })
++
+   const escaped = await loadHelperConfig(t, {
+     user: '//h.registry/:tokenHelper=\\${INIT_CWD}/evil.cmd\n',
+   })
