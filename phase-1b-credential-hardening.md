@@ -66,6 +66,8 @@ A default path is never moved into the project layer by this rule: a home direct
 
 With `strict-credentials` on, npm does not expand `${VAR}` in any key or value of a file of the project layer. The text stays as written, and npm warns at the default level, once per file, naming the key. With the setting off, npm expands as today and warns once per file, naming the keys, wherever strict mode would stop expanding. Files of the user and global layer, and the environment, are expanded as before.
 
+A `registry` or `@scope:registry` setting with an unexpanded environment reference in its key or URL is an error in strict mode, before registry validation, credential lookup or a request. npm names the key and file and asks for a literal URL or a user-level setting. It never drops that setting and falls back to another registry. pnpm 12.19.0 adopted the same refusal after ignoring a project registry placeholder had selected another registry ([sources.md](sources.md#external-facts)).
+
 The reason is that the secret does not have to be in a credential key to leave. An environment variable named in a repository's file is read by npm on the user's behalf, and the registry, user agent and proxy keys all put it on a request. Narrowing the rule to credential keys leaves those three open and gives a repository something to find the next one in.
 
 The remedy for a setup that relies on it, the committed `.npmrc` with `${NPM_TOKEN}`, `${NODE_AUTH_TOKEN}` or `${CI_JOB_TOKEN}` that vendors document, is to keep that file outside the checkout, as the user file (a CI step writes it, as `actions/setup-node` does), or to pass the credential on the command line.

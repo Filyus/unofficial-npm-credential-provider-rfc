@@ -858,6 +858,50 @@
     "sha256": "e62547f475836bddc5c55af25be999dd06f9501c4016bfee6c007e49782fea17",
     "file": ".refs/github.com/orgs_community_discussions_63811.txt"
   },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/auth-commands/src/config_yaml.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/auth-commands/src/login.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/config/src/auth_sources.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/config/src/loading.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/config/src/npmrc_auth/credential_keys.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/config/src/npmrc_auth/ini.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/network/src/auth/lookup.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/network/src/auth/redaction.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/network/src/client_builder.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/network/src/token_helper.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
+  "https://github.com/pnpm/pnpm/blob/f4afab20988dc20b747e97c48388f901258d0fcb/pnpm/crates/tarball/src/error.rs": {
+    "kind": "source",
+    "cited": "2026-11-12"
+  },
   "https://github.com/pnpm/pnpm/blob/fe4a0c232384289de82be3d502896ca7e070050c/pnpm-workspace.yaml": {
     "kind": "source",
     "cited": "2026-10-22"
