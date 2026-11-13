@@ -1,7 +1,7 @@
 From 6545771b44c6d8242ecbfddd7fbddec60485938f Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Sat, 24 Oct 2026 00:58:05 +0500
-Subject: [PATCH 1/9] feat: add tokenHelper, a program that prints a registry
+Subject: [PATCH 01/10] feat: add tokenHelper, a program that prints a registry
  token
 
 `//<registry>/:tokenHelper=<absolute path>` names a program that prints the
@@ -4078,8 +4078,8 @@ index 9426265..0798f0d 100644
 From 7a0057ac31e069ad512b2516a056c3182340fe2d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 23 Oct 2026 21:23:52 +0500
-Subject: [PATCH 2/9] feat: explain a tokenHelper in profile, on a 401 and when
- a helper fails to start
+Subject: [PATCH 02/10] feat: explain a tokenHelper in profile, on a 401 and
+ when a helper fails to start
 
 `profile enable-2fa` says why it cannot work through a helper. The message names
 the helper only when its value is an existing file, and the config key
@@ -4501,7 +4501,7 @@ index c9ab327..d7e23df 100644
 From 627068e062b722296710b6bab48fc7b8113beff4 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Mon, 2 Nov 2026 16:14:57 +0500
-Subject: [PATCH 3/9] config: restrict token helper path interpolation
+Subject: [PATCH 03/10] config: restrict token helper path interpolation
 
 ---
  lib/utils/token-helper.js       |  3 ++
@@ -4675,7 +4675,7 @@ index d2208db..3be51ca 100644
 From 82ddde9dd2ff6bfc47b1fb3672de66b2c7e72878 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 06:03:50 +0500
-Subject: [PATCH 4/9] config: reject helpers from unsafe user files
+Subject: [PATCH 04/10] config: reject helpers from unsafe user files
 
 ---
  workspaces/config/lib/index.js  | 22 +++++++++++++---------
@@ -4749,7 +4749,8 @@ index 3be51ca..9a9ca31 100644
 From 2aa3eae40b2ab21a8df909c2d6e968e750b65f93 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 06:25:44 +0500
-Subject: [PATCH 5/9] config: isolate helper entries and inherited global paths
+Subject: [PATCH 05/10] config: isolate helper entries and inherited global
+ paths
 
 ---
  workspaces/config/lib/index.js     |  55 +++++++++-----
@@ -5083,7 +5084,7 @@ index 0798f0d..cfac363 100644
 From 8f18f8e49828514f5c308a5266ac73360319afec Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 11:16:41 +0500
-Subject: [PATCH 6/9] config: retain trust for inherited helper config files
+Subject: [PATCH 06/10] config: retain trust for inherited helper config files
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  6 +++
@@ -5234,7 +5235,7 @@ index 3830634..89431be 100644
 From 21be661653115e7ed7c42504df6f2094b31d1a60 Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 12:19:29 +0500
-Subject: [PATCH 7/9] config: preserve expanded selector provenance
+Subject: [PATCH 07/10] config: preserve expanded selector provenance
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  5 ++
@@ -5438,7 +5439,7 @@ index 89431be..3a58cff 100644
 From 1676abfb2d26faa0e16d4019619ee91670a4022d Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 16:14:32 +0500
-Subject: [PATCH 8/9] config: validate environment-derived selector paths
+Subject: [PATCH 08/10] config: validate environment-derived selector paths
 
 ---
  docs/lib/content/configuring-npm/npmrc.md |  3 +-
@@ -5591,7 +5592,7 @@ index 3a58cff..9257838 100644
 From 5aff0b2817b3afb0e53a611cc29db80b4564888a Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Thu, 12 Nov 2026 22:08:12 +0500
-Subject: [PATCH 9/9] config: preserve effective helper and route authority
+Subject: [PATCH 09/10] config: preserve effective helper and route authority
 
 ---
  docs/lib/content/configuring-npm/npmrc.md     |   2 +
@@ -6290,4 +6291,297 @@ index 9257838..1b2b60e 100644
 +    t.same(creds, { tokenHelper: HELPER, tokenHelperRegKey: root })
 +    t.equal(config.find(`${creds.tokenHelperRegKey}:tokenHelper`), 'global')
 +  })
++})
+
+From 2a089e3fd9b9a8fb777cf127c9d13ee64e308c25 Mon Sep 17 00:00:00 2001
+From: Filyus <filyus@filyus.ru>
+Date: Fri, 13 Nov 2026 07:02:47 +0500
+Subject: [PATCH 10/10] fix: match helper guards to account request paths
+
+---
+ lib/commands/login.js                    |  4 +--
+ lib/commands/logout.js                   |  4 +--
+ lib/commands/profile.js                  |  5 ++--
+ lib/utils/get-identity.js                |  6 +++--
+ lib/utils/token-helper.js                | 23 +++++++++++++++++
+ test/lib/commands/whoami.js              | 15 +++++++++++
+ test/lib/utils/helper-account-context.js | 32 ++++++++++++++++++++++++
+ test/lib/utils/token-helper.js           | 27 ++++++++++++++++++++
+ workspaces/config/lib/index.js           |  9 ++++---
+ workspaces/config/test/index.js          | 10 ++++++++
+ 10 files changed, 124 insertions(+), 11 deletions(-)
+ create mode 100644 test/lib/utils/helper-account-context.js
+
+diff --git a/lib/commands/login.js b/lib/commands/login.js
+index 9ca3ff1..f19391e 100644
+--- a/lib/commands/login.js
++++ b/lib/commands/login.js
+@@ -3,7 +3,7 @@ const { redactLog: replaceInfo } = require('@npmcli/redact')
+ const auth = require('../utils/auth.js')
+ const BaseCommand = require('../base-cmd.js')
+ const nerfDart = require('@npmcli/config/lib/nerf-dart.js')
+-const { display } = require('../utils/token-helper.js')
++const { display, guardAccountRequests } = require('../utils/token-helper.js')
+ 
+ class Login extends BaseCommand {
+   static description = 'Login to a registry user account'
+@@ -46,7 +46,7 @@ class Login extends BaseCommand {
+     log.notice('', `Log in on ${replaceInfo(registry)}`)
+ 
+     const { message, newCreds } = await auth.login(this.npm, {
+-      ...this.npm.flatOptions,
++      ...guardAccountRequests(this.npm.config, this.npm.flatOptions, 'login'),
+       creds,
+       registry,
+     })
+diff --git a/lib/commands/logout.js b/lib/commands/logout.js
+index 13fbd25..432d6da 100644
+--- a/lib/commands/logout.js
++++ b/lib/commands/logout.js
+@@ -2,7 +2,7 @@ const npmFetch = require('npm-registry-fetch')
+ const { getAuth } = npmFetch
+ const { log } = require('proc-log')
+ const BaseCommand = require('../base-cmd.js')
+-const { display } = require('../utils/token-helper.js')
++const { display, guardAccountRequests } = require('../utils/token-helper.js')
+ 
+ class Logout extends BaseCommand {
+   static description = 'Log out of the registry'
+@@ -47,7 +47,7 @@ class Logout extends BaseCommand {
+     if (auth.token) {
+       log.verbose('logout', `clearing token for ${reg}`)
+       await npmFetch(`/-/user/token/${encodeURIComponent(auth.token)}`, {
+-        ...this.npm.flatOptions,
++        ...guardAccountRequests(this.npm.config, this.npm.flatOptions, 'logout'),
+         registry: reg,
+         method: 'DELETE',
+         ignoreBody: true,
+diff --git a/lib/commands/profile.js b/lib/commands/profile.js
+index 218e1fc..48b7633 100644
+--- a/lib/commands/profile.js
++++ b/lib/commands/profile.js
+@@ -6,6 +6,7 @@ const qrcodeTerminal = require('qrcode-terminal')
+ const { otplease } = require('../utils/auth.js')
+ const readUserInfo = require('../utils/read-user-info.js')
+ const BaseCommand = require('../base-cmd.js')
++const { guardAccountRequests } = require('../utils/token-helper.js')
+ 
+ const qrcode = url =>
+   new Promise((resolve) => qrcodeTerminal.generate(url, resolve))
+@@ -218,7 +219,7 @@ class Profile extends BaseCommand {
+   }
+ 
+   async enable2fa (args) {
+-    const conf = { ...this.npm.flatOptions }
++    const conf = guardAccountRequests(this.npm.config, { ...this.npm.flatOptions }, 'profile enable-2fa')
+ 
+     if (args.length > 1) {
+       throw new Error('npm profile enable-2fa [auth-and-writes|auth-only]')
+@@ -291,7 +292,7 @@ class Profile extends BaseCommand {
+     if (auth.basic) {
+       log.info('profile', 'Updating authentication to bearer token')
+       const result = await createToken(
+-        auth.basic.password, false, [], { ...this.npm.flatOptions }
++        auth.basic.password, false, [], conf
+       )
+ 
+       if (!result.token) {
+diff --git a/lib/utils/get-identity.js b/lib/utils/get-identity.js
+index 036fb1d..8d20528 100644
+--- a/lib/utils/get-identity.js
++++ b/lib/utils/get-identity.js
+@@ -5,12 +5,14 @@ module.exports = async (npm, opts) => {
+ 
+   // First, check if we have a user/pass-based auth
+   const creds = npm.config.getCredentialsByURI(registry)
+-  if (creds.username) {
++  const whoami = `${registry.trim().replace(/\/?$/, '')}/-/whoami`
++  const endpoint = npm.config.getCredentialsByURI(whoami, { request: true })
++  if (creds.username && !endpoint.tokenHelper) {
+     return creds.username
+   }
+ 
+   // No username, but we have other credentials; fetch the username from registry
+-  if (creds.token || creds.tokenHelper || creds.certfile && creds.keyfile) {
++  if (creds.token || creds.tokenHelper || endpoint.tokenHelper || creds.certfile && creds.keyfile) {
+     const registryData = await npmFetch.json('/-/whoami', { ...opts })
+     if (typeof registryData?.username === 'string') {
+       return registryData.username
+diff --git a/lib/utils/token-helper.js b/lib/utils/token-helper.js
+index eb73f3c..f44dc4f 100644
+--- a/lib/utils/token-helper.js
++++ b/lib/utils/token-helper.js
+@@ -475,3 +475,26 @@ module.exports.TIMEOUT = TIMEOUT
+ module.exports.GRACE = GRACE
+ module.exports.DRAIN = DRAIN
+ module.exports.withoutScriptPaths = withoutScriptPaths
++
++// Account commands cannot replace or revoke a helper's credential. The
++// registry-level preflight cannot see a helper scoped to a later endpoint,
++// so check the keys reached by fetch before it calls the runner as well.
++module.exports.guardAccountRequests = (config, opts, operation) => {
++  const { getAuthorization } = opts
++  if (typeof getAuthorization !== 'function') {
++    return opts
++  }
++  return {
++    ...opts,
++    getAuthorization: async (request) => {
++      const { regKey } = request
++      const helper = config.flat.tokenHelpers?.[regKey]
++      if (helper && !config.credentialKeysFromCliOrEnv(regKey).length) {
++        throw new TokenHelperError(display(helper, `${regKey}:tokenHelper`),
++          `cannot be used by npm ${operation}; remove "${regKey}:tokenHelper" ` +
++          'or use the registry website or the tool behind the helper')
++      }
++      return getAuthorization(request)
++    },
++  }
++}
+diff --git a/test/lib/commands/whoami.js b/test/lib/commands/whoami.js
+index a8e474f..adbcad7 100644
+--- a/test/lib/commands/whoami.js
++++ b/test/lib/commands/whoami.js
+@@ -115,3 +115,18 @@ t.test('an ancestor tokenHelper counts as being logged in', async t => {
+   await npm.exec('whoami', [])
+   t.equal(joinedOutput(), username)
+ })
++
++t.test('a helper for the actual whoami endpoint overrides stored basic identity', async t => {
++  const { npm, joinedOutput } = await loadMockNpm(t, {
++    homeDir: { '.npmrc': [
++      '//registry.npmjs.org/-/:tokenHelper=/inert/never-created/helper',
++      '//registry.npmjs.org/:username=old-user',
++      '//registry.npmjs.org/:_password=cGFzcw==',
++    ].join('\n') },
++    mocks: { '{LIB}/utils/token-helper.js': () => async () => 'Bearer synthetic' },
++  })
++  const registry = new MockRegistry({ tap: t, registry: npm.config.get('registry') })
++  registry.whoami({ username })
++  await npm.exec('whoami', [])
++  t.equal(joinedOutput(), username, 'uses the endpoint identity instead of the stored username')
++})
+diff --git a/test/lib/utils/helper-account-context.js b/test/lib/utils/helper-account-context.js
+new file mode 100644
+index 0000000..0810b64
+--- /dev/null
++++ b/test/lib/utils/helper-account-context.js
+@@ -0,0 +1,32 @@
++const t = require('tap')
++const fs = require('node:fs/promises')
++const { join } = require('node:path')
++const { load: loadMockNpm } = require('../../fixtures/mock-npm.js')
++
++for (const command of ['login', 'logout', 'profile']) {
++  t.test(`${command} refuses a helper reached only at an account endpoint`, async t => {
++    const key = '//registry.npmjs.org/-/'
++    const npmrc = `${key}:tokenHelper=/inert/never-created-helper\n` +
++      '//registry.npmjs.org/:_authToken=stored-token\n'
++    let reached = 0
++    const account = async opts => {
++      reached++
++      await opts.getAuthorization({ regKey: key, uri: 'https://registry.npmjs.org/-/user/' })
++      t.fail('account operation must stop before obtaining authorization')
++    }
++    const getAuth = Object.assign(() => ({
++      token: 'stored-token', regKey: '//registry.npmjs.org/', authKey: '_authToken',
++    }), { supportsGetAuthorization: true })
++    const mocks = command === 'login'
++      ? { '{LIB}/utils/auth.js': { login: async (npm, opts) => account(opts) } }
++      : command === 'profile'
++        ? { 'npm-profile': { get: account } }
++        : { 'npm-registry-fetch': Object.assign(async (uri, opts) => account(opts), { getAuth }) }
++    const { npm, home } = await loadMockNpm(t, { homeDir: { '.npmrc': npmrc }, mocks })
++    await t.rejects(npm.exec(command, command === 'profile' ? ['enable-2fa'] : []), {
++      code: 'ETOKENHELPER', message: /cannot be used by npm/,
++    })
++    t.equal(reached, 1, 'the endpoint-specific request reaches the wrapper')
++    t.equal(await fs.readFile(join(home, '.npmrc'), 'utf8'), npmrc, 'no credential file edit')
++  })
++}
+diff --git a/test/lib/utils/token-helper.js b/test/lib/utils/token-helper.js
+index f12951e..329098b 100644
+--- a/test/lib/utils/token-helper.js
++++ b/test/lib/utils/token-helper.js
+@@ -99,6 +99,33 @@ const setup = (t, script, {
+ 
+ const printing = (stdout, stderr) => ({ finish }) => finish(stdout, stderr)
+ 
++t.test('account guard checks reached helper keys before the runner', async t => {
++  const { guardAccountRequests } = require('../../../lib/utils/token-helper.js')
++  const helpers = { [REG]: HELPER }
++  const config = configOf(helpers)
++  let calls = 0
++  const opts = { getAuthorization: async () => {
++    calls++
++    return 'Bearer given'
++  } }
++  const guarded = guardAccountRequests(config, opts, 'logout')
++  await t.rejects(guarded.getAuthorization({ regKey: REG }), {
++    code: 'ETOKENHELPER', message: /cannot be used by npm logout/,
++  })
++  t.equal(calls, 0, 'refusal happens before the runner')
++  t.equal(await guarded.getAuthorization({ regKey: '//sibling/' }), 'Bearer given')
++  t.equal(calls, 1, 'sibling key passes through')
++  config.credentialKeysFromCliOrEnv = () => ['_authToken']
++  t.equal(await guarded.getAuthorization({ regKey: REG }), 'Bearer given',
++    'explicit credentials keep the original callback')
++  config.credentialKeysFromCliOrEnv = () => []
++  delete helpers[REG]
++  t.equal(await guarded.getAuthorization({ regKey: REG }), 'Bearer given',
++    'the helper config is read at request time')
++  const plain = { registry: 'https://helper.registry/' }
++  t.equal(guardAccountRequests(config, plain, 'login'), plain, 'no callback stays unchanged')
++})
++
+ t.test('a raw token is sent as a Bearer token, a scheme as it is', async t => {
+   for (const [out, header] of [
+     ['abc123', 'Bearer abc123'],
+diff --git a/workspaces/config/lib/index.js b/workspaces/config/lib/index.js
+index 8d96bcb..4fa4c9c 100644
+--- a/workspaces/config/lib/index.js
++++ b/workspaces/config/lib/index.js
+@@ -1453,7 +1453,7 @@ class Config {
+   }
+ 
+   // this has to be a bit more complicated to support legacy data of all forms
+-  getCredentialsByURI (uri) {
++  getCredentialsByURI (uri, { request = false } = {}) {
+     const nerfed = nerfDart(uri)
+     const creds = {}
+ 
+@@ -1477,11 +1477,14 @@ class Config {
+     // npm-registry-fetch, takes precedence over a token stored beside it in a
+     // file, but not over one given on the command line or in the environment
+     // Registry requests append an endpoint to this directory, including when
+-    // the configured registry omits its trailing slash. Match helpers under
++    // the configured registry omits its trailing slash. A caller checking an
++    // actual endpoint uses request:true to keep its pathname unchanged.
++    // Match helpers under
+     // the same keys as that request, stopping at a stored Authorization
+     // credential before a shorter helper, but not at an mTLS pair alone.
+     const parsed = new URL(uri)
+-    let regKey = `//${parsed.host}${parsed.pathname.replace(/\/?$/, '/')}`
++    const pathname = request ? parsed.pathname : parsed.pathname.replace(/\/?$/, '/')
++    let regKey = `//${parsed.host}${pathname}`
+     while (regKey.length > '//'.length) {
+       // Slashless helper keys are ignored, unlike stored credential keys.
+       const helper = regKey.endsWith('/') && this.get(`${regKey}:tokenHelper`)
+diff --git a/workspaces/config/test/index.js b/workspaces/config/test/index.js
+index 1b2b60e..ba1c5fb 100644
+--- a/workspaces/config/test/index.js
++++ b/workspaces/config/test/index.js
+@@ -3908,3 +3908,13 @@ t.test('getCredentialsByURI finds the effective helper under ancestor keys', asy
+     t.equal(config.find(`${creds.tokenHelperRegKey}:tokenHelper`), 'global')
+   })
+ })
++
++t.test('request helper lookup keeps the actual endpoint trailing slash', async t => {
++  const registry = 'https://helper.registry/'
++  for (const [path, matches] of [['-/', true], ['-/whoami/', false], ['package/', false]]) {
++    const key = `//helper.registry/${path}`
++    const { config } = await loadHelperConfig(t, { user: `${key}:tokenHelper=${HELPER}` })
++    t.equal(config.getCredentialsByURI(`${registry}-/whoami`, { request: true }).tokenHelper,
++      matches ? HELPER : undefined, path)
++  }
 +})

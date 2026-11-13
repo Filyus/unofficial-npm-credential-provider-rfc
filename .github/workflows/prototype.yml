@@ -115,7 +115,7 @@ jobs:
         working-directory: npm-cli
         run: >-
           node node_modules/tap/bin/run.js --no-coverage
-          test/lib/utils/token-helper.js test/lib/npm.js
+          test/lib/utils/token-helper.js test/lib/utils/helper-account-context.js test/lib/npm.js
           test/lib/commands/login.js test/lib/commands/logout.js test/lib/commands/publish.js
           test/lib/commands/unpublish.js test/lib/commands/config.js test/lib/commands/profile.js
           test/lib/commands/whoami.js test/lib/utils/oidc.js test/lib/utils/publish-config.js test/lib/utils/error-message.js

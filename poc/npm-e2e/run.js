@@ -127,6 +127,9 @@ const main = async () => {
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, authorization: req.headers.authorization || null })
       res.setHeader('content-type', 'application/json')
+      if (req.url === '/-/whoami') {
+        return res.end(JSON.stringify({ username: 'helper-user' }))
+      }
       // trusted publishing: the id token is exchanged for a token
       if (req.url.startsWith('/-/npm/v1/oidc/token/exchange/')) {
         return res.end(JSON.stringify({ token: 'oidc-token' }))
@@ -1107,6 +1110,30 @@ const main = async () => {
     expect(logout, 'logout says the setting has to be removed', logout.failed && logout.output.includes('remove "') && logout.output.includes(':tokenHelper"'))
     expect(logout, 'and names the stored token without revoking it', logout.output.includes('was not revoked') && logout.requests.length === 0)
 
+    const endpointHelper = markedHelper('account-endpoint-helper', `${nerf}-/`)
+    const endpointIdentity = await run('endpoint-helper-identity-control', {
+      args: ['whoami'], user: endpointHelper.line,
+    })
+    expect(endpointIdentity, 'the endpoint helper supplies the whoami credential',
+      !endpointIdentity.failed && endpointHelper.ran() && auths(endpointIdentity).includes('Bearer helper-token'))
+    fs.unlinkSync(path.join(root, 'ran', 'account-endpoint-helper'))
+    const endpointRuns = []
+    for (const [name, args] of [
+      ['endpoint-helper-login', ['login', '--auth-type=web']],
+      ['endpoint-helper-logout', ['logout']],
+      ['endpoint-helper-enable-2fa', ['profile', 'enable-2fa']],
+    ]) {
+      const userConfig = `${endpointHelper.line}${nerf}:_authToken=stale\n`
+      const result = await run(name, { args, user: userConfig })
+      expect(result, 'account requests refuse the endpoint helper before it runs',
+        result.failed && result.output.includes('ETOKENHELPER') &&
+        result.output.includes('cannot be used by npm') && !endpointHelper.ran())
+      expect(result, 'no account request or credential-file edit takes place',
+        result.requests.length === 0 &&
+        fs.readFileSync(path.join(root, name, 'home', 'user.npmrc'), 'utf8') === userConfig)
+      endpointRuns.push(result)
+    }
+
     // --- the credential route through a TLS listener with a trusted
     // certificate (540): the matrix had no cell that rode real TLS ---
     const helperRefused = r => r.failed && r.output.includes('ETOKENHELPER')
@@ -1349,7 +1376,7 @@ const main = async () => {
       { name: 'update-check' },
       `the weekly check for a newer npm sends no credential from a helper (seen in ${checked.length} of ${allResults.length} runs${process.env.CI ? ', CI set: npm does not check' : ''})`,
       allResults.every(r => r.name.endsWith('-token') || r.updateCheck.every(a => a !== 'Bearer helper-token')) && (process.env.CI || checked.length > 0))
-    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout, ...tlsRuns, ...kindRuns, varChild, varParent, varHome, ...relRuns, hang]
+    const results = [user, project, redirect, stale, publish, publishConfig, oidc, failed, recursion, ...insideRepo, ...located, pastedToken, pastedLogin, probed, child, parent, nodeOptions, nestedOptions, ownOptions, ...parity, ...children, login, logout, endpointIdentity, ...endpointRuns, ...tlsRuns, ...kindRuns, varChild, varParent, varHome, ...relRuns, hang]
     console.log(JSON.stringify(results.map(({ output, ...rest }) => rest), null, 2))
     for (const note of notes) {
       console.log(`info ${note}`)

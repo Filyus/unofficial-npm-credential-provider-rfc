@@ -1,7 +1,7 @@
 # RFC draft: `tokenHelper` for npm (Phase 1a)
 
 > Status: Draft
-> Revision: 39 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 39 preserves exported route provenance and aligns command guards with effective helper matching)
+> Revision: 40 (revision 29 split into Phase 1a and [Phase 1b](phase-1b-credential-hardening.md); revision 40 checks account helpers at the actual request path)
 > Date: 2026-10-23
 
 > Phase 1a of an unofficial proposal building on the [npm/rfcs#850](https://github.com/npm/rfcs/pull/850) discussion: npm runs a user-configured program to get a registry credential at the moment it needs one, instead of reading a long-lived secret from `.npmrc` or the environment. [Phase 1b](phase-1b-credential-hardening.md) hardens how every credential travels, and [Phase 2](phase-2-credential-provider.md), a credential provider protocol, is a separate document.
@@ -268,7 +268,9 @@ What it leaves to [Phase 1b](phase-1b-credential-hardening.md) is what happens t
 | The registry answers 401 | The error says that the registry refused the token the helper printed and to refresh the login or the cache of the tool behind it; it does not suggest `npm login`, which does not change what a helper prints |
 | `logout` | Says why it cannot act: the helper setting has to be removed, and a stored token is named, not revoked, since revoking would send the helper's credential |
 | `login` | Refuses: the token it saved would never be sent, and its requests would carry the helper's credential |
-| `profile enable-2fa` | Says why it cannot work through a helper, before any request, so the helper is not started |
+| `profile enable-2fa` | Refuses before a request could use a helper, so the helper is not started |
+
+Account commands check the helper again at the actual request path, before it runs. A helper scoped to `/-/user/` or `/-/npm/v1/` can serve an account endpoint without serving the registry root; `login`, `logout` and `profile enable-2fa` refuse that use too. Unrelated package helpers do not block these commands. Identity lookup checks the actual `/-/whoami` path, so a helper that serves it counts as a login even when none serves the root.
 
 Warnings for the unscoped, slash-less and per-scope forms name the line to write instead.
 

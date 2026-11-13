@@ -6,7 +6,7 @@ The earlier, hardened prototype also did what [Phase 1b](phase-1b-credential-har
 
 ## Submissions
 
-The prototype has eleven pieces, in this order. Each is included as a [patch](poc/patches) against a fixed upstream commit (npm-registry-fetch an mbox of two commits, npm/cli an mbox of nine, applied with `git am`) and comes with its tests. Lines are counted as added lines of the diff in each patch under `lib/` and `workspaces/config/lib/`; [`poc/claims/check.js`](poc/claims/check.js) compares the shas and the line counts in this table with the patches, so they cannot drift.
+The prototype has twelve pieces, in this order. Each is included as a [patch](poc/patches) against a fixed upstream commit (npm-registry-fetch an mbox of two commits, npm/cli an mbox of ten, applied with `git am`) and comes with its tests. Lines are counted as added lines of the diff in each patch under `lib/` and `workspaces/config/lib/`; [`poc/claims/check.js`](poc/claims/check.js) compares the shas and the line counts in this table with the patches, so they cannot drift.
 
 | # | Where | What | Depends on / condition to move on | State |
 |---|---|---|---|---|
@@ -21,6 +21,7 @@ The prototype has eleven pieces, in this order. Each is included as a [patch](po
 | 9 | npm-registry-fetch | Honor request cancellation before and during authorization and stop starting callbacks for shorter keys after abort. Commit `0a3ab7f` on `2e27571`, 23 lib lines | Depends on 1 | Local prototype fix; not sent upstream |
 | 10 | npm/cli | Apply selector provenance checks to environment-derived path values, preserving home references and accepted inherited files. Commit `1676abf` on `21be661`, 8 lib lines | Depends on 8 | Local prototype fix; not sent upstream |
 | 11 | npm/cli | Preserve exact project export origins across normalization and align command guards with effective ancestor helpers. Commit `5aff0b2` on `1676abf`, 115 lib lines | Depends on 10 | Local prototype fix; not sent upstream |
+| 12 | npm/cli | Refuse helper authorization at actual account request paths and recognize helpers at the whoami endpoint. Commit `2a089e3` on `5aff0b2`, 40 lib lines | Depends on 11 | Local prototype fix; not sent upstream |
 
 ### 1. npm-registry-fetch: `opts.getAuthorization`
 
@@ -258,7 +259,8 @@ Kinds: `fetch` is a test title in npm-registry-fetch `test/auth.js`; `config` a 
 | `logout` explains, names a stored token, revokes nothing | 2 | `cli: tokenHelper logout explains instead of claiming no login`, `cli: tokenHelper logout names a token stored beside the helper`, `e2e: logout-with-helper` |
 | `login` refuses, also for a scoped registry | 2 | `cli: tokenHelper refuses instead of saving a token it would shadow`, `cli: tokenHelper on a scoped registry refuses a scoped login`, `e2e: login-with-helper` |
 | A 401 while a helper is configured says the helper's token was refused and to refresh the tool behind it, not `npm login` | 3 | `cli: 401 with a token helper for the registry` |
-| `profile enable-2fa` says why it cannot work through a helper, before any request, so that the helper is not started, and names neither the helper nor its value | 3 | `cli: credentials from a tokenHelper` |
+| `profile enable-2fa` says why it cannot work through a helper before the helper starts; a helper for the registry is refused at the initial preflight | 3 | `cli: credentials from a tokenHelper` |
+| Account requests refuse endpoint-specific helpers before the runner and leave credentials unchanged; identity checks the actual whoami path. Unrelated helpers and explicit credentials retain their behavior | 12 | `cli: account guard checks reached helper keys before the runner`, `cli: the endpoint-specific request reaches the wrapper`, `cli: no credential file edit`, `cli: a helper for the actual whoami endpoint overrides stored basic identity`, `config: request helper lookup keeps the actual endpoint trailing slash`, `e2e: account requests refuse the endpoint helper before it runs`, `e2e: no account request or credential-file edit takes place`, `e2e: the endpoint helper supplies the whoami credential` |
 
 ### The rest of npm
 
