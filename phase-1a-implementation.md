@@ -12,7 +12,7 @@ The prototype has three submissions, in this order. Each is included as a [patch
 |---|---|---|---|---|
 | 1 | npm-registry-fetch | `opts.getAuthorization`, the seam a caller asks for the `Authorization` header through, with `opts.signal` cancellation and listener cleanup. Commit `2dc6788` on base `6b4159a`, 125 lib lines | Depends on nothing. Moves on when it is released as 20.1.0, which 2 needs | Ready for review |
 | 2 | npm/cli | The core: runner, trust rule, selector and export provenance, route refusals, precedence, `login`, `logout` and account-endpoint guards. Commit `55995e4` on base `ae98c62`, 1169 lib lines | Depends on 1: it raises the floor to `^20.1.0`. Moves on when it is merged and released | Draft until npm-registry-fetch 20.1.0 is published |
-| 3 | npm/cli | The follow-up: `profile` guard (with `ETOKENHELPER` and account-endpoint guard), helper-aware 401 hint matching fetch precedence, runner diagnostics. Commit `44e0ded` on `55995e4`, 120 lib lines | Depends on 2. Moves on when it is merged | Written; opened after 2 |
+| 3 | npm/cli | The follow-up: `profile` guard (with `ETOKENHELPER` and account-endpoint guard), helper-aware 401 hint matching fetch precedence, runner diagnostics. Commit `3847bb8` on `55995e4`, 118 lib lines | Depends on 2. Moves on when it is merged | Written; opened after 2 |
 
 ### 1. npm-registry-fetch: `opts.getAuthorization`
 
@@ -127,7 +127,7 @@ A follow-up that adds `profile` guards and user-facing diagnostics.
   - `profile enable-2fa` refuses with `ETOKENHELPER` before its first request (which would start the helper), names the effective helper key and config source without printing the helper value, and guards its account requests against endpoint-scoped helpers.
   - A 401 from a registry that has a helper says that the registry refused the token the helper printed and to refresh the login or the cache of the tool behind it, instead of suggesting `npm login` (`lib/utils/error-message.js`), following the same longest-key precedence and same-host tarball fallback as `npm-registry-fetch`.
   - The runner says more about why a helper could not run: a missing `#!` interpreter is named (and a carriage return at the end of the line as the likely cause), status 127 or 9009 says a tool the script calls was not found, a `~` path notes that `${HOME}` is expanded instead, and a `.ps1` or `.js` file on Windows is refused with a pointer to a `.cmd` wrapper.
-- **Size.** 120 lines added and 5 deleted in `lib/` (`git diff --numstat 55995e4 44e0ded -- lib`, counted on 2026-11-20), 4 of docs and 128 of tests.
+- **Size.** 118 lines added and 5 deleted in `lib/` (`git diff --numstat 55995e4 3847bb8 -- lib`, counted on 2026-11-20), 4 of docs and 136 of tests.
 - **Proposal rules it carries.** The messages of [Output and failures](phase-1a-token-helper.md#output-and-failures), and the 401 and `profile enable-2fa` rows of [Precedence and commands](phase-1a-token-helper.md#precedence-and-commands).
 - **Tests that pin it.** `test/lib/commands/profile.js`, `test/lib/utils/error-message.js`, `test/lib/utils/helper-account-context.js` and `test/lib/utils/token-helper.js`; the rows of [Rule by rule](#rule-by-rule) with Submission 3.
 - **How to try it.** As for submission 2, applied with the second commit of `poc/patches/npm-cli.patch`; run `npm profile enable-2fa` with a helper configured.

@@ -5043,7 +5043,7 @@ index 9426265..b7a3631 100644
 2.52.0.windows.1
 
 
-From 44e0ded106d2fef0bb3f6c0dc5fb9f5217242e0b Mon Sep 17 00:00:00 2001
+From 3847bb8cc55bada003751d008c7dd309a6cea74a Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
 Date: Fri, 20 Nov 2026 19:29:08 +0500
 Subject: [PATCH 2/2] feat: explain a tokenHelper in profile, on a 401 and when
@@ -5053,13 +5053,13 @@ Refuse profile enable-2fa with ETOKENHELPER before a request and guard its accou
 ---
  docs/lib/content/configuring-npm/npmrc.md |  6 ++-
  lib/commands/profile.js                   | 20 ++++++--
- lib/utils/error-message.js                | 61 +++++++++++++++++++++++
- lib/utils/token-helper.js                 | 44 +++++++++++++++-
+ lib/utils/error-message.js                | 59 +++++++++++++++++++++++
+ lib/utils/token-helper.js                 | 44 ++++++++++++++++-
  test/lib/commands/profile.js              | 42 ++++++++++++++++
- test/lib/utils/error-message.js           | 46 +++++++++++++++++
+ test/lib/utils/error-message.js           | 54 +++++++++++++++++++++
  test/lib/utils/helper-account-context.js  |  8 +--
- test/lib/utils/token-helper.js            | 36 ++++++++++++-
- 8 files changed, 252 insertions(+), 11 deletions(-)
+ test/lib/utils/token-helper.js            | 36 +++++++++++++-
+ 8 files changed, 258 insertions(+), 11 deletions(-)
 
 diff --git a/docs/lib/content/configuring-npm/npmrc.md b/docs/lib/content/configuring-npm/npmrc.md
 index b2cb4b4..ff28522 100644
@@ -5147,10 +5147,10 @@ index 9417989..ff52ffc 100644
  
        if (!result.token) {
 diff --git a/lib/utils/error-message.js b/lib/utils/error-message.js
-index 41e35bd..901afec 100644
+index 41e35bd..8d67531 100644
 --- a/lib/utils/error-message.js
 +++ b/lib/utils/error-message.js
-@@ -3,6 +3,57 @@ const { resolve } = require('node:path')
+@@ -3,6 +3,55 @@ const { resolve } = require('node:path')
  const { redactLog: replaceInfo } = require('@npmcli/redact')
  const { log } = require('proc-log')
  
@@ -5181,17 +5181,15 @@ index 41e35bd..901afec 100644
 +  }
 +  const keys = new Set(regKeys(parsed))
 +  const registry = npm.config.get('registry')
-+  if (registry) {
-+    try {
-+      const regParsed = new URL(registry)
-+      if (parsed.host === regParsed.host && uri !== registry) {
-+        for (const key of regKeys(regParsed)) {
-+          keys.add(key)
-+        }
++  try {
++    const regParsed = new URL(registry)
++    if (parsed.host === regParsed.host && uri !== registry) {
++      for (const key of regKeys(regParsed)) {
++        keys.add(key)
 +      }
-+    } catch {
-+      // an unparseable registry adds no keys
 +    }
++  } catch {
++    // no registry, or one that no URL parses from, adds no keys
 +  }
 +  for (const key of keys) {
 +    if (helpers[key]) {
@@ -5208,7 +5206,7 @@ index 41e35bd..901afec 100644
  const errorMessage = (er, npm) => {
    const summary = []
    const detail = []
-@@ -136,6 +187,16 @@ const errorMessage = (er, npm) => {
+@@ -136,6 +185,16 @@ const errorMessage = (er, npm) => {
              'If you already provided a one-time password then it is likely that you either typoed it, or it timed out. Please try again.',
            ].join('\n')])
          }
@@ -5372,10 +5370,10 @@ index 15c4d11..428c038 100644
    const testComp = async (t, { argv, expect, title } = {}) => {
      const { profile } = await mockProfile(t)
 diff --git a/test/lib/utils/error-message.js b/test/lib/utils/error-message.js
-index 44a57ec..41fdbc3 100644
+index 44a57ec..9c334bd 100644
 --- a/test/lib/utils/error-message.js
 +++ b/test/lib/utils/error-message.js
-@@ -315,6 +315,52 @@ t.test('eotp/e401', async t => {
+@@ -315,6 +315,60 @@ t.test('eotp/e401', async t => {
    })
  })
  
@@ -5413,6 +5411,9 @@ index 44a57ec..41fdbc3 100644
 +      '.npmrc': [
 +        `//reg.example/:tokenHelper=${helper}`,
 +        '//reg.example/sub/:_authToken=stored',
++        '//reg.example/pair/:username=stored-user',
++        '//reg.example/pair/:_password=stored-pass',
++        '//reg.example/half/:username=stored-user',
 +        `//other.example/npm/:tokenHelper=${helper}`,
 +      ].join('\n'),
 +    },
@@ -5420,6 +5421,11 @@ index 44a57ec..41fdbc3 100644
 +  const refused = (uri) => errorMessage(Object.assign(new Error('nope'), { code: 'E401', uri }))
 +  t.match(refused('https://reg.example/sub/pkg').summary[0][1], /nope/,
 +    'a stored credential under a longer key stops the walk before an ancestor helper')
++  t.match(refused('https://reg.example/pair/pkg').summary[0][1], /nope/,
++    'a stored username and password stop the walk too')
++  t.match(refused('https://reg.example/half/pkg').summary[0][1],
++    /credential for \/\/reg\.example\//,
++    'a username without a password does not stop the walk')
 +  t.match(refused('https://other.example/tarballs/pkg-1.tgz').summary[0][1],
 +    /credential for \/\/other\.example\/npm\//,
 +    'a tarball on the registry host falls back to the registry helper key')
