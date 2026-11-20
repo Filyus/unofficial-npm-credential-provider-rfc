@@ -250,6 +250,9 @@ const main = async () => {
     seen.length = 0
     elsewhereSeen.length = 0
     proxySeen.length = 0
+    const baseEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !/^npm_config_/i.test(k) && k !== 'PREFIX' && k !== 'DESTDIR')
+    )
     const { stdout, stderr, failed, code } = await new Promise(resolve => execFile(process.execPath, [
       npmCli, ...args,
       `--registry=${registryUrl}`,
@@ -262,7 +265,7 @@ const main = async () => {
       '--prefer-online',
       // a helper that works shows its stderr at this level
       '--loglevel=verbose',
-    ], { cwd: path.join(dir, cwd), timeout, env: { ...process.env, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
+    ], { cwd: path.join(dir, cwd), timeout, env: { ...baseEnv, HOME: home, USERPROFILE: home, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])) } }, (err, out, errOut) =>
       resolve({ stdout: out, stderr: errOut + (err ? `\n${err.message}` : ''), failed: !!err, code: err ? err.code : 0 })))
     // E2E_SHOW=<scenario name> prints everything npm said in that scenario
     if (process.env.E2E_SHOW === name) {

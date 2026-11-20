@@ -2,7 +2,7 @@
 
 use mock_client::ProviderCommand;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
 
 /// Builds the mock provider once per test binary and gives its path. The
@@ -13,21 +13,38 @@ pub fn mock_provider_exe() -> PathBuf {
     static EXE: OnceLock<PathBuf> = OnceLock::new();
     EXE.get_or_init(|| {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
-        let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-            .args(["build", "--quiet", "-p", "mock-provider", "--manifest-path"])
+        let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .args([
+                "build",
+                "--quiet",
+                "-p",
+                "mock-provider",
+                "--message-format=json",
+                "--manifest-path",
+            ])
             .arg(manifest)
-            .stdout(Stdio::null())
-            .status()
+            .output()
             .expect("cargo runs");
-        assert!(status.success(), "mock-provider builds");
-        // target/debug/deps/<this test> -> target/debug
-        let profile_dir = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .and_then(|deps| deps.parent())
-            .unwrap()
-            .to_path_buf();
-        profile_dir.join(format!("mock-provider{}", std::env::consts::EXE_SUFFIX))
+        assert!(
+            output.status.success(),
+            "mock-provider builds: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).expect("cargo json is utf-8");
+        stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|msg| {
+                msg.get("reason").and_then(|v| v.as_str()) == Some("compiler-artifact")
+                    && msg.pointer("/target/name").and_then(|v| v.as_str()) == Some("mock-provider")
+            })
+            .filter_map(|msg| {
+                msg.get("executable")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+            })
+            .next_back()
+            .expect("cargo reports mock-provider executable")
     })
     .clone()
 }
