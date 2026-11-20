@@ -151,7 +151,7 @@ A user with a helper should be told what is going on, and not be pointed at `npm
 
 ## Tests and size
 
-Tests for each message and guard in `test/lib/commands/profile.js`, `test/lib/utils/error-message.js`, `test/lib/utils/helper-account-context.js` and `test/lib/utils/token-helper.js` (128 lines). 120 lines added in `lib/`, 4 in the docs. Nothing changes where no helper is configured.
+Tests for each message and guard in `test/lib/commands/profile.js`, `test/lib/utils/error-message.js`, `test/lib/utils/helper-account-context.js` and `test/lib/utils/token-helper.js` (136 lines). 118 lines added in `lib/`, 4 in the docs. Nothing changes where no helper is configured.
 
 ## Context
 
