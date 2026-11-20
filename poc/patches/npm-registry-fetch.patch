@@ -1,45 +1,28 @@
-From 2e27571902aa04ab055d64c5fe7f2725b4a32834 Mon Sep 17 00:00:00 2001
+From 2dc67887f4efd1019eb281c13b0c9d1176332aee Mon Sep 17 00:00:00 2001
 From: Filyus <filyus@filyus.ru>
-Date: Thu, 22 Oct 2026 14:46:14 +0500
-Subject: [PATCH 1/2] feat: add opts.getAuthorization, a callback that supplies
- the Authorization header
+Date: Fri, 20 Nov 2026 19:20:39 +0500
+Subject: [PATCH] feat: add opts.getAuthorization, a callback that supplies the
+ Authorization header
 
-A caller can pass an async function that is given `{ regKey, uri }` (an object,
-so that fields can be added later) and returns the value of the Authorization
-header, or nothing. It is asked for the keys a stored credential for the request
-would be looked up under, longest first: the keys of the request's URL, then,
-for a URL on the registry's own host (a tarball), the keys of the registry. The
-first value returned is sent. The walk ends at the first key that holds a stored
-credential which sets Authorization (a token, _auth, or a username and
-password), so the function wins over a stored credential for the same key and a
-credential stored under a longer key wins over the function's for a shorter
-one. A key that holds only a client certificate and key sets no Authorization,
-so an mTLS pair at a longer key does not shadow the function at a shorter one.
+A caller can pass an async function that is given { regKey, uri } (an object, so that fields can be added later) and returns the value of the Authorization header, or nothing. It is asked for the keys a stored credential for the request would be looked up under, longest first: the keys of the request's URL, then, for a URL on the registry's own host (a tarball), the keys of the registry. The first value returned is sent. The walk ends at the first key that holds a stored credential which sets Authorization (a token, _auth, or a username and password), so the function wins over a stored credential for the same key and a credential stored under a longer key wins over the function's for a shorter one. A key that holds only a client certificate and key sets no Authorization, so an mTLS pair at a longer key does not shadow the function at a shorter one.
 
-The value is sent as a stored credential is: same transport options, same
-http: behaviour and same redirects, and the otp retry asks again. It is not
-asked for an offline request or when forceAuth is given. An error thrown by the
-function rejects the request unchanged. A body that is a promise or a stream
-and fails while the function runs rejects the request as well, and a stream is
-piped into gzip only once the function is done.
+The value is sent as a stored credential is: same transport options, same http: behaviour and same redirects, and the otp retry asks again. It is not asked for an offline request or when forceAuth is given. An error thrown by the function rejects the request unchanged. A body that is a promise or a stream and fails while the function runs rejects the request as well, and a stream is piped into gzip only once the function is done. An aborted opts.signal rejects with AbortError before or during the wait, stops further key lookups, and removes its listeners once settled.
 
-getAuth.supportsGetAuthorization is true, so a caller that cannot do without
-the option can tell a library that ignores it.
+getAuth.supportsGetAuthorization is true, so a caller that cannot do without the option can tell a library that ignores it.
 
-The library runs no program: a caller that wants a credential from one, such as
-npm with a configured tokenHelper, does that in the function.
+The library runs no program: a caller that wants a credential from one, such as npm with a configured tokenHelper, does that in the function.
 ---
- README.md    |  32 +++++++++++
- lib/auth.js  |  65 +++++++++++++++++++--
- lib/index.js |  48 +++++++++++++---
- test/auth.js | 159 +++++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 291 insertions(+), 13 deletions(-)
+ README.md    |  36 +++++++
+ lib/auth.js  |  69 ++++++++++++--
+ lib/index.js |  69 ++++++++++++--
+ test/auth.js | 258 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 419 insertions(+), 13 deletions(-)
 
 diff --git a/README.md b/README.md
-index f474cdc..0534136 100644
+index f474cdc..56aaba3 100644
 --- a/README.md
 +++ b/README.md
-@@ -263,6 +263,38 @@ If present, other auth-related values in `opts` will be completely ignored,
+@@ -263,6 +263,42 @@ If present, other auth-related values in `opts` will be completely ignored,
  including `alwaysAuth`, `email`, and `otp`, when calculating auth for a request,
  and the auth details in `opts.forceAuth` will be used instead.
  
@@ -62,6 +45,10 @@ index f474cdc..0534136 100644
 +it is for a stored `_authToken`. An error thrown by the function rejects the
 +request as it is. It is not called for an `opts.offline` request, nor when
 +[`opts.forceAuth`](#opts-forceAuth) is set. This library runs nothing itself.
++An aborted `opts.signal` rejects the request with `AbortError` even while the
++function is pending. A signal already aborted prevents the function from being
++called. Aborting does not cancel work already started by the function.
++No further registry keys are queried after abort.
 +
 +A caller that must not run without the option being honoured (a version older
 +than the one that added it ignores it) can check `getAuth.supportsGetAuthorization`,
@@ -79,10 +66,16 @@ index f474cdc..0534136 100644
  
  * Type: Boolean
 diff --git a/lib/auth.js b/lib/auth.js
-index 9270025..876efe5 100644
+index 9270025..016ee9a 100644
 --- a/lib/auth.js
 +++ b/lib/auth.js
-@@ -6,25 +6,31 @@ const { URL } = require('url')
+@@ -1,30 +1,37 @@
+ 'use strict'
+ const fs = require('fs')
+ const npa = require('npm-package-arg')
++const { AbortError } = require('minipass-fetch')
+ const { URL } = require('url')
+ 
  // Find the longest registry key that is used for some kind of auth
  // in the options.  Returns the registry key and the auth config.
  const regFromURI = (uri, opts) => {
@@ -120,7 +113,7 @@ index 9270025..876efe5 100644
  }
  
  // Not only do we want to know if there is auth, but if we are calling `npm
-@@ -49,6 +55,13 @@ const hasAuth = (regKey, opts) => {
+@@ -49,6 +56,13 @@ const hasAuth = (regKey, opts) => {
    return false
  }
  
@@ -134,7 +127,7 @@ index 9270025..876efe5 100644
  const sameHost = (a, b) => {
    const parsedA = new URL(a)
    const parsedB = new URL(b)
-@@ -178,4 +191,44 @@ class Auth {
+@@ -178,4 +192,47 @@ class Auth {
    }
  }
  
@@ -163,6 +156,9 @@ index 9270025..876efe5 100644
 +    }
 +  }
 +  for (const regKey of keys) {
++    if (opts.signal?.aborted) {
++      throw new AbortError('The operation was aborted.')
++    }
 +    const value = await getAuthorization({ regKey, uri })
 +    if (value) {
 +      return value
@@ -180,18 +176,20 @@ index 9270025..876efe5 100644
 +// opts.getAuthorization; an older one ignores the option without a word
 +module.exports.supportsGetAuthorization = true
 diff --git a/lib/index.js b/lib/index.js
-index 91d450f..4dafec3 100644
+index 91d450f..3b74bd9 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -3,6 +3,7 @@
+@@ -3,7 +3,9 @@
  const { HttpErrorAuthOTP } = require('./errors.js')
  const checkResponse = require('./check-response.js')
  const getAuth = require('./auth.js')
 +const { authorize } = getAuth
  const fetch = require('make-fetch-happen')
++const { AbortError } = require('minipass-fetch')
  const JSONStream = require('./json-stream')
  const npa = require('npm-package-arg')
-@@ -71,12 +72,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+ const qs = require('querystring')
+@@ -71,12 +73,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
  
    if (opts.gzip) {
      headers['content-encoding'] = 'gzip'
@@ -206,7 +204,7 @@ index 91d450f..4dafec3 100644
        body = new zlib.Gzip().end(body).concat()
      }
    }
-@@ -164,7 +161,44 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
+@@ -164,7 +162,64 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
      }
    }
  
@@ -226,7 +224,8 @@ index 91d450f..4dafec3 100644
 +  if (typeof opts.getAuthorization !== 'function' || opts.offline) {
 +    return send()
 +  }
-+  return getAuthorization(authorize(uri, opts), body, bodyIsStream).then(authorization => {
++  const pending = getAuthorization(() => authorize(uri, opts), body, bodyIsStream, opts.signal)
++  return pending.then(authorization => {
 +    if (authorization) {
 +      headers.authorization = authorization
 +    }
@@ -240,31 +239,52 @@ index 91d450f..4dafec3 100644
 +// that rejects is an unhandled rejection, and a stream that errors with no
 +// listener throws (which is why the gzip pipeline is built after the wait).
 +// An error from the function itself rejects the request as it is.
-+function getAuthorization (pending, body, bodyIsStream) {
++function getAuthorization (start, body, bodyIsStream, signal) {
++  let onAbort
++  let onBodyError
 +  const failed = new Promise((resolve, reject) => {
 +    if (bodyIsStream) {
-+      body.on('error', reject)
++      onBodyError = reject
++      body.on('error', onBodyError)
 +    } else if (body && typeof body.then === 'function') {
 +      Promise.resolve(body).catch(reject)
 +    }
++    if (signal) {
++      onAbort = () => reject(new AbortError('The operation was aborted.'))
++      if (signal.aborted) {
++        onAbort()
++      } else {
++        signal.addEventListener('abort', onAbort, { once: true })
++      }
++    }
 +  })
-+  return Promise.race([pending, failed])
++  // Watch body failures even when abort prevents authorization from starting.
++  return Promise.race([signal?.aborted ? failed : start(), failed]).finally(() => {
++    if (onBodyError) {
++      body.removeListener('error', onBodyError)
++    }
++    if (onAbort) {
++      signal.removeEventListener('abort', onAbort)
++    }
++  })
  }
  
  module.exports.getAuth = getAuth
 diff --git a/test/auth.js b/test/auth.js
-index ac65822..ee3c816 100644
+index ac65822..4019d28 100644
 --- a/test/auth.js
 +++ b/test/auth.js
-@@ -1,6 +1,7 @@
+@@ -1,6 +1,9 @@
  'use strict'
  
  const t = require('tap')
 +const { Minipass } = require('minipass')
++const { getEventListeners } = require('node:events')
++const nock = require('nock')
  const tnock = require('./util/tnock.js')
  
  const fetch = require('..')
-@@ -619,3 +620,161 @@ t.test('registry host matches, path does not, send auth', t => {
+@@ -619,3 +622,258 @@ t.test('registry host matches, path does not, send auth', t => {
  t.test('getAuth is exported', async t => {
    t.equal(fetch.getAuth, getAuth)
  })
@@ -406,6 +426,7 @@ index ac65822..ee3c816 100644
 +    const p = fetch('/hello', { ...base, method: 'PUT', gzip: true, getAuthorization: slow, body })
 +    body.emit('error', er)
 +    await t.rejects(p, er)
++    t.equal(body.listenerCount('error'), 0, 'the body error listener is removed after settling')
 +    release()
 +  })
 +
@@ -425,128 +446,6 @@ index ac65822..ee3c816 100644
 +    })
 +    t.equal(res, 'ok')
 +  })
-+})
-
-From 0a3ab7f4212bee4ed2b36f3ac01f5e6d60b21638 Mon Sep 17 00:00:00 2001
-From: Filyus <filyus@filyus.ru>
-Date: Thu, 12 Nov 2026 12:21:00 +0500
-Subject: [PATCH 2/2] auth: honor abort while awaiting authorization
-
----
- README.md    |  4 +++
- lib/auth.js  |  4 +++
- lib/index.js | 22 ++++++++++--
- test/auth.js | 98 ++++++++++++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 125 insertions(+), 3 deletions(-)
-
-diff --git a/README.md b/README.md
-index 0534136..56aaba3 100644
---- a/README.md
-+++ b/README.md
-@@ -282,6 +282,10 @@ certificate and key does not stop it. The request is otherwise sent exactly as
- it is for a stored `_authToken`. An error thrown by the function rejects the
- request as it is. It is not called for an `opts.offline` request, nor when
- [`opts.forceAuth`](#opts-forceAuth) is set. This library runs nothing itself.
-+An aborted `opts.signal` rejects the request with `AbortError` even while the
-+function is pending. A signal already aborted prevents the function from being
-+called. Aborting does not cancel work already started by the function.
-+No further registry keys are queried after abort.
- 
- A caller that must not run without the option being honoured (a version older
- than the one that added it ignores it) can check `getAuth.supportsGetAuthorization`,
-diff --git a/lib/auth.js b/lib/auth.js
-index 876efe5..016ee9a 100644
---- a/lib/auth.js
-+++ b/lib/auth.js
-@@ -1,6 +1,7 @@
- 'use strict'
- const fs = require('fs')
- const npa = require('npm-package-arg')
-+const { AbortError } = require('minipass-fetch')
- const { URL } = require('url')
- 
- // Find the longest registry key that is used for some kind of auth
-@@ -216,6 +217,9 @@ const authorize = async (uri, opts) => {
-     }
-   }
-   for (const regKey of keys) {
-+    if (opts.signal?.aborted) {
-+      throw new AbortError('The operation was aborted.')
-+    }
-     const value = await getAuthorization({ regKey, uri })
-     if (value) {
-       return value
-diff --git a/lib/index.js b/lib/index.js
-index 4dafec3..fad1ef5 100644
---- a/lib/index.js
-+++ b/lib/index.js
-@@ -5,6 +5,7 @@ const checkResponse = require('./check-response.js')
- const getAuth = require('./auth.js')
- const { authorize } = getAuth
- const fetch = require('make-fetch-happen')
-+const { AbortError } = require('minipass-fetch')
- const JSONStream = require('./json-stream')
- const npa = require('npm-package-arg')
- const qs = require('querystring')
-@@ -176,7 +177,8 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
-   if (typeof opts.getAuthorization !== 'function' || opts.offline) {
-     return send()
-   }
--  return getAuthorization(authorize(uri, opts), body, bodyIsStream).then(authorization => {
-+  const pending = getAuthorization(() => authorize(uri, opts), body, bodyIsStream, opts.signal)
-+  return pending.then(authorization => {
-     if (authorization) {
-       headers.authorization = authorization
-     }
-@@ -190,15 +192,29 @@ function regFetch (uri, /* istanbul ignore next */ opts_ = {}) {
- // that rejects is an unhandled rejection, and a stream that errors with no
- // listener throws (which is why the gzip pipeline is built after the wait).
- // An error from the function itself rejects the request as it is.
--function getAuthorization (pending, body, bodyIsStream) {
-+function getAuthorization (start, body, bodyIsStream, signal) {
-+  let onAbort
-   const failed = new Promise((resolve, reject) => {
-     if (bodyIsStream) {
-       body.on('error', reject)
-     } else if (body && typeof body.then === 'function') {
-       Promise.resolve(body).catch(reject)
-     }
-+    if (signal) {
-+      onAbort = () => reject(new AbortError('The operation was aborted.'))
-+      if (signal.aborted) {
-+        onAbort()
-+      } else {
-+        signal.addEventListener('abort', onAbort, { once: true })
-+      }
-+    }
-+  })
-+  // Watch body failures even when abort prevents authorization from starting.
-+  return Promise.race([signal?.aborted ? failed : start(), failed]).finally(() => {
-+    if (onAbort) {
-+      signal.removeEventListener('abort', onAbort)
-+    }
-   })
--  return Promise.race([pending, failed])
- }
- 
- module.exports.getAuth = getAuth
-diff --git a/test/auth.js b/test/auth.js
-index ee3c816..e223771 100644
---- a/test/auth.js
-+++ b/test/auth.js
-@@ -2,6 +2,8 @@
- 
- const t = require('tap')
- const { Minipass } = require('minipass')
-+const { getEventListeners } = require('node:events')
-+const nock = require('nock')
- const tnock = require('./util/tnock.js')
- 
- const fetch = require('..')
-@@ -777,4 +779,100 @@ t.test('opts.getAuthorization', async t => {
-     })
-     t.equal(res, 'ok')
-   })
 +
 +  await t.test('abort signals also cover the authorization wait', async t => {
 +    nock.disableNetConnect()
@@ -643,4 +542,7 @@ index ee3c816..e223771 100644
 +      t.equal(getEventListeners(controller.signal, 'abort').length, 0, 'the listener is removed')
 +    })
 +  })
- })
++})
+-- 
+2.52.0.windows.1
+

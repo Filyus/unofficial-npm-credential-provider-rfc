@@ -46,7 +46,7 @@ index 947bf34..ba32aa7 100644
    await refused('C:\\tools\\token.ps1', /\.ps1 or \.js file.*use a \.cmd wrapper/, 'win32')
    await refused('C:\\tools\\token.JS', /use a \.cmd wrapper/, 'win32')
 +  await refused('C:\\tools\\a"b.cmd', /cannot be run through cmd.exe because its path contains ", % or !/, 'win32')
-+  await refused('C:\\tools\\%PATH%.bat', /contains ", % or !.*\.cmd wrapper in a directory without them/, 'win32')
++  await refused('C:\\tools\\%PATH%.bat', /cmd\.exe expands/, 'win32')
 +  await refused('C:\\tools\\hello!.cmd', /contains ", % or !/, 'win32')
    await refused(`C:\\${'d'.repeat(260)}\\token.cmd`, /longer than 258 characters.*move it to a shorter path/, 'win32')
  
