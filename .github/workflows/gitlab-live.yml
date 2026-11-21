@@ -18,7 +18,7 @@ on:
     inputs:
       image:
         description: 'GitLab CE image to run against'
-        default: 'gitlab/gitlab-ce:19.5.1-ce.0'
+        default: 'gitlab/gitlab-ce:19.6.1-ce.0'
         type: string
   schedule:
     # after the fuzz soak
@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 40
     env:
       # the nightly run is against `latest`; a dispatch names its image, by default the pinned one
-      GITLAB_IMAGE: ${{ github.event_name == 'schedule' && 'gitlab/gitlab-ce:latest' || inputs.image || 'gitlab/gitlab-ce:19.5.1-ce.0' }}
+      GITLAB_IMAGE: ${{ github.event_name == 'schedule' && 'gitlab/gitlab-ce:latest' || inputs.image || 'gitlab/gitlab-ce:19.6.1-ce.0' }}
       GITLAB_URL: http://localhost:8929
     steps:
       - uses: actions/checkout@v7
