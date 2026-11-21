@@ -2,7 +2,7 @@
   "comment": "Differences between examples/providers/gitlab/fake.js and a real GitLab CE that are known and kept, one entry each: the exact `id` the run prints, the GitLab majors it holds for, and the reason. A difference not listed fails the run; so does an entry that no longer matches anything.",
   "allow": [
     {
-      "id": "POST /oauth/authorize_device {client_id,scope scope=api} :: vary fake=\"Accept\" real=\"Accept, X-Requested-With\"",
+      "id": "POST /oauth/authorize_device :: vary fake=\"Accept\" real=\"Accept, X-Requested-With\"",
       "versions": ["19"],
       "reason": "19.6 answers the device authorization request with `Vary: Accept, X-Requested-With`, where 19.5.1 answered `Vary: Accept`; the fake keeps the 19.5 header, and nothing in the provider or the harness reads it (the harness only compares it)."
     }
